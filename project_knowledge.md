@@ -1,5 +1,16 @@
 # Open Generative AI: Technical Documentation & Context
 
+> **Scope note (kept for historical context):** this document describes the
+> original **Electron/Vite + vanilla JavaScript** desktop UI under `src/`
+> (`ImageStudio.js`, `src/lib/muapi.js`, `src/lib/models.js`, etc). The
+> project has since grown a second, primary **Next.js 15 + React 19** web
+> app (`app/`, `components/StandaloneShell.js`, `packages/studio/`) that
+> most of this file does not cover — see [README.md](README.md) for the
+> current architecture and both run modes (`npm run dev` for the web app,
+> `npm run electron:dev` for the desktop app this document describes).
+> The vanilla `src/` app is still maintained as the Electron shell, so the
+> component/file references below remain accurate for that surface.
+
 This document serves as a comprehensive knowledge base for the Open Generative AI project. It details the architecture, key components, API integration patterns, and state management strategies used in the application.
 
 ## 1. Project Vision & Overview

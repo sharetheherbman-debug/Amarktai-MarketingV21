@@ -49,14 +49,19 @@ export function SettingsModal(onClose) {
 
     // ── Tab: API Key ──────────────────────────────────────────────────────────
     const apiPanel = document.createElement('div');
+    // NOTE: the stored API key is intentionally NOT interpolated into this
+    // HTML template. Building an attribute string like `value="${key}"`
+    // would let a key containing a `"` (or any HTML metacharacter) break out
+    // of the attribute and inject markup/script (CWE-79). Instead the field
+    // is rendered empty and populated via the `value` DOM property below,
+    // which is always treated as plain text.
     apiPanel.innerHTML = `
         <div style="display:flex;flex-direction:column;gap:0.75rem;">
             <div>
                 <label style="display:block;font-size:0.75rem;color:rgba(255,255,255,0.5);margin-bottom:0.4rem;font-weight:600;">${t('settings.muapiKeyLabel')}</label>
                 <input id="settings-api-key" type="password"
                     style="width:100%;box-sizing:border-box;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);border-radius:0.75rem;padding:0.6rem 0.9rem;color:#fff;font-size:0.875rem;outline:none;"
-                    placeholder="${t('settings.keyPlaceholder')}"
-                    value="${localStorage.getItem('muapi_key') || ''}">
+                    placeholder="${t('settings.keyPlaceholder')}">
             </div>
             <p style="font-size:0.7rem;color:rgba(255,255,255,0.3);margin:0;">
                 ${t('settings.keyNote')}
@@ -67,6 +72,7 @@ export function SettingsModal(onClose) {
             </div>
         </div>
     `;
+    apiPanel.querySelector('#settings-api-key').value = localStorage.getItem('muapi_key') || '';
 
     // ── Tab: Local Models ─────────────────────────────────────────────────────
     const localPanel = LocalModelManager();

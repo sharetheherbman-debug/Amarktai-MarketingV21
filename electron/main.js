@@ -54,7 +54,22 @@ function createWindow() {
     });
 
     mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-        shell.openExternal(url);
+        // Only hand http(s) links to the OS default browser. Without this
+        // check a malicious/compromised renderer could ask the main process
+        // to open arbitrary schemes (e.g. file:, javascript:, custom
+        // protocol handlers), which is a known Electron privilege-escalation
+        // vector (CWE-73 / insecure openExternal usage).
+        let parsed;
+        try {
+            parsed = new URL(url);
+        } catch (_) {
+            return { action: 'deny' };
+        }
+        if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+            shell.openExternal(url);
+        } else {
+            console.warn('Blocked attempt to open non-http(s) URL externally:', parsed.protocol);
+        }
         return { action: 'deny' };
     });
 

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import dynamic from 'next/dynamic';
 import { ImageStudio, VideoStudio, ClippingStudio, VibeMotionStudio, LipSyncStudio, RecastStudio, CinemaStudio, AudioStudio, MarketingStudio, WorkflowStudio, AgentStudio, AppsStudio, AiInfluencerStudio, getUserBalance } from 'studio';
@@ -239,10 +239,24 @@ const getNavigationCategory = (tabId) => (
 
 const STORAGE_KEY = 'muapi_key';
 
+// The muapi_key cookie cannot be marked HttpOnly (it is written and read by
+// client JS so the axios interceptor and server components can both see it),
+// but we still scope it as tightly as the browser allows: Secure prevents it
+// from ever being sent over plain HTTP, and SameSite=Lax limits cross-site
+// sending. This does not protect against XSS (see README/security notes);
+// only removing the key from client-readable storage entirely would do that.
+function buildKeyCookie(key) {
+  const secureFlag = typeof window !== 'undefined' && window.location.protocol === 'https:' ? '; Secure' : '';
+  return `muapi_key=${key}; path=/; max-age=31536000; SameSite=Lax${secureFlag}`;
+}
+
 export default function StandaloneShell() {
   const params = useParams();
   const router = useRouter();
-  const slug = params?.slug || []; 
+  // useMemo keeps this array reference stable across renders when
+  // params.slug is unset, so it doesn't invalidate the useCallback below
+  // (react-hooks/exhaustive-deps) on every render.
+  const slug = useMemo(() => params?.slug || [], [params?.slug]);
   const idFromParams = params?.id;
   const tabFromParams = params?.tab;
 
@@ -428,7 +442,7 @@ export default function StandaloneShell() {
       setApiKey(stored);
       fetchBalance(stored);
       // Sync cookie immediately on mount to establish identity for background requests
-      document.cookie = `muapi_key=${stored}; path=/; max-age=31536000; SameSite=Lax`;
+      document.cookie = buildKeyCookie(stored);
     }
   }, [fetchBalance]);
 
@@ -436,7 +450,7 @@ export default function StandaloneShell() {
     localStorage.setItem(STORAGE_KEY, key);
     setApiKey(key);
     fetchBalance(key);
-    document.cookie = `muapi_key=${key}; path=/; max-age=31536000; SameSite=Lax`;
+    document.cookie = buildKeyCookie(key);
   }, [fetchBalance]);
 
   const handleKeyChange = useCallback(() => {

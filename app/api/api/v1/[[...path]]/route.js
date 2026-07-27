@@ -1,65 +1,24 @@
-import { NextResponse } from 'next/server';
-
-const MUAPI_BASE = 'https://api.muapi.ai';
-
-function getApiKey(request) {
-    const headerKey = request.headers.get('x-api-key');
-    if (headerKey) return headerKey;
-    // Cookie-based auth removed for security (CWE-522)
-    return null;
-}
-
-function cleanHeaders(request) {
-    const headers = new Headers(request.headers);
-    headers.delete('host');
-    headers.delete('connection');
-    headers.delete('cookie');
-    return headers;
-}
+import { MUAPI_BASE, proxyRequest } from '@/app/api/_lib/proxyHelpers';
 
 // Proxies /api/api/v1/* -> https://api.muapi.ai/api/v1/*
 // This is required because the AiAgent library hardcodes a double /api/api
+function targetUrlFor(pathSegments, search) {
+    const path = pathSegments.join('/');
+    return `${MUAPI_BASE}/api/v1/${path}${search}`;
+}
+
 export async function GET(request, { params }) {
     const slug = await params;
-    const pathSegments = slug.path || [];
-    const path = pathSegments.join('/');
-    
     const { search } = new URL(request.url);
-    const targetUrl = `${MUAPI_BASE}/api/v1/${path}${search}`;
+    const targetUrl = targetUrlFor(slug.path || [], search);
 
-    const headers = cleanHeaders(request);
-    const apiKey = getApiKey(request);
-
-    // NOTE: credential logging removed for security (CWE-200)
-    if (apiKey) headers.set('x-api-key', apiKey);
-
-    try {
-        const response = await fetch(targetUrl, { headers, method: 'GET' });
-        const data = await response.json();
-        return NextResponse.json(data, { status: response.status });
-    } catch (error) {
-        return NextResponse.json({ error: error.message }, { status: 500 });
-    }
+    return proxyRequest(request, targetUrl, { method: 'GET', logLabel: 'api/v1 GET' });
 }
 
 export async function POST(request, { params }) {
     const slug = await params;
-    const pathSegments = slug.path || [];
-    const path = pathSegments.join('/');
-    
     const { search } = new URL(request.url);
-    const targetUrl = `${MUAPI_BASE}/api/v1/${path}${search}`;
+    const targetUrl = targetUrlFor(slug.path || [], search);
 
-    const headers = cleanHeaders(request);
-    const apiKey = getApiKey(request);
-    if (apiKey) headers.set('x-api-key', apiKey);
-
-    try {
-        const body = await request.arrayBuffer();
-        const response = await fetch(targetUrl, { method: 'POST', headers, body });
-        const data = await response.json();
-        return NextResponse.json(data, { status: response.status });
-    } catch (error) {
-        return NextResponse.json({ error: error.message }, { status: 500 });
-    }
+    return proxyRequest(request, targetUrl, { method: 'POST', hasBody: true, logLabel: 'api/v1 POST' });
 }

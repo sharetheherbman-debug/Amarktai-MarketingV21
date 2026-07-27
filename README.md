@@ -569,10 +569,11 @@ Lip sync jobs use the same two-step pattern: a dedicated `processLipSync()` meth
 
 ## 🛠️ Tech Stack
 
-- **Next.js 14** — App Router, server components, fast dev server
-- **React 18** — Studio UI components
+- **Next.js 15** — App Router, server components, fast dev server
+- **React 19** — Studio UI components
 - **Tailwind CSS v3** — Utility-first styling
 - **npm workspaces** — Monorepo with shared `packages/studio` library
+- **Electron 33 + Vite** — Desktop app shell with local-inference support (sd.cpp, Wan2GP)
 - **Muapi.ai** — AI model API gateway
 
 ## 🤔 How is this different from other AI Video Platforms?

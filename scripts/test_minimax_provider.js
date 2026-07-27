@@ -1,8 +1,9 @@
 /**
  * Test script for MiniMax provider integration.
  *
- * Verifies that the MiniMax Image 01 model is correctly registered in models.js
- * and that the model definition has the expected structure.
+ * Verifies that the MiniMax Image 01 model is correctly registered in the
+ * shared studio model catalog and that the model definition has the
+ * expected structure.
  *
  * Usage:
  *   node scripts/test_minimax_provider.js
@@ -20,15 +21,17 @@ const ROOT = join(__dirname, "..");
 
 // ── 1. Model registration check ──────────────────────────────────────────────
 
-const modelsContent = readFileSync(
-  join(ROOT, "src", "lib", "models.js"),
-  "utf-8"
-);
+// The model catalog's single source of truth is packages/studio/src/models.js
+// (src/lib/models.js only re-exports it for the Electron/Vite build — see
+// that file's header comment). Read from the source of truth directly so
+// this check keeps working regardless of how the Electron shim re-exports it.
+const MODELS_PATH = join(ROOT, "packages", "studio", "src", "models.js");
+const modelsContent = readFileSync(MODELS_PATH, "utf-8");
 
 // Extract the t2iModels JSON array via a simple regex
 const t2iMatch = modelsContent.match(/export const t2iModels = (\[[\s\S]*?\]);/);
 if (!t2iMatch) {
-  console.error("FAIL: Could not parse t2iModels from src/lib/models.js");
+  console.error(`FAIL: Could not parse t2iModels from ${MODELS_PATH}`);
   process.exit(1);
 }
 
@@ -45,7 +48,7 @@ const minimaxModel = t2iModels.find((m) => m.id === "minimax-image-01");
 if (!minimaxModel) {
   console.error(
     'FAIL: "minimax-image-01" not found in t2iModels.\n' +
-      "Expected it to be registered in src/lib/models.js."
+      "Expected it to be registered in packages/studio/src/models.js."
   );
   process.exit(1);
 }

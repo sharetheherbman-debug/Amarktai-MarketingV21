@@ -13,9 +13,15 @@ function addSecurityHeaders(response) {
     // connect-src covers *.muapi.ai (not just api.muapi.ai) because generated
     // media, model thumbnails, and other assets are served from cdn.muapi.ai
     // and other muapi subdomains that the renderer fetches directly.
+    // 'unsafe-eval' is only added outside production: Next.js dev/Fast Refresh
+    // relies on eval-based source maps, but a production build does not need
+    // it, so we drop it there to shrink the XSS attack surface (CWE-79).
+    const scriptSrc = process.env.NODE_ENV === 'production'
+        ? "'self' 'unsafe-inline'"
+        : "'self' 'unsafe-eval' 'unsafe-inline'";
     response.headers.set(
         'Content-Security-Policy',
-        "default-src 'self'; script-src 'self' 'unsafe-eval' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; media-src 'self' data: blob: https:; connect-src 'self' https://muapi.ai https://*.muapi.ai; font-src 'self' data:;"
+        `default-src 'self'; script-src ${scriptSrc}; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; media-src 'self' data: blob: https:; connect-src 'self' https://muapi.ai https://*.muapi.ai; font-src 'self' data:;`
     );
     return response;
 }
