@@ -110,8 +110,10 @@ export interface Content {
   deleted_at: Date | null;
 }
 
-export type ContentType = 'blog' | 'social' | 'email' | 'ad' | 'video' | 'image';
-export type ContentStatus = 'draft' | 'review' | 'approved' | 'published' | 'archived';
+export type ContentType = 'blog' | 'article' | 'landing_page' | 'sales_page' | 'product_desc' | 'service_page' | 'case_study' | 'faq' | 'newsletter' | 'email' | 'press_release' | 'social' | 'asset' | 'ad' | 'video' | 'image';
+export type ContentStatus = 'draft' | 'review' | 'approved' | 'rejected' | 'published' | 'archived' | 'scheduled';
+export type ContentPlatform = 'facebook' | 'instagram' | 'linkedin' | 'x' | 'threads' | 'pinterest' | 'reddit' | 'youtube' | 'tiktok' | 'email' | 'web';
+export type AssetType = 'headline' | 'cta' | 'tagline' | 'hook' | 'caption' | 'description' | 'meta_title' | 'meta_description' | 'schema_summary';
 
 export interface Agent {
   id: string;
@@ -409,14 +411,31 @@ export interface CreateCampaignData {
 }
 
 export interface CreateContentData {
-  title?: string;
+  title: string;
   body?: string;
+  excerpt?: string;
   type: ContentType;
   format?: string;
-  platform?: string;
+  platform?: ContentPlatform;
   campaign_id?: string;
   project_id?: string;
+  template_id?: string;
   metadata?: Record<string, unknown>;
+  scheduled_at?: string;
+  assigned_to?: string;
+}
+
+export interface UpdateContentData {
+  title?: string;
+  body?: string;
+  excerpt?: string;
+  type?: ContentType;
+  format?: string;
+  platform?: ContentPlatform;
+  status?: ContentStatus;
+  metadata?: Record<string, unknown>;
+  scheduled_at?: string;
+  assigned_to?: string;
 }
 
 export interface CreateAgentData {
@@ -848,4 +867,214 @@ export interface UpdateTrendMonitorData {
   config?: Record<string, unknown>;
   alert_threshold?: number;
   is_active?: boolean;
+}
+
+// ─── Content Studio Types ────────────────────────────────────────────────────
+
+export interface ContentItem {
+  id: string;
+  organization_id: string;
+  campaign_id: string | null;
+  project_id: string | null;
+  title: string;
+  body: string | null;
+  excerpt: string | null;
+  type: ContentType;
+  format: string;
+  platform: ContentPlatform | null;
+  status: ContentStatus;
+  workflow_state: string;
+  language: string;
+  word_count: number;
+  reading_time_seconds: number;
+  seo_score: number;
+  readability_score: number;
+  brand_voice_score: number;
+  quality_score: number;
+  metadata: Record<string, unknown>;
+  ai_generated: boolean;
+  ai_model: string | null;
+  ai_prompt: string | null;
+  ai_context: Record<string, unknown>;
+  template_id: string | null;
+  parent_id: string | null;
+  version: number;
+  scheduled_at: string | null;
+  published_at: string | null;
+  archived_at: string | null;
+  created_by: string | null;
+  assigned_to: string | null;
+  approved_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ContentVersion {
+  id: string;
+  content_id: string;
+  organization_id: string;
+  version: number;
+  title: string;
+  body: string | null;
+  metadata: Record<string, unknown>;
+  change_summary: string | null;
+  created_by: string | null;
+  created_at: string;
+}
+
+export interface ContentTemplate {
+  id: string;
+  organization_id: string;
+  name: string;
+  description: string | null;
+  category: string;
+  type: ContentType;
+  platform: ContentPlatform | null;
+  template_body: string;
+  variables: TemplateVariable[];
+  conditional_sections: ConditionalSection[];
+  prompt_template: string | null;
+  system_prompt: string | null;
+  brand_voice_override: Record<string, unknown>;
+  default_metadata: Record<string, unknown>;
+  is_system: boolean;
+  usage_count: number;
+  version: number;
+  is_active: boolean;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TemplateVariable {
+  name: string;
+  type: 'string' | 'number' | 'boolean' | 'select' | 'text';
+  description: string;
+  required: boolean;
+  default?: string;
+  options?: string[];
+}
+
+export interface ConditionalSection {
+  condition: string;
+  content: string;
+}
+
+export interface CreateTemplateData {
+  name: string;
+  description?: string;
+  category: string;
+  type: ContentType;
+  platform?: ContentPlatform;
+  template_body: string;
+  variables?: TemplateVariable[];
+  prompt_template?: string;
+  system_prompt?: string;
+  brand_voice_override?: Record<string, unknown>;
+  default_metadata?: Record<string, unknown>;
+}
+
+export interface CalendarEvent {
+  id: string;
+  organization_id: string;
+  content_id: string | null;
+  campaign_id: string | null;
+  title: string;
+  description: string | null;
+  platform: ContentPlatform | null;
+  content_type: ContentType | null;
+  scheduled_date: string;
+  scheduled_time: string | null;
+  status: string;
+  publish_config: Record<string, unknown>;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CreateCalendarEventData {
+  content_id?: string;
+  campaign_id?: string;
+  title: string;
+  description?: string;
+  platform?: ContentPlatform;
+  content_type?: ContentType;
+  scheduled_date: string;
+  scheduled_time?: string;
+  publish_config?: Record<string, unknown>;
+}
+
+export interface ContentApproval {
+  id: string;
+  content_id: string;
+  organization_id: string;
+  status: 'pending' | 'approved' | 'rejected' | 'changes_requested';
+  assigned_to: string | null;
+  comments: string | null;
+  reviewed_by: string | null;
+  reviewed_at: string | null;
+  created_at: string;
+}
+
+export interface ContentGenerationJob {
+  id: string;
+  organization_id: string;
+  content_id: string | null;
+  template_id: string | null;
+  type: ContentType;
+  platform: ContentPlatform | null;
+  status: 'pending' | 'planning' | 'generating' | 'reviewing' | 'completed' | 'failed';
+  input: Record<string, unknown>;
+  output: Record<string, unknown>;
+  quality_results: Record<string, unknown>;
+  error: string | null;
+  tokens_in: number;
+  tokens_out: number;
+  cost_cents: number;
+  latency_ms: number;
+  provider_used: string | null;
+  model_used: string | null;
+  started_at: string | null;
+  completed_at: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface GenerateContentRequest {
+  type: ContentType;
+  platform?: ContentPlatform;
+  title?: string;
+  prompt: string;
+  template_id?: string;
+  variables?: Record<string, string>;
+  campaign_id?: string;
+  max_words?: number;
+  tone?: string;
+  language?: string;
+}
+
+export interface ContentQualityCheck {
+  id: string;
+  content_id: string;
+  organization_id: string;
+  check_type: 'grammar' | 'readability' | 'seo' | 'brand_voice' | 'duplicate' | 'compliance' | 'cta';
+  score: number;
+  issues: QualityIssue[];
+  suggestions: string[];
+  passed: boolean;
+  created_at: string;
+}
+
+export interface QualityIssue {
+  type: string;
+  message: string;
+  severity: 'error' | 'warning' | 'info';
+  position?: { start: number; end: number };
+}
+
+export interface QualityReport {
+  overall_score: number;
+  checks: ContentQualityCheck[];
+  passed: boolean;
 }

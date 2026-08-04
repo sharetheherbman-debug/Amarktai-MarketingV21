@@ -26,6 +26,9 @@ import brandDnaRoutes from './routes/brand-dna';
 import knowledgeRoutes from './routes/knowledge';
 import competitorRoutes from './routes/competitors';
 import trendRoutes from './routes/trends';
+import contentStudioRoutes from './routes/content-studio';
+import templateRoutes from './routes/templates';
+import calendarRoutes from './routes/calendar';
 import scheduler from './services/scheduler.service';
 
 const app = express();
@@ -86,6 +89,9 @@ app.use('/api/v1/brand-dna', brandDnaRoutes);
 app.use('/api/v1/knowledge', knowledgeRoutes);
 app.use('/api/v1/competitors', competitorRoutes);
 app.use('/api/v1/trends', trendRoutes);
+app.use('/api/v1/content-studio', contentStudioRoutes);
+app.use('/api/v1/templates', templateRoutes);
+app.use('/api/v1/calendar', calendarRoutes);
 
 app.use((_req: Request, res: Response) => {
   res.status(404).json({
