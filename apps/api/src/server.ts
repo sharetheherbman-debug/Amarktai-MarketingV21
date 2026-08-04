@@ -29,6 +29,9 @@ import trendRoutes from './routes/trends';
 import contentStudioRoutes from './routes/content-studio';
 import templateRoutes from './routes/templates';
 import calendarRoutes from './routes/calendar';
+import seoRoutes from './routes/seo';
+import campaignAiRoutes from './routes/campaign-ai';
+import amaiRoutes from './routes/amai';
 import scheduler from './services/scheduler.service';
 
 const app = express();
@@ -92,6 +95,9 @@ app.use('/api/v1/trends', trendRoutes);
 app.use('/api/v1/content-studio', contentStudioRoutes);
 app.use('/api/v1/templates', templateRoutes);
 app.use('/api/v1/calendar', calendarRoutes);
+app.use('/api/v1/seo', seoRoutes);
+app.use('/api/v1/campaign-ai', campaignAiRoutes);
+app.use('/api/v1/amai', amaiRoutes);
 
 app.use((_req: Request, res: Response) => {
   res.status(404).json({
