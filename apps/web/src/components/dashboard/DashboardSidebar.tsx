@@ -28,6 +28,7 @@ import {
   Target,
   Heart,
   Puzzle,
+  CreditCard,
 } from 'lucide-react';
 import { useAuthStore } from '@/stores/auth.store';
 import { useUIStore } from '@/stores/ui.store';
@@ -86,6 +87,7 @@ const mainNav: NavSection[] = [
     title: 'Platform',
     items: [
       { label: 'Integrations', href: '/integrations', icon: Puzzle },
+      { label: 'Billing', href: '/billing', icon: CreditCard },
     ],
   },
   {
