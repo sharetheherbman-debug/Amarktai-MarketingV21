@@ -1666,3 +1666,169 @@ GET /api/v1/campaigns?page=2&limit=10
 | `sort` | string | created_at | - | Sort field |
 | `order` | string | desc | - | Sort direction |
 | `search` | string | - | - | Search query |
+
+---
+
+## Knowledge Base
+
+All knowledge endpoints require authentication. Data is scoped to organizations.
+
+### List Knowledge Sources
+
+```http
+GET /api/v1/knowledge?organization_id=uuid&type=website
+Authorization: Bearer <token>
+```
+
+**Query Parameters:**
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `organization_id` | uuid | Required. Organization scope |
+| `type` | string | Filter by type: `website`, `document`, `api`, `manual` |
+
+### Create Knowledge Source
+
+```http
+POST /api/v1/knowledge
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{
+  "organization_id": "uuid",
+  "name": "Company Website",
+  "type": "website",
+  "url": "https://example.com"
+}
+```
+
+### Sync Knowledge Source
+
+```http
+POST /api/v1/knowledge/:id/sync
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{ "organization_id": "uuid" }
+```
+
+### Get Knowledge Stats
+
+```http
+GET /api/v1/knowledge/stats?organization_id=uuid
+Authorization: Bearer <token>
+```
+
+### Search Knowledge
+
+```http
+GET /api/v1/knowledge/search?organization_id=uuid&q=search+term&limit=10
+Authorization: Bearer <token>
+```
+
+---
+
+## Competitors
+
+All competitor endpoints require authentication.
+
+### List Competitors
+
+```http
+GET /api/v1/competitors?organization_id=uuid&status=active
+Authorization: Bearer <token>
+```
+
+### Create Competitor
+
+```http
+POST /api/v1/competitors
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{
+  "organization_id": "uuid",
+  "name": "Acme Corp",
+  "url": "https://acme.com",
+  "industry": "SaaS"
+}
+```
+
+### Run Competitor Check
+
+```http
+POST /api/v1/competitors/:id/check
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{ "organization_id": "uuid" }
+```
+
+### Get Recent Changes
+
+```http
+GET /api/v1/competitors/recent-changes?organization_id=uuid&days=7
+Authorization: Bearer <token>
+```
+
+---
+
+## Trends
+
+All trend endpoints require authentication.
+
+### List Trend Monitors
+
+```http
+GET /api/v1/trends?organization_id=uuid
+Authorization: Bearer <token>
+```
+
+### Create Trend Monitor
+
+```http
+POST /api/v1/trends
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{
+  "organization_id": "uuid",
+  "topic": "AI Marketing",
+  "keywords": ["AI", "marketing automation"],
+  "sources": ["https://techcrunch.com/feed"],
+  "alert_threshold": 0.7
+}
+```
+
+### Run Trend Check
+
+```http
+POST /api/v1/trends/:id/check
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{ "organization_id": "uuid" }
+```
+
+### Get Unread Count
+
+```http
+GET /api/v1/trends/unread-count?organization_id=uuid
+Authorization: Bearer <token>
+```
+
+### Get Alerts
+
+```http
+GET /api/v1/trends/alerts?organization_id=uuid
+Authorization: Bearer <token>
+```
+
+### Mark Item as Read
+
+```http
+PATCH /api/v1/trends/items/:itemId/read
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{ "organization_id": "uuid" }
+```

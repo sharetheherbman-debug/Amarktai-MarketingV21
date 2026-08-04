@@ -854,3 +854,40 @@ const registerSchema = z.object({
 - **Image optimization** via Next.js Image component
 - **Font optimization** with `next/font`
 - **Turbopack** for fast development builds
+
+## Milestone 2: Research & Knowledge
+
+### Services Added
+
+| Service | File | Purpose |
+|---------|------|---------|
+| `knowledge.service.ts` | `apps/api/src/services/knowledge.service.ts` | CRUD for knowledge sources and items, search, sync |
+| `crawler.service.ts` | `apps/api/src/services/crawler.service.ts` | Website crawling, HTML parsing, text chunking |
+| `competitor.service.ts` | `apps/api/src/services/competitor.service.ts` | Competitor tracking, website checks, change detection |
+| `trend.service.ts` | `apps/api/src/services/trend.service.ts` | Trend monitoring, alert management, item tracking |
+| `vector.service.ts` | `apps/api/src/services/vector.service.ts` | Embedding generation, similarity search via pgvector |
+
+### API Routes Added
+
+| Route | Prefix | Description |
+|-------|--------|-------------|
+| `knowledge.ts` | `/api/v1/knowledge` | Knowledge sources, items, search, sync |
+| `competitors.ts` | `/api/v1/competitors` | Competitor CRUD, checks, snapshots |
+| `trends.ts` | `/api/v1/trends` | Trend monitors, items, alerts |
+
+### Database Tables Added (Migration 003)
+
+- `knowledge_sources` - Content source definitions
+- `knowledge_items` - Chunked knowledge content with embeddings
+- `competitors` - Tracked competitor companies
+- `competitor_snapshots` - Point-in-time competitor data
+- `trend_monitoring` - Trend monitor configurations
+- `trend_items` - Individual trend entries
+
+### Frontend Pages Added
+
+| Page | Route | Description |
+|------|-------|-------------|
+| Knowledge | `/knowledge` | Manage knowledge sources, sync, search |
+| Competitors | `/competitors` | Track competitors, run checks, view changes |
+| Trends | `/trends` | Monitor trends, view alerts, manage items |

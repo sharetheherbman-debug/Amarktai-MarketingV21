@@ -387,6 +387,138 @@ JWT refresh token storage.
 
 Indexes: `idx_refresh_tokens_user`, `idx_refresh_tokens_hash`
 
+### knowledge_sources
+
+Knowledge content sources (websites, documents, APIs).
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | UUID PK | Primary key |
+| `organization_id` | UUID FK | References organizations(id) CASCADE |
+| `name` | VARCHAR(255) | Source name |
+| `type` | VARCHAR(50) | `website`, `document`, `api`, `manual` |
+| `url` | TEXT | Source URL |
+| `config` | JSONB | Crawl/import configuration |
+| `status` | VARCHAR(50) | `pending`, `crawling`, `completed`, `failed` |
+| `error_message` | TEXT | Last error message |
+| `last_synced_at` | TIMESTAMP | Last sync timestamp |
+| `item_count` | INTEGER | Number of knowledge items |
+| `total_tokens` | INTEGER | Total token count |
+| `created_by` | UUID FK | References users(id) |
+| `created_at` | TIMESTAMP | Creation timestamp |
+| `updated_at` | TIMESTAMP | Last update timestamp |
+| `deleted_at` | TIMESTAMP | Soft delete timestamp |
+
+Indexes: `idx_knowledge_sources_org`, `idx_knowledge_sources_type`, `idx_knowledge_sources_status`
+
+### knowledge_items
+
+Individual knowledge chunks from sources.
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | UUID PK | Primary key |
+| `organization_id` | UUID FK | References organizations(id) CASCADE |
+| `source_id` | UUID FK | References knowledge_sources(id) CASCADE |
+| `title` | VARCHAR(500) | Item title |
+| `content` | TEXT | Content text |
+| `content_type` | VARCHAR(50) | `page`, `section`, `faq`, `product` |
+| `url` | TEXT | Source URL |
+| `metadata` | JSONB | Additional metadata |
+| `embedding` | VECTOR(1536) | pgvector embedding |
+| `tokens` | INTEGER | Token count |
+| `chunk_index` | INTEGER | Chunk order index |
+| `parent_id` | UUID FK | References knowledge_items(id) |
+| `created_at` | TIMESTAMP | Creation timestamp |
+| `updated_at` | TIMESTAMP | Last update timestamp |
+
+Indexes: `idx_knowledge_items_org`, `idx_knowledge_items_source`, `idx_knowledge_items_type`, `idx_knowledge_items_tokens`
+
+### competitors
+
+Tracked competitor companies.
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | UUID PK | Primary key |
+| `organization_id` | UUID FK | References organizations(id) CASCADE |
+| `name` | VARCHAR(255) | Competitor name |
+| `url` | TEXT | Website URL |
+| `description` | TEXT | Description |
+| `industry` | VARCHAR(100) | Industry category |
+| `monitoring_config` | JSONB | What to monitor |
+| `last_checked_at` | TIMESTAMP | Last check timestamp |
+| `status` | VARCHAR(50) | `active`, `paused`, `archived` |
+| `created_by` | UUID FK | References users(id) |
+| `created_at` | TIMESTAMP | Creation timestamp |
+| `updated_at` | TIMESTAMP | Last update timestamp |
+| `deleted_at` | TIMESTAMP | Soft delete timestamp |
+
+Indexes: `idx_competitors_org`, `idx_competitors_status`
+
+### competitor_snapshots
+
+Point-in-time competitor website data.
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | UUID PK | Primary key |
+| `competitor_id` | UUID FK | References competitors(id) CASCADE |
+| `organization_id` | UUID FK | References organizations(id) CASCADE |
+| `type` | VARCHAR(50) | `pricing`, `content`, `social`, `seo` |
+| `title` | VARCHAR(500) | Snapshot title |
+| `data` | JSONB | Captured data |
+| `summary` | TEXT | Change summary |
+| `snapshot_date` | DATE | Snapshot date |
+| `created_at` | TIMESTAMP | Creation timestamp |
+
+Indexes: `idx_competitor_snapshots_competitor`, `idx_competitor_snapshots_type`, `idx_competitor_snapshots_date`
+
+### trend_monitoring
+
+Trend monitoring configurations.
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | UUID PK | Primary key |
+| `organization_id` | UUID FK | References organizations(id) CASCADE |
+| `topic` | VARCHAR(255) | Trend topic |
+| `description` | TEXT | Description |
+| `keywords` | JSONB | Search keywords array |
+| `sources` | JSONB | Source URLs array |
+| `config` | JSONB | Monitor configuration |
+| `last_checked_at` | TIMESTAMP | Last check timestamp |
+| `alert_threshold` | FLOAT | Relevance threshold (0-1) |
+| `is_active` | BOOLEAN | Whether active |
+| `created_by` | UUID FK | References users(id) |
+| `created_at` | TIMESTAMP | Creation timestamp |
+| `updated_at` | TIMESTAMP | Last update timestamp |
+
+Indexes: `idx_trend_monitoring_org`, `idx_trend_monitoring_active`
+
+### trend_items
+
+Individual trend entries found by monitors.
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | UUID PK | Primary key |
+| `monitor_id` | UUID FK | References trend_monitoring(id) CASCADE |
+| `organization_id` | UUID FK | References organizations(id) CASCADE |
+| `title` | VARCHAR(500) | Item title |
+| `url` | TEXT | Source URL |
+| `source` | VARCHAR(255) | Source name |
+| `summary` | TEXT | Content summary |
+| `relevance_score` | FLOAT | Relevance score (0-1) |
+| `sentiment` | VARCHAR(50) | `positive`, `negative`, `neutral`, `mixed` |
+| `data` | JSONB | Additional data |
+| `is_read` | BOOLEAN | Read status |
+| `is_saved` | BOOLEAN | Saved status |
+| `published_at` | TIMESTAMP | Publication timestamp |
+| `created_at` | TIMESTAMP | Creation timestamp |
+
+Indexes: `idx_trend_items_monitor`, `idx_trend_items_org`, `idx_trend_items_relevance`, `idx_trend_items_created`
+
 ### system_settings
 
 Global system configuration.
@@ -459,7 +591,9 @@ Migrations are stored in `apps/api/src/db/migrations/` and executed in sequentia
 
 ```
 apps/api/src/db/migrations/
-└── 001_initial.sql
+├── 001_initial.sql
+├── 002_ai_core.sql
+└── 003_knowledge.sql
 ```
 
 ### Creating New Migrations
