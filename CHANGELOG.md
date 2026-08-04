@@ -2,6 +2,105 @@
 
 All notable changes to AmarktAI Marketing are documented in this file.
 
+## [0.6.0-integrations] - 2026-08-04
+
+### Milestone 6: Integrations & Omnichannel Automation
+
+#### Database
+- Added `integration_providers` table with 21 seeded providers
+- Added `integration_connections` table for user-configured connections
+- Added `integration_sync_logs` table for audit trail
+- Added `webhooks_incoming` and `webhooks_outgoing` tables
+- Added `webhook_deliveries` table for delivery tracking
+- Added `analytics_google` and `analytics_search_console` tables
+- Added `email_providers` table for email provider configurations
+- Added `import_export_jobs` table for job tracking
+
+#### Backend Services
+- `integration.service.ts` - Complete integration framework with providers, connections, webhooks, email, import/export
+
+#### API Routes
+- `/api/v1/integrations/providers` - List available integration providers
+- `/api/v1/integrations/connections` - CRUD for integration connections
+- `/api/v1/integrations/connections/:id/test` - Connection testing
+- `/api/v1/integrations/health` - Health check all connections
+- `/api/v1/integrations/logs` - Sync log retrieval
+- `/api/v1/integrations/webhooks/incoming` - Incoming webhook management
+- `/api/v1/integrations/webhooks/outgoing` - Outgoing webhook management
+- `/api/v1/integrations/webhooks/deliveries` - Webhook delivery history
+- `/api/v1/integrations/email-providers` - Email provider management
+- `/api/v1/integrations/import-export` - Import/export job management
+
+#### Supported Providers (21)
+- CMS: WordPress, Webflow, Ghost
+- Social: Facebook, Instagram, LinkedIn, X, YouTube, Pinterest
+- Analytics: Google Analytics 4, Google Search Console, Google Business Profile
+- Calendar: Google Calendar, Outlook Calendar
+- Email: SMTP, Gmail, Microsoft 365, Mailgun, SendGrid, Amazon SES
+- Storage: Google Drive
+
+#### Frontend
+- Integrations dashboard with provider browser
+- Webhook management (incoming/outgoing)
+- Import/Export job management
+
+#### Documentation
+- Integration Guide added (docs/INTEGRATION_GUIDE.md)
+
+---
+
+## [0.5.0-crm] - 2026-08-04
+
+### Milestone 7: CRM Integration
+
+- Contact management with CRUD operations
+- Lead scoring system
+- Customer segmentation
+- Email marketing integration
+- Pipeline management
+- Activity tracking
+
+---
+
+## [0.4.0-seo-social] - 2026-08-04
+
+### Milestones 4-5: SEO Engine & Social Publishing
+
+#### SEO Engine (Milestone 4)
+- SEO analysis tool
+- Keyword research functionality
+- On-page SEO recommendations
+- Meta tag optimization
+- Content readability scoring
+- Competitor SEO comparison
+- SERP tracking
+
+#### Social Publishing (Milestone 5)
+- Social media account connections
+- Multi-platform publishing
+- Post scheduling
+- Engagement tracking
+- Hashtag suggestions
+- Best time to post analysis
+- Social media calendar
+
+---
+
+## [0.3.0-content-studio] - 2026-08-04
+
+### Milestone 3: Content Studio
+
+- AI content generation engine
+- Blog post generator
+- Social media post creator
+- Email campaign writer
+- Ad copy generator
+- Content templates
+- Content scheduling
+- Content calendar
+
+---
+
 ## [0.3.0-research] - 2026-08-04
 
 ### Milestone 2: Research & Knowledge
