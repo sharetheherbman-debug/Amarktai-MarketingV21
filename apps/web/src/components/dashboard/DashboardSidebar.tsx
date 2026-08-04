@@ -17,6 +17,8 @@ import {
   ChevronRight,
   Dna,
   BookOpen,
+  Eye,
+  TrendingUp,
 } from 'lucide-react';
 import { useAuthStore } from '@/stores/auth.store';
 import { useUIStore } from '@/stores/ui.store';
@@ -48,6 +50,13 @@ const mainNav: NavSection[] = [
       { label: 'Prompts', href: '/prompts', icon: FileText },
       { label: 'Brand DNA', href: '/brand-dna', icon: Dna },
       { label: 'Knowledge Base', href: '/knowledge', icon: BookOpen },
+    ],
+  },
+  {
+    title: 'Research',
+    items: [
+      { label: 'Competitors', href: '/competitors', icon: Eye },
+      { label: 'Trends', href: '/trends', icon: TrendingUp },
     ],
   },
   {
