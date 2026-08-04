@@ -27,6 +27,7 @@ import {
   Building2,
   Target,
   Heart,
+  Puzzle,
 } from 'lucide-react';
 import { useAuthStore } from '@/stores/auth.store';
 import { useUIStore } from '@/stores/ui.store';
@@ -79,6 +80,12 @@ const mainNav: NavSection[] = [
       { label: 'Contacts', href: '/crm/contacts', icon: Users },
       { label: 'Deals', href: '/crm/deals', icon: Target },
       { label: 'Customers', href: '/crm/customers', icon: Heart },
+    ],
+  },
+  {
+    title: 'Platform',
+    items: [
+      { label: 'Integrations', href: '/integrations', icon: Puzzle },
     ],
   },
   {
