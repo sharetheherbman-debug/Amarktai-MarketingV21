@@ -21,6 +21,9 @@ import {
   TrendingUp,
   Sparkles,
   CalendarDays,
+  Search,
+  GitBranch,
+  Share2,
 } from 'lucide-react';
 import { useAuthStore } from '@/stores/auth.store';
 import { useUIStore } from '@/stores/ui.store';
@@ -55,6 +58,15 @@ const mainNav: NavSection[] = [
       { label: 'Knowledge Base', href: '/knowledge', icon: BookOpen },
       { label: 'Templates', href: '/content-studio/templates', icon: FileText },
       { label: 'Calendar', href: '/content-studio/calendar', icon: CalendarDays },
+    ],
+  },
+  {
+    title: 'Intelligence',
+    items: [
+      { label: 'SEO', href: '/seo', icon: Search },
+      { label: 'Campaign Planner', href: '/campaign-planner', icon: Megaphone },
+      { label: 'Workflows', href: '/workflows', icon: GitBranch },
+      { label: 'Social', href: '/social', icon: Share2 },
     ],
   },
   {
