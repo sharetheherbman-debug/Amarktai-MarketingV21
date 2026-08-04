@@ -19,6 +19,8 @@ import {
   BookOpen,
   Eye,
   TrendingUp,
+  Sparkles,
+  CalendarDays,
 } from 'lucide-react';
 import { useAuthStore } from '@/stores/auth.store';
 import { useUIStore } from '@/stores/ui.store';
@@ -39,6 +41,7 @@ const mainNav: NavSection[] = [
   {
     items: [
       { label: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
+      { label: 'Content Studio', href: '/content-studio', icon: Sparkles },
       { label: 'Campaigns', href: '/campaigns', icon: Megaphone },
       { label: 'Content', href: '/content', icon: FileText },
     ],
@@ -50,6 +53,8 @@ const mainNav: NavSection[] = [
       { label: 'Prompts', href: '/prompts', icon: FileText },
       { label: 'Brand DNA', href: '/brand-dna', icon: Dna },
       { label: 'Knowledge Base', href: '/knowledge', icon: BookOpen },
+      { label: 'Templates', href: '/content-studio/templates', icon: FileText },
+      { label: 'Calendar', href: '/content-studio/calendar', icon: CalendarDays },
     ],
   },
   {
