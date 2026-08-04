@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      width: 1200px;
+      height: 630px;
+      background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: system-ui, -apple-system, sans-serif;
+      overflow: hidden;
+      position: relative;
+    }
+    .glow {
+      position: absolute;
+      width: 400px;
+      height: 400px;
+      background: radial-gradient(circle, rgba(16,185,129,0.15) 0%, transparent 70%);
+      top: -100px;
+      right: -100px;
+      border-radius: 50%;
+    }
+    .glow2 {
+      position: absolute;
+      width: 300px;
+      height: 300px;
+      background: radial-gradient(circle, rgba(16,185,129,0.1) 0%, transparent 70%);
+      bottom: -50px;
+      left: -50px;
+      border-radius: 50%;
+    }
+    .content {
+      text-align: center;
+      z-index: 1;
+    }
+    .icon {
+      width: 80px;
+      height: 80px;
+      background: #10b981;
+      border-radius: 16px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: 0 auto 32px;
+      font-size: 40px;
+      color: white;
+      font-weight: 700;
+    }
+    h1 {
+      font-size: 64px;
+      font-weight: 700;
+      color: #ffffff;
+      margin-bottom: 16px;
+      letter-spacing: -1px;
+    }
+    h1 span {
+      color: #10b981;
+    }
+    p {
+      font-size: 24px;
+      color: #94a3b8;
+      font-weight: 400;
+    }
+    .line {
+      width: 60px;
+      height: 4px;
+      background: #10b981;
+      margin: 24px auto 0;
+      border-radius: 2px;
+    }
+  </style>
+</head>
+<body>
+  <div class="glow"></div>
+  <div class="glow2"></div>
+  <div class="content">
+    <div class="icon">A</div>
+    <h1>Amarkt<span>AI</span> Marketing</h1>
+    <p>The AI Marketing Operating System</p>
+    <div class="line"></div>
+  </div>
+</body>
+</html>
