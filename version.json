@@ -1,0 +1,12 @@
+{
+  "name": "AmarktAI Marketing",
+  "version": "0.3.0",
+  "tag": "v0.3.0-research",
+  "milestone": "Milestone 2: Research & Knowledge",
+  "releaseDate": "2026-08-04",
+  "commit": "2b53538",
+  "buildNumber": "20260804.1",
+  "environment": "production",
+  "description": "AI Marketing Operating System",
+  "repository": "https://github.com/sharetheherbman-debug/Amarktai-MarketingV21"
+}

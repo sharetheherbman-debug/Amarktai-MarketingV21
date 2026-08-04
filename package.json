@@ -1,6 +1,6 @@
 {
   "name": "amarktai-marketing",
-  "version": "1.0.0",
+  "version": "0.3.0",
   "private": true,
   "description": "AmarktAI Marketing - AI Marketing Operating System",
   "workspaces": [
@@ -17,7 +17,16 @@
     "docker:up": "docker compose -f docker/docker-compose.yml up -d",
     "docker:down": "docker compose -f docker/docker-compose.yml down",
     "docker:build": "docker compose -f docker/docker-compose.yml build",
-    "clean": "turbo clean"
+    "clean": "turbo clean",
+    "verify": "node scripts/verify.js",
+    "verify:types": "node scripts/verify-types.js",
+    "verify:build": "node scripts/verify-build.js",
+    "verify:docs": "node scripts/verify-docs.js",
+    "verify:routes": "node scripts/verify-routes.js",
+    "verify:database": "node scripts/verify-database.js",
+    "verify:security": "node scripts/verify-security.js",
+    "verify:branding": "node scripts/verify-branding.js",
+    "verify:version": "node scripts/verify-version.js"
   },
   "devDependencies": {
     "turbo": "^2.3.0",
