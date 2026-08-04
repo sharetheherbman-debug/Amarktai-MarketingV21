@@ -34,6 +34,7 @@ import campaignAiRoutes from './routes/campaign-ai';
 import amaiRoutes from './routes/amai';
 import crmRoutes from './routes/crm';
 import integrationRoutes from './routes/integrations';
+import billingRoutes from './routes/billing';
 import scheduler from './services/scheduler.service';
 
 const app = express();
@@ -102,6 +103,7 @@ app.use('/api/v1/campaign-ai', campaignAiRoutes);
 app.use('/api/v1/amai', amaiRoutes);
 app.use('/api/v1/crm', crmRoutes);
 app.use('/api/v1/integrations', integrationRoutes);
+app.use('/api/v1/billing', billingRoutes);
 
 app.use((_req: Request, res: Response) => {
   res.status(404).json({
