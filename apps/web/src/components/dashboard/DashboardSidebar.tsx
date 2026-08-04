@@ -24,6 +24,9 @@ import {
   Search,
   GitBranch,
   Share2,
+  Building2,
+  Target,
+  Heart,
 } from 'lucide-react';
 import { useAuthStore } from '@/stores/auth.store';
 import { useUIStore } from '@/stores/ui.store';
@@ -67,6 +70,15 @@ const mainNav: NavSection[] = [
       { label: 'Campaign Planner', href: '/campaign-planner', icon: Megaphone },
       { label: 'Workflows', href: '/workflows', icon: GitBranch },
       { label: 'Social', href: '/social', icon: Share2 },
+    ],
+  },
+  {
+    title: 'CRM',
+    items: [
+      { label: 'CRM Dashboard', href: '/crm', icon: BarChart3 },
+      { label: 'Contacts', href: '/crm/contacts', icon: Users },
+      { label: 'Deals', href: '/crm/deals', icon: Target },
+      { label: 'Customers', href: '/crm/customers', icon: Heart },
     ],
   },
   {
