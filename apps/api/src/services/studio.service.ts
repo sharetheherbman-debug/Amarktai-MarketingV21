@@ -39,57 +39,56 @@ export interface StudioModel {
 // ─── Model Catalogue ─────────────────────────────────────────────────────────
 
 export function getAvailableModels(): StudioModel[] {
-  // GenX only has confirmed text/chat capabilities
-  // Media generation models are NOT available through GenX
   return [
+    // AVAILABLE THROUGH GENX - Text generation
     {
-      id: 'genx-text',
-      name: 'GenX Text Generation',
+      id: 'genx-gpt-4o',
+      name: 'GPT-4o',
       type: 'text_generation',
       provider: 'genx',
       status: 'available',
-      description: 'Text generation via GenX (confirmed)',
+      description: 'Advanced text generation via GenX',
     },
-    // Media models - marked as pending since GenX doesn't have confirmed endpoints
     {
-      id: 'genx-t2i-pending',
-      name: 'GenX Text-to-Image',
+      id: 'genx-gpt-4o-mini',
+      name: 'GPT-4o Mini',
+      type: 'text_generation',
+      provider: 'genx',
+      status: 'available',
+      description: 'Fast text generation via GenX',
+    },
+    // RECOVERED_AWAITING_MAPPING - Media models (Preview)
+    {
+      id: 'preview-t2i',
+      name: 'Text-to-Image (Preview)',
       type: 'text_to_image',
       provider: 'genx',
       status: 'pending',
-      description: 'GenX mapping pending - no confirmed endpoint',
+      description: 'GenX media endpoint not yet confirmed',
     },
     {
-      id: 'genx-i2i-pending',
-      name: 'GenX Image-to-Image',
+      id: 'preview-i2i',
+      name: 'Image-to-Image (Preview)',
       type: 'image_to_image',
       provider: 'genx',
       status: 'pending',
-      description: 'GenX mapping pending - no confirmed endpoint',
+      description: 'GenX media endpoint not yet confirmed',
     },
     {
-      id: 'genx-t2v-pending',
-      name: 'GenX Text-to-Video',
+      id: 'preview-t2v',
+      name: 'Text-to-Video (Preview)',
       type: 'text_to_video',
       provider: 'genx',
       status: 'pending',
-      description: 'GenX mapping pending - no confirmed endpoint',
+      description: 'GenX media endpoint not yet confirmed',
     },
     {
-      id: 'genx-i2v-pending',
-      name: 'GenX Image-to-Video',
-      type: 'image_to_video',
-      provider: 'genx',
-      status: 'pending',
-      description: 'GenX mapping pending - no confirmed endpoint',
-    },
-    {
-      id: 'genx-lipsync-pending',
-      name: 'GenX Lip Sync',
+      id: 'preview-lipsync',
+      name: 'Lip Sync (Preview)',
       type: 'lip_sync',
       provider: 'genx',
       status: 'pending',
-      description: 'GenX mapping pending - no confirmed endpoint',
+      description: 'GenX media endpoint not yet confirmed',
     },
   ];
 }
