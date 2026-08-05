@@ -2,6 +2,42 @@
 
 All notable changes to AmarktAI Marketing are documented in this file.
 
+## [0.9.0-marketplace] - 2026-08-05
+
+### Milestone 9: Marketplace, Developer Platform & Extensibility
+
+#### Database
+- Added migration `011_marketplace.sql`
+- `marketplace_publishers` - Publisher profiles with verification
+- `marketplace_items` - Marketplace items (agents, prompts, workflows, plugins, skill packs)
+- `marketplace_versions` - Version history for marketplace items
+- `marketplace_installations` - Organization installations
+- `marketplace_reviews` - Ratings and reviews
+- `marketplace_categories` - Item categories (5 seeded)
+- `skill_packs` - AI capability bundles
+- `oauth_applications` - OAuth2 application registrations
+- `oauth_tokens` - OAuth access tokens
+- `marketplace_submissions` - Approval workflow
+
+#### Backend
+- `marketplace.service.ts` - Full marketplace (publishers, items, installations, reviews, skill packs, admin)
+- `developer-portal.service.ts` - OAuth apps, API keys, developer profile, webhook tester, SDK info
+- `marketplace.ts` routes - Marketplace API endpoints
+- `developer.ts` routes - Developer portal API endpoints
+
+#### Frontend
+- Marketplace (`/marketplace`) - Browse, search, filter, install marketplace items
+- Developer Portal (`/developer`) - API keys, OAuth apps, SDK documentation
+
+#### Navigation
+- Added "Extend" section to sidebar with Marketplace and Developer links
+
+#### Version
+- Updated to v0.9.0-marketplace
+- 60 frontend pages, 30 API routes, 11 database migrations
+
+---
+
 ## [0.8.0-saas-billing] - 2026-08-04
 
 ### Milestone 8: SaaS Billing & Platform Operations

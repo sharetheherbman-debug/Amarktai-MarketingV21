@@ -105,11 +105,21 @@ AmarktAI Marketing platform development roadmap.
 - [x] Admin console (health, providers, feature flags, announcements)
 - [x] API keys and personal access tokens (schema ready)
 
+### Milestone 9: Marketplace, Developer Platform & Extensibility (v0.9.0)
+- [x] Agent Marketplace (publish, install, update, remove, versioning, ratings)
+- [x] Prompt Marketplace (prompt packs, industry packs, import/export)
+- [x] Workflow Marketplace (templates, packs, clone, share, versioning)
+- [x] Plugin Marketplace (repository, installer, permissions, health)
+- [x] Public SDK (TypeScript, REST, webhook helpers)
+- [x] Developer Portal (API explorer, OAuth apps, API keys, SDK docs)
+- [x] Marketplace Administration (submissions, approval workflow, moderation)
+- [x] AI Skill Packs (industry packs, capability bundles, compatibility)
+
 ---
 
 ## In Progress
 
-### Milestone 9: Campaign Intelligence
+### Milestone 10: Campaign Intelligence
 - [ ] Campaign performance prediction
 - [ ] A/B testing framework
 - [ ] Budget optimization
