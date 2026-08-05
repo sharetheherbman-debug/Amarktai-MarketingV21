@@ -18,6 +18,7 @@ export interface StudioGeneration {
   status: string;
   progress: number;
   output_urls: string[];
+  primary_output_url: string | null;
   error_code: string | null;
   error_message: string | null;
   metadata: Record<string, unknown>;
@@ -228,6 +229,7 @@ export async function createUpload(
 // ─── Mapper ──────────────────────────────────────────────────────────────────
 
 function mapGenerationRow(row: Record<string, unknown>): StudioGeneration {
+  const outputUrls = typeof row.output_urls === 'string' ? JSON.parse(row.output_urls) : (row.output_urls as string[]) || [];
   return {
     id: row.id as string,
     organization_id: row.organization_id as string,
@@ -241,7 +243,8 @@ function mapGenerationRow(row: Record<string, unknown>): StudioGeneration {
     provider_job_id: row.provider_job_id as string | null,
     status: row.status as string,
     progress: parseInt(row.progress as string) || 0,
-    output_urls: typeof row.output_urls === 'string' ? JSON.parse(row.output_urls) : (row.output_urls as string[]) || [],
+    output_urls: outputUrls,
+    primary_output_url: outputUrls[0] || null,
     error_code: row.error_code as string | null,
     error_message: row.error_message as string | null,
     metadata: typeof row.metadata === 'string' ? JSON.parse(row.metadata) : (row.metadata as Record<string, unknown>) || {},
