@@ -3,17 +3,32 @@ import path from 'path';
 
 dotenv.config({ path: path.resolve(__dirname, '../../.env') });
 
+const isProduction = process.env.NODE_ENV === 'production';
+
 function getEnv(key: string, defaultValue?: string): string {
   const value = process.env[key] || defaultValue;
-  if (!value && process.env.NODE_ENV === 'production') {
+  if (!value && isProduction) {
     throw new Error(`Missing required environment variable: ${key}`);
   }
   return value || '';
 }
 
+function getRequiredProductionValue(key: string, developmentDefault: string): string {
+  const value = process.env[key];
+  if (isProduction) {
+    if (!value || value === developmentDefault || value.startsWith('change-me') || value.startsWith('replace-with')) {
+      throw new Error(`Missing or insecure production environment variable: ${key}`);
+    }
+    return value;
+  }
+  return value || developmentDefault;
+}
+
 function getEnvNumber(key: string, defaultValue: number): number {
   const value = process.env[key];
-  return value ? parseInt(value, 10) : defaultValue;
+  const parsed = value ? parseInt(value, 10) : defaultValue;
+  if (!Number.isFinite(parsed)) throw new Error(`Invalid numeric environment variable: ${key}`);
+  return parsed;
 }
 
 function getEnvBoolean(key: string, defaultValue: boolean): boolean {
@@ -28,22 +43,24 @@ export const env = {
   APP_URL: getEnv('APP_URL', 'http://localhost:3000'),
   API_URL: getEnv('API_URL', 'http://localhost:4000'),
 
-  DATABASE_URL: getEnv('DATABASE_URL', 'postgresql://postgres:postgres@localhost:5432/amarktai'),
+  DATABASE_URL: getRequiredProductionValue('DATABASE_URL', 'postgresql://postgres:postgres@localhost:5432/amarktai'),
   POSTGRES_USER: getEnv('POSTGRES_USER', 'postgres'),
-  POSTGRES_PASSWORD: getEnv('POSTGRES_PASSWORD', 'postgres'),
+  POSTGRES_PASSWORD: isProduction ? getRequiredProductionValue('POSTGRES_PASSWORD', 'postgres') : getEnv('POSTGRES_PASSWORD', 'postgres'),
   POSTGRES_DB: getEnv('POSTGRES_DB', 'amarktai'),
 
-  REDIS_URL: getEnv('REDIS_URL', 'redis://localhost:6379'),
+  REDIS_URL: getRequiredProductionValue('REDIS_URL', 'redis://localhost:6379'),
 
-  JWT_SECRET: getEnv('JWT_SECRET', 'dev-jwt-secret-change-in-production'),
-  JWT_REFRESH_SECRET: getEnv('JWT_REFRESH_SECRET', 'dev-jwt-refresh-secret-change-in-production'),
+  JWT_SECRET: getRequiredProductionValue('JWT_SECRET', 'dev-jwt-secret-change-in-production'),
+  JWT_REFRESH_SECRET: getRequiredProductionValue('JWT_REFRESH_SECRET', 'dev-jwt-refresh-secret-change-in-production'),
   JWT_EXPIRES_IN: getEnv('JWT_EXPIRES_IN', '15m'),
   JWT_REFRESH_EXPIRES_IN: getEnv('JWT_REFRESH_EXPIRES_IN', '7d'),
 
-  ENCRYPTION_KEY: getEnv('ENCRYPTION_KEY', 'dev-encryption-key-32-chars-long!!'),
+  ENCRYPTION_KEY: getRequiredProductionValue('ENCRYPTION_KEY', 'dev-encryption-key-32-chars-long!!'),
 
-  GENX_API_KEY: getEnv('GENX_API_KEY', ''),
+  GENX_API_KEY: isProduction ? getRequiredProductionValue('GENX_API_KEY', 'change-me-genx-key') : getEnv('GENX_API_KEY', ''),
   GENX_BASE_URL: getEnv('GENX_BASE_URL', 'https://query.genx.sh'),
+  GENX_WEBHOOK_SECRET: getEnv('GENX_WEBHOOK_SECRET', ''),
+  GENX_WEBHOOK_URL: getEnv('GENX_WEBHOOK_URL', ''),
 
   TOGETHER_API_KEY: getEnv('TOGETHER_API_KEY', ''),
   TOGETHER_BASE_URL: getEnv('TOGETHER_BASE_URL', 'https://api.together.xyz/v1'),
