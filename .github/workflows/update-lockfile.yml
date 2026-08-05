@@ -20,18 +20,14 @@ jobs:
         with:
           ref: fix/p0-runtime-remediation
           fetch-depth: 0
-
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
           cache: npm
-
       - name: Regenerate package lock
         run: npm install --package-lock-only --ignore-scripts
-
       - name: Verify audited dependency graph
         run: npm audit --audit-level=high
-
       - name: Commit lockfile
         run: |
           if git diff --quiet -- package-lock.json; then
