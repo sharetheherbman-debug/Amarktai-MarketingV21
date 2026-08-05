@@ -1,57 +1,44 @@
 import { Router, Response, NextFunction } from 'express';
 import * as providerService from '../services/provider.service';
 import * as usageService from '../services/usage.service';
-import { requireAuth, AuthRequest } from '../middleware/auth';
+import { requireAuth, requireRole, AuthRequest } from '../middleware/auth';
+import { requireOrganizationMembership } from '../middleware/organization-access';
 import { validateBody } from '../middleware/validator';
 import { providerConfigSchema } from '../utils/validation';
 import { ApiResponse } from '../types';
 
 const router = Router();
-
 router.use(requireAuth);
 
-router.get('/', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction) => {
+// Organization users may inspect only their own aggregate usage.
+router.get('/usage', requireOrganizationMembership, async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction) => {
   try {
-    const orgId = req.query.organization_id as string | undefined;
-    const providers = await providerService.list(orgId);
+    const orgId = req.query.organization_id as string;
+    const startDate = req.query.start_date ? new Date(req.query.start_date as string) : new Date(new Date().setDate(1));
+    const endDate = req.query.end_date ? new Date(req.query.end_date as string) : new Date();
+    const usage = await usageService.getUsageByOrg(orgId, startDate, endDate);
+    res.json({ success: true, data: usage });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Provider credentials, global health, tests, models and configuration are platform-admin operations.
+router.use(requireRole('admin', 'superadmin'));
+
+router.get('/', async (_req: AuthRequest, res: Response<ApiResponse>, next: NextFunction) => {
+  try {
+    const providers = await providerService.list(undefined);
     res.json({ success: true, data: providers });
   } catch (error) {
     next(error);
   }
 });
 
-router.get('/health', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction) => {
+router.get('/health', async (_req: AuthRequest, res: Response<ApiResponse>, next: NextFunction) => {
   try {
     const health = await providerService.healthCheck();
     res.json({ success: true, data: health });
-  } catch (error) {
-    next(error);
-  }
-});
-
-router.get('/usage', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction) => {
-  try {
-    const orgId = req.query.organization_id as string;
-    const startDate = req.query.start_date ? new Date(req.query.start_date as string) : new Date(new Date().setDate(1));
-    const endDate = req.query.end_date ? new Date(req.query.end_date as string) : new Date();
-    const providerId = req.query.provider_id as string | undefined;
-
-    if (!orgId) {
-      res.status(400).json({
-        success: false,
-        error: { message: 'organization_id is required', code: 'BAD_REQUEST' },
-      });
-      return;
-    }
-
-    let usage;
-    if (providerId) {
-      usage = await usageService.getUsageByProvider(providerId, startDate, endDate);
-    } else {
-      usage = await usageService.getUsageByOrg(orgId, startDate, endDate);
-    }
-
-    res.json({ success: true, data: usage });
   } catch (error) {
     next(error);
   }
