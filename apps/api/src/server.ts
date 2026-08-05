@@ -39,6 +39,7 @@ import agencyRoutes from './routes/agency';
 import whiteLabelRoutes from './routes/white-label';
 import templateLibraryRoutes from './routes/template-library';
 import clientReportsRoutes from './routes/client-reports';
+import adminRoutes from './routes/admin';
 import scheduler from './services/scheduler.service';
 
 const app = express();
@@ -112,6 +113,7 @@ app.use('/api/v1/agency', agencyRoutes);
 app.use('/api/v1/white-label', whiteLabelRoutes);
 app.use('/api/v1/template-library', templateLibraryRoutes);
 app.use('/api/v1/client-reports', clientReportsRoutes);
+app.use('/api/v1/admin', adminRoutes);
 
 app.use((_req: Request, res: Response) => {
   res.status(404).json({

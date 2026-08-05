@@ -2,6 +2,37 @@
 
 All notable changes to AmarktAI Marketing are documented in this file.
 
+## [0.8.0-saas-billing] - 2026-08-04
+
+### Milestone 8: SaaS Billing & Platform Operations
+
+#### Backend
+- Added `stripe.service.ts` - Full Stripe integration (customers, subscriptions, payment methods, invoices, webhooks, customer portal)
+- Added `feature-flags.service.ts` - Feature flag system with plan/org/role/beta targeting
+- Added `licensing.service.ts` - License validation, usage enforcement, overage detection, grace periods, auto-suspension
+- Added `platform-ops.service.ts` - System health, provider status, queue status, audit logs, tenant management, announcements
+- Added `admin.ts` routes - Admin console API endpoints
+- Added migration `010_feature_flags.sql` - Feature flags, announcements, API keys, personal access tokens, security policies
+
+#### Frontend
+- Admin Console (`/admin/console`) - System health, provider status, feature flags toggle
+- Updated sidebar with Console link in Admin section
+
+#### Platform Features
+- Stripe billing with mock mode for development
+- Feature flags with plan-based, org-based, role-based, and beta targeting
+- License validation with usage limits and overage detection
+- Grace period management for past-due subscriptions
+- Automatic organization suspension and reactivation
+- Platform announcements system
+- API keys and personal access tokens (schema ready)
+
+#### Version
+- Updated to v0.8.0-saas-billing
+- 58 frontend pages, 28 API routes, 10 database migrations
+
+---
+
 ## [0.7.0-agency-platform] - 2026-08-04
 
 ### Milestone 7A: Agency Platform Complete

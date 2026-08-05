@@ -32,6 +32,7 @@ import {
   Palette,
   Globe,
   PieChart,
+  Activity,
 } from 'lucide-react';
 import { useAuthStore } from '@/stores/auth.store';
 import { useUIStore } from '@/stores/ui.store';
@@ -127,6 +128,7 @@ const adminNav: NavSection[] = [
   {
     title: 'Admin',
     items: [
+      { label: 'Console', href: '/admin/console', icon: Activity },
       { label: 'Providers', href: '/admin/providers', icon: Cpu },
       { label: 'Users', href: '/admin/users', icon: Users },
     ],
