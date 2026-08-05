@@ -2,14 +2,40 @@ import { query } from '../config/database';
 import { logger } from '../utils/logger';
 import { genxMultimodalProvider, type GenXModel as GenXBaseModel } from '../providers/genx-multimodal.provider';
 
-// Extended model with database fields
+// Extended model with database fields and verified operations
 export interface GenXModel extends GenXBaseModel {
   operations?: string[];
   raw_metadata?: Record<string, unknown>;
   first_seen?: string;
   last_seen?: string;
   last_verified?: string;
+  verification_status?: 'metadata_confirmed' | 'runtime_confirmed' | 'failed' | 'unverified';
+  required_parameters?: string[];
+  optional_parameters?: string[];
 }
+
+// Operation types
+export type ModelOperation =
+  | 'text_generation'
+  | 'vision'
+  | 'text_to_image'
+  | 'image_to_image'
+  | 'image_edit'
+  | 'text_to_video'
+  | 'image_to_video'
+  | 'video_to_video'
+  | 'video_extend'
+  | 'first_frame_video'
+  | 'first_last_frame_video'
+  | 'reference_image_video'
+  | 'reference_video'
+  | 'text_to_speech'
+  | 'speech_to_text'
+  | 'voice_clone'
+  | 'audio_generation'
+  | 'music_generation'
+  | 'sound_effects'
+  | 'lip_sync';
 
 // ─── Live Catalogue Retrieval ────────────────────────────────────────────────
 
@@ -22,39 +48,150 @@ export async function fetchLiveModelCatalogue(): Promise<GenXModel[]> {
     try {
       const models = await genxMultimodalProvider.listModels(category);
       for (const model of models) {
+        const operations = classifyOperations(model);
         allModels.push({
           ...model,
-          operations: inferOperations(model),
+          operations,
           raw_metadata: model.metadata || {},
           first_seen: timestamp,
           last_seen: timestamp,
           last_verified: timestamp,
+          verification_status: 'metadata_confirmed',
+          required_parameters: extractRequiredParams(model),
+          optional_parameters: extractOptionalParams(model),
         });
       }
+      logger.info(`Fetched ${models.length} ${category} models from GenX`);
     } catch (error) {
       logger.error('Failed to fetch ' + category + ' models: ' + error);
     }
   }
 
-  logger.info('Fetched ' + allModels.length + ' models from GenX across ' + categories.length + ' categories');
+  logger.info('Fetched ' + allModels.length + ' total models from GenX');
   return allModels;
 }
 
-function inferOperations(model: { id?: string; category?: string; inputs?: string[]; outputs?: string[] }): string[] {
+// ─── Operation Classification ────────────────────────────────────────────────
+
+function classifyOperations(model: GenXBaseModel): string[] {
   const ops: string[] = [];
-  const cat = model.category?.toLowerCase() || '';
+  const category = model.category?.toLowerCase() || '';
+  const id = (model.id || '').toLowerCase();
+  const name = (model.name || '').toLowerCase();
+  const params = model.parameters as Record<string, unknown> || {};
+  const inputs = model.inputs || [];
+  const outputs = model.outputs || [];
 
-  if (cat === 'text') ops.push('chat');
-  if (cat === 'image') ops.push('text_to_image');
-  if (cat === 'video') ops.push('text_to_video');
-  if (cat === 'voice') ops.push('text_to_speech');
-  if (cat === 'audio') ops.push('text_to_speech');
+  // Text models
+  if (category === 'text') {
+    ops.push('text_generation');
+    // Check for vision capability (image input)
+    if (inputs.includes('image') || id.includes('vision') || id.includes('gpt-4o')) {
+      ops.push('vision');
+    }
+  }
 
-  if (model.inputs?.includes('image') && cat === 'image') ops.push('image_to_image');
-  if (model.inputs?.includes('image') && cat === 'video') ops.push('image_to_video');
-  if (model.inputs?.includes('video') && cat === 'video') ops.push('video_to_video');
+  // Image models
+  if (category === 'image') {
+    // Text-to-image is the default for image category
+    ops.push('text_to_image');
 
-  return ops.length > 0 ? ops : ['chat'];
+    // Check for image-to-image capability
+    if (inputs.includes('image') || params.image || params.input_image || params.reference_image) {
+      ops.push('image_to_image');
+    }
+
+    // Check for image edit capability
+    if (params.mask || params.edit || id.includes('edit') || id.includes('inpaint')) {
+      ops.push('image_edit');
+    }
+  }
+
+  // Video models
+  if (category === 'video') {
+    // Text-to-video is the default
+    ops.push('text_to_video');
+
+    // Check for image-to-video
+    if (inputs.includes('image') || params.image || params.input_image || params.start_frame) {
+      ops.push('image_to_video');
+    }
+
+    // Check for video-to-video / continuation
+    if (inputs.includes('video') || params.video || params.input_video || params.continuation) {
+      ops.push('video_to_video');
+    }
+
+    // Check for video extension
+    if (params.extend || params.continuation_id || id.includes('extend')) {
+      ops.push('video_extend');
+    }
+
+    // Check for first-frame support
+    if (params.first_frame || params.start_frame) {
+      ops.push('first_frame_video');
+    }
+
+    // Check for first+last frame support
+    if (params.last_frame || params.end_frame) {
+      ops.push('first_last_frame_video');
+    }
+
+    // Check for reference image support
+    if (params.reference_image || params.character_reference) {
+      ops.push('reference_image_video');
+    }
+  }
+
+  // Voice models
+  if (category === 'voice') {
+    if (id.includes('tts') || id.includes('speech') || name.includes('text-to-speech')) {
+      ops.push('text_to_speech');
+    }
+    if (id.includes('stt') || id.includes('transcri') || name.includes('speech-to-text')) {
+      ops.push('speech_to_text');
+    }
+    if (id.includes('clone') || name.includes('clone')) {
+      ops.push('voice_clone');
+    }
+    if (ops.length === 0) ops.push('text_to_speech');
+  }
+
+  // Audio models
+  if (category === 'audio') {
+    if (id.includes('music') || name.includes('music')) {
+      ops.push('music_generation');
+    } else if (id.includes('sfx') || id.includes('sound') || name.includes('effect')) {
+      ops.push('sound_effects');
+    } else {
+      ops.push('audio_generation');
+    }
+  }
+
+  // Lip sync detection
+  if (id.includes('lip') || id.includes('sync') || name.includes('lip sync')) {
+    ops.push('lip_sync');
+  }
+
+  return ops.length > 0 ? ops : ['text_generation'];
+}
+
+function extractRequiredParams(model: GenXBaseModel): string[] {
+  const params = model.parameters as Record<string, unknown> || {};
+  const required: string[] = [];
+  const schema = params.required as string[] || [];
+  if (schema.length > 0) return schema;
+
+  // Infer from parameter names
+  if (params.prompt) required.push('prompt');
+  if (params.input && !params.prompt) required.push('input');
+  return required;
+}
+
+function extractOptionalParams(model: GenXBaseModel): string[] {
+  const params = model.parameters as Record<string, unknown> || {};
+  const properties = params.properties as Record<string, unknown> || {};
+  return Object.keys(properties).filter(k => !(params.required as string[] || []).includes(k));
 }
 
 // ─── Database Sync ───────────────────────────────────────────────────────────
@@ -74,18 +211,20 @@ export async function syncModelsToDatabase(models: GenXModel[]): Promise<{ total
         `UPDATE genx_models SET name = $2, category = $3, vendor = $4, inputs = $5, outputs = $6,
          operations = $7, parameters = $8, available = $9, deprecated = $10, raw_metadata = $11,
          last_seen = $12, last_verified = $13 WHERE id = $1`,
-        [model.id, model.name, model.category, model.vendor, JSON.stringify(model.inputs),
-         JSON.stringify(model.outputs), JSON.stringify(model.operations), JSON.stringify(model.parameters),
-         model.available, model.deprecated, JSON.stringify(model.raw_metadata), timestamp, timestamp]
+        [model.id, model.name, model.category, model.vendor || null, JSON.stringify(model.inputs || []),
+         JSON.stringify(model.outputs || []), JSON.stringify(model.operations || []), JSON.stringify(model.parameters || {}),
+         model.available !== false, model.deprecated === true, JSON.stringify(model.raw_metadata || {}),
+         timestamp, timestamp]
       );
       updatedCount++;
     } else {
       await query(
         `INSERT INTO genx_models (id, name, category, vendor, inputs, outputs, operations, parameters, available, deprecated, raw_metadata, first_seen, last_seen, last_verified)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
-        [model.id, model.name, model.category, model.vendor, JSON.stringify(model.inputs),
-         JSON.stringify(model.outputs), JSON.stringify(model.operations), JSON.stringify(model.parameters),
-         model.available, model.deprecated, JSON.stringify(model.raw_metadata), timestamp, timestamp, timestamp]
+        [model.id, model.name, model.category, model.vendor || null, JSON.stringify(model.inputs || []),
+         JSON.stringify(model.outputs || []), JSON.stringify(model.operations || []), JSON.stringify(model.parameters || {}),
+         model.available !== false, model.deprecated === true, JSON.stringify(model.raw_metadata || {}),
+         timestamp, timestamp, timestamp]
       );
       newCount++;
     }
@@ -169,5 +308,9 @@ function mapModelRow(row: Record<string, unknown>): GenXModel {
     first_seen: row.first_seen as string,
     last_seen: row.last_seen as string,
     last_verified: row.last_verified as string,
+    verification_status: (row.verification_status as GenXModel['verification_status']) || 'unverified',
+    required_parameters: typeof row.required_parameters === 'string' ? JSON.parse(row.required_parameters) : (row.required_parameters as string[]) || [],
+    optional_parameters: typeof row.optional_parameters === 'string' ? JSON.parse(row.optional_parameters) : (row.optional_parameters as string[]) || [],
   };
 }
+
