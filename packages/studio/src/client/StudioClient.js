@@ -80,6 +80,63 @@ export class StudioClient {
     return (result.data || []).map(gen => this.normalizeGeneration(gen));
   }
 
+  /**
+   * Wait for a generation to complete by polling the AmarktAI backend.
+   * Never polls GenX directly — only AmarktAI API.
+   */
+  async waitForGeneration(generationId, options = {}) {
+    const {
+      signal,
+      pollIntervalMs = 3000,
+      maxWaitMs = 300000,
+      onProgress,
+    } = options;
+
+    const startTime = Date.now();
+    let lastStatus = null;
+
+    while (Date.now() - startTime < maxWaitMs) {
+      if (signal?.aborted) {
+        throw new Error('Polling cancelled');
+      }
+
+      try {
+        const generation = await this.getGeneration(generationId);
+
+        // Notify progress callback
+        if (onProgress && generation.status !== lastStatus) {
+          lastStatus = generation.status;
+          onProgress(generation);
+        }
+
+        // Terminal states
+        if (generation.status === 'completed') {
+          return generation;
+        }
+        if (generation.status === 'failed') {
+          throw new Error(generation.error_message || 'Generation failed');
+        }
+        if (generation.status === 'cancelled') {
+          throw new Error('Generation was cancelled');
+        }
+
+        // Wait before next poll
+        await new Promise(resolve => setTimeout(resolve, pollIntervalMs));
+      } catch (error) {
+        // If it's a terminal error, rethrow
+        if (error.message === 'Generation failed' ||
+            error.message === 'Generation was cancelled' ||
+            error.message === 'Polling cancelled') {
+          throw error;
+        }
+        // Transient error — wait and retry
+        await new Promise(resolve => setTimeout(resolve, pollIntervalMs * 2));
+      }
+    }
+
+    throw new Error('Generation polling timeout');
+  }
+
   async uploadAsset(file) {
     const formData = new FormData();
     formData.append('file', file);
