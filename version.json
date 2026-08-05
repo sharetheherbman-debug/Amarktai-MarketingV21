@@ -4,7 +4,7 @@
   "tag": "v0.9.0-marketplace",
   "milestone": "Milestone 9: Marketplace, Developer Platform & Extensibility",
   "releaseDate": "2026-08-05",
-  "commit": "pending",
+  "commit": "5a3ea8f",
   "releaseChannel": "stable",
   "buildNumber": "20260805.9",
   "description": "Marketplace, developer platform, SDK, OAuth, API keys, and AI skill packs",
