@@ -29,6 +29,9 @@ import {
   Heart,
   Puzzle,
   CreditCard,
+  Palette,
+  Globe,
+  PieChart,
 } from 'lucide-react';
 import { useAuthStore } from '@/stores/auth.store';
 import { useUIStore } from '@/stores/ui.store';
@@ -100,6 +103,17 @@ const mainNav: NavSection[] = [
   {
     title: 'Analytics',
     items: [{ label: 'Analytics', href: '/analytics', icon: BarChart3 }],
+  },
+  {
+    title: 'Agency',
+    items: [
+      { label: 'Agency Dashboard', href: '/agency', icon: Building2 },
+      { label: 'Clients', href: '/agency/clients', icon: Users },
+      { label: 'White Label', href: '/agency/white-label', icon: Palette },
+      { label: 'Client Portal', href: '/agency/portal', icon: Globe },
+      { label: 'Templates', href: '/agency/templates', icon: FileText },
+      { label: 'Reports', href: '/agency/reports', icon: PieChart },
+    ],
   },
   {
     title: 'Settings',

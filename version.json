@@ -1,12 +1,22 @@
 {
   "name": "AmarktAI Marketing",
-  "version": "0.3.0",
-  "tag": "v0.3.0-research",
-  "milestone": "Milestone 2: Research & Knowledge",
+  "version": "0.7.0",
+  "tag": "v0.7.0-agency-platform",
+  "milestone": "Milestone 7A: Agency Platform Complete",
   "releaseDate": "2026-08-04",
-  "commit": "2b53538",
-  "buildNumber": "20260804.1",
-  "environment": "production",
-  "description": "AI Marketing Operating System",
-  "repository": "https://github.com/sharetheherbman-debug/Amarktai-MarketingV21"
+  "commit": "pending",
+  "releaseChannel": "stable",
+  "buildNumber": "20260804.7",
+  "description": "Complete agency platform with white-label, client portals, template library, and client reporting",
+  "features": [
+    "Agency Dashboard",
+    "Client Management",
+    "White Label Configuration",
+    "Client Portals",
+    "Template Library",
+    "Client Reports",
+    "96 database tables",
+    "27 API routes",
+    "57 frontend pages"
+  ]
 }

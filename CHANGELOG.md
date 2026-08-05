@@ -2,12 +2,38 @@
 
 All notable changes to AmarktAI Marketing are documented in this file.
 
-## [0.7.0-agency] - 2026-08-04
+## [0.7.0-agency-platform] - 2026-08-04
 
-### Milestone 7: Agency Platform & White Label
+### Milestone 7A: Agency Platform Complete
 
-#### Database
-- Added `agencies` table for agency management
+#### Backend
+- Added `client-reports.service.ts` - Full CRUD for client reports with stats
+- Added `client-reports.ts` routes - REST API for report management
+- Registered `/api/v1/client-reports` route in server.ts
+
+#### Frontend (6 new pages)
+- Agency Dashboard (`/agency`) - Overview with stats, client health, quick actions
+- Client Management (`/agency/clients`) - Client list, add, remove with search
+- White Label Settings (`/agency/white-label`) - Branding, colors, domains, advanced
+- Client Portals (`/agency/portal`) - Portal management with subdomain support
+- Template Library (`/agency/templates`) - Browse, search, filter, duplicate, delete
+- Client Reports (`/agency/reports`) - Create, send, delete with stats
+
+#### Navigation
+- Added "Agency" section to sidebar with 6 links
+- All pages connected to API endpoints
+
+#### Version
+- Created `version.json` with v0.7.0-agency-platform
+- 57 frontend pages total
+- 27 API routes total
+- 96 database tables total
+
+---
+
+## [0.6.0-integrations] - 2026-08-04
+
+### Milestone 6: Integrations & Omnichannel Automation
 - Added `client_portals` table for white-labeled client portals
 - Added `white_label_configs` table for branding configurations
 - Added `custom_domains` table for domain mapping
