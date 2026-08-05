@@ -1,8 +1,17 @@
+import { Queue } from 'bullmq';
 import { query } from '../config/database';
 import { logger } from '../utils/logger';
 import { AppError, NotFoundError } from '../middleware/errorHandler';
 import { genxMultimodalProvider } from '../providers/genx-multimodal.provider';
 import * as genxRegistry from './genx-model-registry.service';
+
+const generationQueue = new Queue('studio-generations', {
+  connection: {
+    host: process.env.REDIS_HOST || 'localhost',
+    port: parseInt(process.env.REDIS_PORT || '6379'),
+    password: process.env.REDIS_PASSWORD || undefined,
+  },
+});
 
 // Types
 export interface StudioGeneration {
@@ -126,98 +135,25 @@ export async function createGeneration(
 
   const generation = mapGenerationRow(result.rows[0]);
 
-  // Execute generation asynchronously
-  executeGeneration(generation.id, orgId, modelId, data).catch(err => {
-    logger.error(`Generation failed: ${err}`);
+  // Enqueue generation job
+  await generationQueue.add('generate', {
+    generationId: generation.id,
+    organizationId: orgId,
+    userId,
+    type: data.type,
+    modelId,
+    prompt: data.prompt,
+    negativePrompt: data.negative_prompt,
+    options: data.options,
+  }, {
+    attempts: 3,
+    backoff: { type: 'exponential', delay: 5000 },
+    removeOnComplete: { age: 86400 },
+    removeOnFail: { age: 604800 },
   });
 
+  logger.info(`Generation queued: ${generation.id}`);
   return generation;
-}
-
-async function executeGeneration(
-  generationId: string,
-  orgId: string,
-  modelId: string,
-  data: { type: string; prompt?: string; negative_prompt?: string; options?: Record<string, unknown> }
-): Promise<void> {
-  try {
-    // Build GenX request params
-    const params: Record<string, unknown> = {};
-    if (data.prompt) params.prompt = data.prompt;
-    if (data.negative_prompt) params.negative_prompt = data.negative_prompt;
-    if (data.options) {
-      Object.assign(params, data.options);
-    }
-
-    // Submit to GenX
-    const job = await genxMultimodalProvider.generate({
-      model: modelId,
-      params,
-      metadata: { organization_id: orgId, generation_id: generationId, type: data.type },
-    });
-
-    // Update with provider job ID
-    await query(
-      'UPDATE studio_generations SET provider_job_id = $1, status = $2, updated_at = NOW() WHERE id = $3',
-      [job.id, job.status === 'queued' ? 'pending' : 'processing', generationId]
-    );
-
-    // Poll for completion
-    const completedJob = await genxMultimodalProvider.waitForJob(job.id, {
-      maxWaitMs: getMaxWaitMs(data.type),
-      pollIntervalMs: 3000,
-    });
-
-    // Get result
-    let outputUrls: string[] = [];
-    if (completedJob.result_url) {
-      outputUrls = [completedJob.result_url];
-    } else if (completedJob.status === 'completed') {
-      const result = await genxMultimodalProvider.getJobResult(job.id);
-      if (result.url) outputUrls = [result.url];
-    }
-
-    if (completedJob.status === 'completed' && outputUrls.length > 0) {
-      await query(
-        `UPDATE studio_generations SET status = 'completed', output_urls = $1, progress = 100, completed_at = NOW(), updated_at = NOW() WHERE id = $2`,
-        [JSON.stringify(outputUrls), generationId]
-      );
-      logger.info(`Generation completed: ${generationId}`);
-    } else if (completedJob.status === 'failed') {
-      await query(
-        `UPDATE studio_generations SET status = 'failed', error_code = 'GENERATION_FAILED', error_message = $1, updated_at = NOW() WHERE id = $2`,
-        [completedJob.error || 'Unknown error', generationId]
-      );
-    } else {
-      await query(
-        `UPDATE studio_generations SET status = 'failed', error_code = 'GENERATION_TIMEOUT', error_message = 'Generation did not complete in time', updated_at = NOW() WHERE id = $1`,
-        [generationId]
-      );
-    }
-  } catch (error) {
-    const message = error instanceof Error ? error.message : 'Unknown error';
-    await query(
-      `UPDATE studio_generations SET status = 'failed', error_code = 'GENERATION_ERROR', error_message = $1, updated_at = NOW() WHERE id = $2`,
-      [message, generationId]
-    );
-    logger.error(`Generation error: ${generationId} - ${message}`);
-  }
-}
-
-function getMaxWaitMs(type: string): number {
-  const waits: Record<string, number> = {
-    text_generation: 120000,
-    text_to_image: 300000,
-    image_to_image: 300000,
-    image_edit: 300000,
-    text_to_video: 1200000,
-    image_to_video: 1200000,
-    video_to_video: 1200000,
-    text_to_speech: 600000,
-    speech_to_text: 300000,
-    lip_sync: 600000,
-  };
-  return waits[type] || 300000;
 }
 
 export async function getGeneration(id: string, orgId: string): Promise<StudioGeneration> {
