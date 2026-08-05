@@ -29,7 +29,7 @@ export async function requireOrganizationMembership(
     }
 
     const result = await query(
-      `SELECT role FROM organization_members
+      `SELECT 1 FROM organization_members
        WHERE organization_id = $1 AND user_id = $2`,
       [orgId, req.user!.userId]
     );
@@ -41,8 +41,6 @@ export async function requireOrganizationMembership(
       return;
     }
 
-    req.organizationId = orgId;
-    req.organizationRole = result.rows[0].role as string;
     next();
   } catch (error) {
     next(error);
@@ -50,14 +48,32 @@ export async function requireOrganizationMembership(
 }
 
 export function requireOrganizationRole(...roles: string[]) {
-  return (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): void => {
-    if (!req.organizationRole || !roles.includes(req.organizationRole)) {
-      res.status(403).json({
-        success: false,
-        error: { message: 'Insufficient organization permissions', code: 'FORBIDDEN' },
-      });
-      return;
+  return async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
+    try {
+      const orgId = getRequestedOrganizationId(req);
+      if (!orgId) {
+        res.status(400).json({
+          success: false,
+          error: { message: 'organization_id required', code: 'BAD_REQUEST' },
+        });
+        return;
+      }
+
+      const result = await query(
+        `SELECT role FROM organization_members
+         WHERE organization_id = $1 AND user_id = $2`,
+        [orgId, req.user!.userId]
+      );
+      if (result.rows.length === 0 || !roles.includes(result.rows[0].role as string)) {
+        res.status(403).json({
+          success: false,
+          error: { message: 'Insufficient organization permissions', code: 'FORBIDDEN' },
+        });
+        return;
+      }
+      next();
+    } catch (error) {
+      next(error);
     }
-    next();
   };
 }
