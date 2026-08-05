@@ -43,7 +43,7 @@ export const env = {
   ENCRYPTION_KEY: getEnv('ENCRYPTION_KEY', 'dev-encryption-key-32-chars-long!!'),
 
   GENX_API_KEY: getEnv('GENX_API_KEY', ''),
-  GENX_BASE_URL: getEnv('GENX_BASE_URL', 'https://api.genxrouter.com/v1'),
+  GENX_BASE_URL: getEnv('GENX_BASE_URL', 'https://query.genx.sh'),
 
   TOGETHER_API_KEY: getEnv('TOGETHER_API_KEY', ''),
   TOGETHER_BASE_URL: getEnv('TOGETHER_BASE_URL', 'https://api.together.xyz/v1'),
