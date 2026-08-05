@@ -52,12 +52,20 @@ export class StudioClient {
       negative_prompt,
       options,
     });
-    return result.data;
+    return this.normalizeGeneration(result.data);
   }
 
   async getGeneration(id) {
     const result = await this.request('GET', `/studio/generations/${id}?organization_id=${this.organizationId}`);
-    return result.data;
+    return this.normalizeGeneration(result.data);
+  }
+
+  normalizeGeneration(gen) {
+    if (!gen) return null;
+    return {
+      ...gen,
+      url: gen.primary_output_url || gen.output_urls?.[0] || null,
+    };
   }
 
   async cancelGeneration(id) {
@@ -69,7 +77,7 @@ export class StudioClient {
 
   async listHistory(limit = 50) {
     const result = await this.request('GET', `/studio/history?organization_id=${this.organizationId}&limit=${limit}`);
-    return result.data || [];
+    return (result.data || []).map(gen => this.normalizeGeneration(gen));
   }
 
   async uploadAsset(file) {

@@ -1,6 +1,7 @@
 import { Router, Response, NextFunction } from 'express';
 import multer from 'multer';
 import path from 'path';
+import fs from 'fs';
 import crypto from 'crypto';
 import { requireAuth, AuthRequest } from '../middleware/auth';
 import { ApiResponse } from '../types';
@@ -10,33 +11,21 @@ import { query } from '../config/database';
 const router = Router();
 router.use(requireAuth);
 
-// Configure multer for file uploads
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, path.join(process.cwd(), 'uploads', 'studio'));
-  },
-  filename: (req, file, cb) => {
-    const uniqueName = `${crypto.randomUUID()}${path.extname(file.originalname)}`;
-    cb(null, uniqueName);
-  },
-});
-
-const fileFilter = (req: Express.Request, file: Express.Multer.File, cb: multer.FileFilterCallback) => {
-  const allowedMimes = [
-    'image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/svg+xml',
-    'video/mp4', 'video/webm', 'video/ogg',
-    'audio/mpeg', 'audio/wav', 'audio/ogg', 'audio/webm',
-  ];
-  if (allowedMimes.includes(file.mimetype)) {
-    cb(null, true);
-  } else {
-    cb(new Error('File type not allowed'));
-  }
-};
-
+// Configure multer for file uploads (memory storage for security check first)
 const upload = multer({
-  storage,
-  fileFilter,
+  storage: multer.memoryStorage(),
+  fileFilter: (req, file, cb) => {
+    const allowedMimes = [
+      'image/jpeg', 'image/png', 'image/gif', 'image/webp',
+      'video/mp4', 'video/webm', 'video/ogg',
+      'audio/mpeg', 'audio/wav', 'audio/ogg', 'audio/webm',
+    ];
+    if (allowedMimes.includes(file.mimetype)) {
+      cb(null, true);
+    } else {
+      cb(new Error('File type not allowed'));
+    }
+  },
   limits: { fileSize: 50 * 1024 * 1024 }, // 50MB
 });
 
@@ -142,8 +131,9 @@ router.get('/history', async (req: AuthRequest, res: Response<ApiResponse>, next
 });
 
 // POST /api/v1/studio/uploads
-router.post('/uploads', upload.single('file'), async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
+router.post('/uploads', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
   try {
+    // Verify auth and org membership BEFORE processing upload
     const orgId = req.body.organization_id;
     if (!orgId) {
       res.status(400).json({ success: false, error: { message: 'organization_id required', code: 'BAD_REQUEST' } });
@@ -155,20 +145,44 @@ router.post('/uploads', upload.single('file'), async (req: AuthRequest, res: Res
       return;
     }
 
-    if (!req.file) {
-      res.status(400).json({ success: false, error: { message: 'No file provided', code: 'BAD_REQUEST' } });
-      return;
-    }
+    // Now process the upload
+    upload.single('file')(req, res, async (err) => {
+      if (err) {
+        res.status(400).json({ success: false, error: { message: err.message, code: 'UPLOAD_ERROR' } });
+        return;
+      }
 
-    const result = await studioService.createUpload(orgId, req.user!.userId, {
-      filename: req.file.filename,
-      originalName: req.file.originalname,
-      mimeType: req.file.mimetype,
-      size: req.file.size,
-      path: req.file.path,
+      if (!req.file) {
+        res.status(400).json({ success: false, error: { message: 'No file provided', code: 'BAD_REQUEST' } });
+        return;
+      }
+
+      // Persist file to disk
+      const filename = `${crypto.randomUUID()}${path.extname(req.file.originalname)}`;
+      const uploadDir = path.join(process.cwd(), 'uploads', 'studio');
+      const filePath = path.join(uploadDir, filename);
+
+      try {
+        // Ensure directory exists
+        if (!fs.existsSync(uploadDir)) {
+          fs.mkdirSync(uploadDir, { recursive: true });
+        }
+        fs.writeFileSync(filePath, req.file.buffer);
+      } catch (writeErr) {
+        res.status(500).json({ success: false, error: { message: 'Failed to save file', code: 'STORAGE_ERROR' } });
+        return;
+      }
+
+      const result = await studioService.createUpload(orgId, req.user!.userId, {
+        filename,
+        originalName: req.file.originalname,
+        mimeType: req.file.mimetype,
+        size: req.file.size,
+        path: filePath,
+      });
+
+      res.status(201).json({ success: true, data: result });
     });
-
-    res.status(201).json({ success: true, data: result });
   } catch (error) { next(error); }
 });
 

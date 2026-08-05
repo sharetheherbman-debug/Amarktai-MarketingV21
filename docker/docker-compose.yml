@@ -63,6 +63,8 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s
+    volumes:
+      - studio_uploads:/app/uploads
     networks:
       - amarktai-network
 
@@ -114,6 +116,8 @@ volumes:
     name: amarktai-postgres-data
   redis_data:
     name: amarktai-redis-data
+  studio_uploads:
+    name: amarktai-studio-uploads
 
 networks:
   amarktai-network:

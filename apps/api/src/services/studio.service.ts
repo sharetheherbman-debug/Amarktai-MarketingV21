@@ -18,6 +18,7 @@ export interface StudioGeneration {
   status: string;
   progress: number;
   output_urls: string[];
+  primary_output_url: string | null;
   error_code: string | null;
   error_message: string | null;
   metadata: Record<string, unknown>;
@@ -38,57 +39,56 @@ export interface StudioModel {
 // ─── Model Catalogue ─────────────────────────────────────────────────────────
 
 export function getAvailableModels(): StudioModel[] {
-  // GenX only has confirmed text/chat capabilities
-  // Media generation models are NOT available through GenX
   return [
+    // AVAILABLE THROUGH GENX - Text generation
     {
-      id: 'genx-text',
-      name: 'GenX Text Generation',
+      id: 'genx-gpt-4o',
+      name: 'GPT-4o',
       type: 'text_generation',
       provider: 'genx',
       status: 'available',
-      description: 'Text generation via GenX (confirmed)',
+      description: 'Advanced text generation via GenX',
     },
-    // Media models - marked as pending since GenX doesn't have confirmed endpoints
     {
-      id: 'genx-t2i-pending',
-      name: 'GenX Text-to-Image',
+      id: 'genx-gpt-4o-mini',
+      name: 'GPT-4o Mini',
+      type: 'text_generation',
+      provider: 'genx',
+      status: 'available',
+      description: 'Fast text generation via GenX',
+    },
+    // RECOVERED_AWAITING_MAPPING - Media models (Preview)
+    {
+      id: 'preview-t2i',
+      name: 'Text-to-Image (Preview)',
       type: 'text_to_image',
       provider: 'genx',
       status: 'pending',
-      description: 'GenX mapping pending - no confirmed endpoint',
+      description: 'GenX media endpoint not yet confirmed',
     },
     {
-      id: 'genx-i2i-pending',
-      name: 'GenX Image-to-Image',
+      id: 'preview-i2i',
+      name: 'Image-to-Image (Preview)',
       type: 'image_to_image',
       provider: 'genx',
       status: 'pending',
-      description: 'GenX mapping pending - no confirmed endpoint',
+      description: 'GenX media endpoint not yet confirmed',
     },
     {
-      id: 'genx-t2v-pending',
-      name: 'GenX Text-to-Video',
+      id: 'preview-t2v',
+      name: 'Text-to-Video (Preview)',
       type: 'text_to_video',
       provider: 'genx',
       status: 'pending',
-      description: 'GenX mapping pending - no confirmed endpoint',
+      description: 'GenX media endpoint not yet confirmed',
     },
     {
-      id: 'genx-i2v-pending',
-      name: 'GenX Image-to-Video',
-      type: 'image_to_video',
-      provider: 'genx',
-      status: 'pending',
-      description: 'GenX mapping pending - no confirmed endpoint',
-    },
-    {
-      id: 'genx-lipsync-pending',
-      name: 'GenX Lip Sync',
+      id: 'preview-lipsync',
+      name: 'Lip Sync (Preview)',
       type: 'lip_sync',
       provider: 'genx',
       status: 'pending',
-      description: 'GenX mapping pending - no confirmed endpoint',
+      description: 'GenX media endpoint not yet confirmed',
     },
   ];
 }
@@ -228,6 +228,7 @@ export async function createUpload(
 // ─── Mapper ──────────────────────────────────────────────────────────────────
 
 function mapGenerationRow(row: Record<string, unknown>): StudioGeneration {
+  const outputUrls = typeof row.output_urls === 'string' ? JSON.parse(row.output_urls) : (row.output_urls as string[]) || [];
   return {
     id: row.id as string,
     organization_id: row.organization_id as string,
@@ -241,7 +242,8 @@ function mapGenerationRow(row: Record<string, unknown>): StudioGeneration {
     provider_job_id: row.provider_job_id as string | null,
     status: row.status as string,
     progress: parseInt(row.progress as string) || 0,
-    output_urls: typeof row.output_urls === 'string' ? JSON.parse(row.output_urls) : (row.output_urls as string[]) || [],
+    output_urls: outputUrls,
+    primary_output_url: outputUrls[0] || null,
     error_code: row.error_code as string | null,
     error_message: row.error_message as string | null,
     metadata: typeof row.metadata === 'string' ? JSON.parse(row.metadata) : (row.metadata as Record<string, unknown>) || {},
