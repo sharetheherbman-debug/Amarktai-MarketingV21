@@ -1,0 +1,45 @@
+name: Refresh npm lockfile
+
+on:
+  push:
+    branches:
+      - fix/p0-runtime-remediation
+    paths:
+      - package.json
+      - apps/*/package.json
+      - packages/*/package.json
+
+permissions:
+  contents: write
+
+jobs:
+  refresh-lockfile:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/p0-runtime-remediation
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Regenerate package lock
+        run: npm install --package-lock-only --ignore-scripts
+
+      - name: Verify audited dependency graph
+        run: npm audit --audit-level=high
+
+      - name: Commit lockfile
+        run: |
+          if git diff --quiet -- package-lock.json; then
+            echo "Lockfile is already current"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package-lock.json
+          git commit -m "chore: refresh audited dependency lockfile [skip ci]"
+          git push origin HEAD:fix/p0-runtime-remediation
