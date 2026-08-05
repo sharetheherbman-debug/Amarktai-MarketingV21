@@ -93,20 +93,32 @@ AmarktAI Marketing platform development roadmap.
 - [x] Template library UI
 - [x] Client reports UI with stats
 
+### Milestone 8: SaaS Billing & Platform Operations (v0.8.0)
+- [x] Stripe billing integration (customers, subscriptions, invoices, webhooks)
+- [x] Subscription management (plans, trials, upgrades, downgrades, cancellation)
+- [x] Usage metering (AI tokens, storage, API requests, contacts, campaigns)
+- [x] Billing dashboard (plans, invoices, payment methods, usage)
+- [x] Organisation administration (settings, limits, audit logs)
+- [x] Feature flag system (plan/org/role/beta targeting)
+- [x] Licensing (validation, enforcement, overage detection, grace periods)
+- [x] Platform operations (system health, provider status, queue status)
+- [x] Admin console (health, providers, feature flags, announcements)
+- [x] API keys and personal access tokens (schema ready)
+
 ---
 
 ## In Progress
 
----
-
-## Upcoming
-
-### Campaign Intelligence
+### Milestone 9: Campaign Intelligence
 - [ ] Campaign performance prediction
 - [ ] A/B testing framework
 - [ ] Budget optimization
 - [ ] Audience targeting recommendations
 - [ ] Cross-channel attribution
+
+---
+
+## Upcoming
 
 ### Analytics Dashboard
 - [ ] Real-time analytics
