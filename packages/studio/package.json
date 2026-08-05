@@ -1,0 +1,23 @@
+{
+  "name": "@amarktai/studio",
+  "version": "1.0.0",
+  "description": "AmarktAI Creative Studio components",
+  "main": "src/index.js",
+  "module": "src/index.js",
+  "files": [
+    "src"
+  ],
+  "scripts": {
+    "build": "echo 'Studio package uses direct imports - no build required'"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "axios": "^1.7.0",
+    "react-icons": "^5.0.1",
+    "react-hot-toast": "^2.4.1"
+  },
+  "peerDependencies": {
+    "react": ">=18.0.0",
+    "react-dom": ">=18.0.0"
+  }
+}

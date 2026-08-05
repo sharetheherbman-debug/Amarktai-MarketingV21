@@ -35,6 +35,7 @@ import {
   Activity,
   Store,
   Code,
+  Image,
 } from 'lucide-react';
 import { useAuthStore } from '@/stores/auth.store';
 import { useUIStore } from '@/stores/ui.store';
@@ -56,6 +57,7 @@ const mainNav: NavSection[] = [
     items: [
       { label: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
       { label: 'Content Studio', href: '/content-studio', icon: Sparkles },
+      { label: 'Creative Studio', href: '/creative-studio', icon: Image },
       { label: 'Campaigns', href: '/campaigns', icon: Megaphone },
       { label: 'Content', href: '/content', icon: FileText },
     ],
