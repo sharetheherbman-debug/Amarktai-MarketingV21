@@ -4,7 +4,7 @@
   "tag": "v0.7.0-agency-platform",
   "milestone": "Milestone 7A: Agency Platform Complete",
   "releaseDate": "2026-08-04",
-  "commit": "pending",
+  "commit": "25d16c9",
   "releaseChannel": "stable",
   "buildNumber": "20260804.7",
   "description": "Complete agency platform with white-label, client portals, template library, and client reporting",
