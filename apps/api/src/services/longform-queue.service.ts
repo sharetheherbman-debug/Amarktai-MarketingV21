@@ -114,7 +114,7 @@ export async function cancelProjectGeneration(projectId: string, orgId: string) 
   for (const scene of scenes.rows) {
     if (!scene.queue_job_id) continue;
     const job = await generationQueue.getJob(scene.queue_job_id);
-    if (job && !(await job.isActive())) await job.remove().catch(() => undefined);
+    if (job && (await job.getState()) !== 'active') await job.remove().catch(() => undefined);
   }
   await query(
     `UPDATE video_projects SET status = 'cancelled', updated_at = NOW()

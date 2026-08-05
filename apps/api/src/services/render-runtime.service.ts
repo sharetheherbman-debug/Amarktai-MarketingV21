@@ -87,7 +87,7 @@ export async function cancelRender(id: string, orgId: string): Promise<void> {
   const queueJobId = result.rows[0]?.queue_job_id as string | null;
   if (queueJobId) {
     const job = await renderQueue.getJob(queueJobId);
-    if (job && !(await job.isActive())) await job.remove().catch(() => undefined);
+    if (job && (await job.getState()) !== 'active') await job.remove().catch(() => undefined);
   }
   await query(
     `INSERT INTO video_render_events (render_id, event_type, message)
