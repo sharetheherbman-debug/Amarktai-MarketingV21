@@ -43,6 +43,7 @@ import adminRoutes from './routes/admin';
 import marketplaceRoutes from './routes/marketplace';
 import developerRoutes from './routes/developer';
 import studioRoutes from './routes/studio';
+import genxAdminRoutes from './routes/genx-admin';
 import scheduler from './services/scheduler.service';
 
 const app = express();
@@ -120,6 +121,7 @@ app.use('/api/v1/admin', adminRoutes);
 app.use('/api/v1/marketplace', marketplaceRoutes);
 app.use('/api/v1/developer', developerRoutes);
 app.use('/api/v1/studio', studioRoutes);
+app.use('/api/v1/admin/genx', genxAdminRoutes);
 
 app.use((_req: Request, res: Response) => {
   res.status(404).json({

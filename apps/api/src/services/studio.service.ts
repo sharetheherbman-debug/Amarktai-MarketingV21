@@ -2,6 +2,9 @@ import { query } from '../config/database';
 import { logger } from '../utils/logger';
 import { AppError, NotFoundError } from '../middleware/errorHandler';
 import { providerRouter } from '../providers/provider-router';
+import { GenXProvider } from '../providers/genx.provider';
+import * as genxRegistry from './genx-model-registry.service';
+import { env } from '../config/env';
 
 // Types
 export interface StudioGeneration {
@@ -39,58 +42,51 @@ export interface StudioModel {
 // ─── Model Catalogue ─────────────────────────────────────────────────────────
 
 export function getAvailableModels(): StudioModel[] {
+  // This is a sync function for backward compatibility
+  // In production, models come from the genx_models database table
+  // For now, return models that will be populated by the sync process
   return [
-    // AVAILABLE THROUGH GENX - Text generation
     {
-      id: 'genx-gpt-4o',
-      name: 'GPT-4o',
+      id: 'genx-sync-required',
+      name: 'Sync GenX Models',
       type: 'text_generation',
       provider: 'genx',
       status: 'available',
-      description: 'Advanced text generation via GenX',
-    },
-    {
-      id: 'genx-gpt-4o-mini',
-      name: 'GPT-4o Mini',
-      type: 'text_generation',
-      provider: 'genx',
-      status: 'available',
-      description: 'Fast text generation via GenX',
-    },
-    // RECOVERED_AWAITING_MAPPING - Media models (Preview)
-    {
-      id: 'preview-t2i',
-      name: 'Text-to-Image (Preview)',
-      type: 'text_to_image',
-      provider: 'genx',
-      status: 'pending',
-      description: 'GenX media endpoint not yet confirmed',
-    },
-    {
-      id: 'preview-i2i',
-      name: 'Image-to-Image (Preview)',
-      type: 'image_to_image',
-      provider: 'genx',
-      status: 'pending',
-      description: 'GenX media endpoint not yet confirmed',
-    },
-    {
-      id: 'preview-t2v',
-      name: 'Text-to-Video (Preview)',
-      type: 'text_to_video',
-      provider: 'genx',
-      status: 'pending',
-      description: 'GenX media endpoint not yet confirmed',
-    },
-    {
-      id: 'preview-lipsync',
-      name: 'Lip Sync (Preview)',
-      type: 'lip_sync',
-      provider: 'genx',
-      status: 'pending',
-      description: 'GenX media endpoint not yet confirmed',
+      description: 'Run model sync from admin panel to discover available models',
     },
   ];
+}
+
+export async function getAvailableModelsAsync(): Promise<StudioModel[]> {
+  // Get models from the live GenX registry
+  const genxModels = await genxRegistry.getAvailableModels();
+
+  if (genxModels.length === 0) {
+    return getAvailableModels();
+  }
+
+  // Map GenX models to Studio models
+  return genxModels.map(model => ({
+    id: model.id,
+    name: model.name,
+    type: getPrimaryOperation(model.operations),
+    provider: 'genx',
+    status: model.status === 'available' ? 'available' : 'pending',
+    description: `${model.vendor ? model.vendor + ' - ' : ''}${model.operations.join(', ')}`,
+  }));
+}
+
+function getPrimaryOperation(operations: string[]): string {
+  if (operations.includes('text_to_image')) return 'text_to_image';
+  if (operations.includes('image_to_image')) return 'image_to_image';
+  if (operations.includes('text_to_video')) return 'text_to_video';
+  if (operations.includes('image_to_video')) return 'image_to_video';
+  if (operations.includes('lip_sync')) return 'lip_sync';
+  if (operations.includes('text_to_speech')) return 'text_to_speech';
+  if (operations.includes('speech_to_text')) return 'speech_to_text';
+  if (operations.includes('vision')) return 'vision';
+  if (operations.includes('embedding')) return 'embedding';
+  return 'chat';
 }
 
 // ─── Generation Requests ─────────────────────────────────────────────────────
