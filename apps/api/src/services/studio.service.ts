@@ -1,10 +1,8 @@
 import { query } from '../config/database';
 import { logger } from '../utils/logger';
 import { AppError, NotFoundError } from '../middleware/errorHandler';
-import { providerRouter } from '../providers/provider-router';
-import { GenXProvider } from '../providers/genx.provider';
+import { genxMultimodalProvider } from '../providers/genx-multimodal.provider';
 import * as genxRegistry from './genx-model-registry.service';
-import { env } from '../config/env';
 
 // Types
 export interface StudioGeneration {
@@ -69,10 +67,10 @@ export async function getAvailableModelsAsync(): Promise<StudioModel[]> {
   return genxModels.map(model => ({
     id: model.id,
     name: model.name,
-    type: getPrimaryOperation(model.operations),
+    type: getPrimaryOperation(model.operations || []),
     provider: 'genx',
-    status: model.status === 'available' ? 'available' : 'pending',
-    description: `${model.vendor ? model.vendor + ' - ' : ''}${model.operations.join(', ')}`,
+    status: model.available ? 'available' : 'pending',
+    description: `${model.vendor ? model.vendor + ' - ' : ''}${(model.operations || []).join(', ')}`,
   }));
 }
 
@@ -102,73 +100,124 @@ export async function createGeneration(
     options?: Record<string, unknown>;
   }
 ): Promise<StudioGeneration> {
-  // Check if the model is available
-  const models = getAvailableModels();
-  const model = models.find(m => m.id === data.model || m.type === data.type);
-
-  if (!model || model.status !== 'available') {
-    // Store the attempt but mark as failed
-    const result = await query(
-      `INSERT INTO studio_generations (organization_id, user_id, type, model, prompt, negative_prompt, options, provider, status, error_code, error_message)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, 'genx', 'failed', 'GENX_MODALITY_NOT_AVAILABLE', 'This generation type is not yet available through GenX')
-       RETURNING *`,
-      [orgId, userId, data.type, data.model || null, data.prompt || null, data.negative_prompt || null, JSON.stringify(data.options || {})]
-    );
-    return mapGenerationRow(result.rows[0]);
+  // Find an appropriate model for this generation type
+  let modelId = data.model;
+  if (!modelId) {
+    const models = await genxRegistry.getAvailableModels(data.type);
+    if (models.length === 0) {
+      const result = await query(
+        `INSERT INTO studio_generations (organization_id, user_id, type, model, prompt, negative_prompt, options, provider, status, error_code, error_message)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, 'genx', 'failed', 'NO_MODEL_AVAILABLE', 'No GenX model available for this generation type')
+         RETURNING *`,
+        [orgId, userId, data.type, null, data.prompt || null, data.negative_prompt || null, JSON.stringify(data.options || {})]
+      );
+      return mapGenerationRow(result.rows[0]);
+    }
+    modelId = models[0].id;
   }
 
-  // For text generation, use the existing GenX provider
-  if (data.type === 'text_generation' && data.prompt) {
-    const result = await query(
-      `INSERT INTO studio_generations (organization_id, user_id, type, model, prompt, options, provider, status)
-       VALUES ($1, $2, $3, $4, $5, $6, 'genx', 'processing')
-       RETURNING *`,
-      [orgId, userId, data.type, data.model || 'gpt-4o', data.prompt, JSON.stringify(data.options || {})]
-    );
-
-    const generation = mapGenerationRow(result.rows[0]);
-
-    // Execute text generation asynchronously
-    executeTextGeneration(generation.id, orgId, data.prompt, data.model || 'gpt-4o').catch(err => {
-      logger.error(`Text generation failed: ${err}`);
-    });
-
-    return generation;
-  }
-
-  // For media types, return honest failure
+  // Create the generation record
   const result = await query(
-    `INSERT INTO studio_generations (organization_id, user_id, type, model, prompt, negative_prompt, options, provider, status, error_code, error_message)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, 'genx', 'failed', 'GENX_MODALITY_NOT_AVAILABLE', 'Media generation is not yet available through GenX')
+    `INSERT INTO studio_generations (organization_id, user_id, type, model, prompt, negative_prompt, options, provider, status)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, 'genx', 'pending')
      RETURNING *`,
-    [orgId, userId, data.type, data.model || null, data.prompt || null, data.negative_prompt || null, JSON.stringify(data.options || {})]
+    [orgId, userId, data.type, modelId, data.prompt || null, data.negative_prompt || null, JSON.stringify(data.options || {})]
   );
-  return mapGenerationRow(result.rows[0]);
+
+  const generation = mapGenerationRow(result.rows[0]);
+
+  // Execute generation asynchronously
+  executeGeneration(generation.id, orgId, modelId, data).catch(err => {
+    logger.error(`Generation failed: ${err}`);
+  });
+
+  return generation;
 }
 
-async function executeTextGeneration(generationId: string, orgId: string, prompt: string, model: string): Promise<void> {
+async function executeGeneration(
+  generationId: string,
+  orgId: string,
+  modelId: string,
+  data: { type: string; prompt?: string; negative_prompt?: string; options?: Record<string, unknown> }
+): Promise<void> {
   try {
-    const result = await providerRouter.routeRequest(
-      [{ role: 'user', content: prompt }],
-      model,
-      { max_tokens: 2000, temperature: 0.7 },
-      { organizationId: orgId }
-    );
+    // Build GenX request params
+    const params: Record<string, unknown> = {};
+    if (data.prompt) params.prompt = data.prompt;
+    if (data.negative_prompt) params.negative_prompt = data.negative_prompt;
+    if (data.options) {
+      Object.assign(params, data.options);
+    }
 
+    // Submit to GenX
+    const job = await genxMultimodalProvider.generate({
+      model: modelId,
+      params,
+      metadata: { organization_id: orgId, generation_id: generationId, type: data.type },
+    });
+
+    // Update with provider job ID
     await query(
-      `UPDATE studio_generations SET status = 'completed', output_urls = $1, completed_at = NOW(), updated_at = NOW() WHERE id = $2`,
-      [JSON.stringify([{ type: 'text', content: result.content }]), generationId]
+      'UPDATE studio_generations SET provider_job_id = $1, status = $2, updated_at = NOW() WHERE id = $3',
+      [job.id, job.status === 'queued' ? 'pending' : 'processing', generationId]
     );
 
-    logger.info(`Text generation completed: ${generationId}`);
+    // Poll for completion
+    const completedJob = await genxMultimodalProvider.waitForJob(job.id, {
+      maxWaitMs: getMaxWaitMs(data.type),
+      pollIntervalMs: 3000,
+    });
+
+    // Get result
+    let outputUrls: string[] = [];
+    if (completedJob.result_url) {
+      outputUrls = [completedJob.result_url];
+    } else if (completedJob.status === 'completed') {
+      const result = await genxMultimodalProvider.getJobResult(job.id);
+      if (result.url) outputUrls = [result.url];
+    }
+
+    if (completedJob.status === 'completed' && outputUrls.length > 0) {
+      await query(
+        `UPDATE studio_generations SET status = 'completed', output_urls = $1, progress = 100, completed_at = NOW(), updated_at = NOW() WHERE id = $2`,
+        [JSON.stringify(outputUrls), generationId]
+      );
+      logger.info(`Generation completed: ${generationId}`);
+    } else if (completedJob.status === 'failed') {
+      await query(
+        `UPDATE studio_generations SET status = 'failed', error_code = 'GENERATION_FAILED', error_message = $1, updated_at = NOW() WHERE id = $2`,
+        [completedJob.error || 'Unknown error', generationId]
+      );
+    } else {
+      await query(
+        `UPDATE studio_generations SET status = 'failed', error_code = 'GENERATION_TIMEOUT', error_message = 'Generation did not complete in time', updated_at = NOW() WHERE id = $1`,
+        [generationId]
+      );
+    }
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error';
     await query(
-      `UPDATE studio_generations SET status = 'failed', error_code = 'GENERATION_FAILED', error_message = $1, updated_at = NOW() WHERE id = $2`,
+      `UPDATE studio_generations SET status = 'failed', error_code = 'GENERATION_ERROR', error_message = $1, updated_at = NOW() WHERE id = $2`,
       [message, generationId]
     );
-    logger.error(`Text generation failed: ${generationId} - ${message}`);
+    logger.error(`Generation error: ${generationId} - ${message}`);
   }
+}
+
+function getMaxWaitMs(type: string): number {
+  const waits: Record<string, number> = {
+    text_generation: 120000,
+    text_to_image: 300000,
+    image_to_image: 300000,
+    image_edit: 300000,
+    text_to_video: 1200000,
+    image_to_video: 1200000,
+    video_to_video: 1200000,
+    text_to_speech: 600000,
+    speech_to_text: 300000,
+    lip_sync: 600000,
+  };
+  return waits[type] || 300000;
 }
 
 export async function getGeneration(id: string, orgId: string): Promise<StudioGeneration> {
