@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
-import { generateImage, generateI2I, uploadFile } from "../muapi.js";
 import {
   t2iModels,
   i2iModels,
@@ -43,7 +42,7 @@ async function downloadImage(url, filename) {
 
 // ─── UploadButton (inline picker) ───────────────────────────────────────────
 
-function UploadButton({ apiKey, maxImages, onSelect, onClear }) {
+function UploadButton({ studioClient, maxImages, onSelect, onClear }) {
   const [panelOpen, setPanelOpen] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [selectedEntries, setSelectedEntries] = useState([]); // [{url, thumbnail}]
@@ -102,10 +101,11 @@ function UploadButton({ apiKey, maxImages, onSelect, onClear }) {
     try {
       if (maxImages === 1) {
         const file = files[0];
-        const [uploadedUrl, thumbnail] = await Promise.all([
-          uploadFile(apiKey, file),
+        const [uploadedResult, thumbnail] = await Promise.all([
+          studioClient.uploadAsset(file),
           generateThumbnail(file),
         ]);
+        const uploadedUrl = uploadedResult.data?.url || uploadedResult.url;
         const entry = { id: Date.now().toString(), name: file.name, url: uploadedUrl, thumbnail };
         setUploadHistory((prev) => [entry, ...prev]);
         const newSelected = [{ url: uploadedUrl, thumbnail }];
@@ -118,14 +118,14 @@ function UploadButton({ apiKey, maxImages, onSelect, onClear }) {
 
         const results = await Promise.all(
           toUpload.map(async (file) => {
-            const [uploadedUrl, thumbnail] = await Promise.all([
-              uploadFile(apiKey, file),
+            const [uploadedResult, thumbnail] = await Promise.all([
+              studioClient.uploadAsset(file),
               generateThumbnail(file),
             ]);
             return {
               id: Date.now().toString() + Math.random(),
               name: file.name,
-              url: uploadedUrl,
+              url: uploadedResult.data?.url || uploadedResult.url,
               thumbnail,
             };
           })
@@ -560,7 +560,7 @@ function SimpleDropdown({ title, options, selected, onSelect, onClose }) {
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 
-export default function ImageStudio({ apiKey, onGenerationComplete, historyItems }) {
+export default function ImageStudio({ studioClient, onGenerationComplete, historyItems }) {
   // ── Model / mode state ──────────────────────────────────────────────────
   const [imageMode, setImageMode] = useState(false); // false=t2i, true=i2i
   const [selectedModelId, setSelectedModelId] = useState(t2iModels[0].id);
@@ -741,7 +741,12 @@ export default function ImageStudio({ apiKey, onGenerationComplete, historyItems
         if (currentQualityField && selectedQuality) {
           genParams[currentQualityField] = selectedQuality;
         }
-        res = await generateI2I(apiKey, genParams);
+        res = await studioClient.createGeneration({
+          type: 'image_to_image',
+          model: selectedModelId,
+          prompt: prompt.trim(),
+          options: genParams,
+        });
       } else {
         const genParams = {
           model: selectedModelId,
@@ -751,7 +756,12 @@ export default function ImageStudio({ apiKey, onGenerationComplete, historyItems
         if (currentQualityField && selectedQuality) {
           genParams[currentQualityField] = selectedQuality;
         }
-        res = await generateImage(apiKey, genParams);
+        res = await studioClient.createGeneration({
+          type: 'text_to_image',
+          model: selectedModelId,
+          prompt: prompt.trim(),
+          options: genParams,
+        });
       }
 
       if (res && res.url) {
@@ -934,7 +944,7 @@ export default function ImageStudio({ apiKey, onGenerationComplete, historyItems
               {/* Top row: upload picker + textarea */}
               <div className="flex items-start gap-5 px-2">
                 <UploadButton
-                  apiKey={apiKey}
+                  studioClient={studioClient}
                   maxImages={maxImages}
                   onSelect={handleUploadSelect}
                   onClear={handleUploadClear}

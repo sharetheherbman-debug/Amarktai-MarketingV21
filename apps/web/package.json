@@ -10,6 +10,7 @@
     "clean": "rm -rf .next"
   },
   "dependencies": {
+    "@amarktai/studio": "*",
     "@amarktai/ui": "*",
     "clsx": "^2.1.0",
     "date-fns": "^4.1.0",

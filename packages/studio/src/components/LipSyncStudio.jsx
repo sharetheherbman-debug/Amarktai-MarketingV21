@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { processLipSync, uploadFile } from '../muapi.js';
 import {
     lipsyncModels,
     imageLipSyncModels,
@@ -19,7 +18,7 @@ const UPLOAD_STATE = {
     READY: 'ready',
 };
 
-function MediaPickerButton({ accept, label, icon, onUpload, onClear, uploadState, fileName, apiKey }) {
+function MediaPickerButton({ accept, label, icon, onUpload, onClear, uploadState, fileName }) {
     const inputRef = useRef(null);
 
     const handleClick = (e) => {
@@ -208,7 +207,7 @@ const VideoIcon = ({ className = 'text-muted group-hover:text-primary transition
 // ---------------------------------------------------------------------------
 // Main component
 // ---------------------------------------------------------------------------
-export default function LipSyncStudio({ apiKey, onGenerationComplete, historyItems }) {
+export default function LipSyncStudio({ studioClient, onGenerationComplete, historyItems }) {
     // ── Mode & model state ──────────────────────────────────────────────────
     const [inputMode, setInputMode] = useState('image'); // 'image' | 'video'
 
@@ -275,7 +274,8 @@ export default function LipSyncStudio({ apiKey, onGenerationComplete, historyIte
     const handleImageUpload = useCallback(async (file) => {
         setImageState(UPLOAD_STATE.UPLOADING);
         try {
-            const url = await uploadFile(apiKey, file);
+            const result = await studioClient.uploadAsset(file);
+            const url = result.data?.url || result.url;
             setImageUrl(url);
             setImageName(file.name);
             setImageState(UPLOAD_STATE.READY);
@@ -283,12 +283,13 @@ export default function LipSyncStudio({ apiKey, onGenerationComplete, historyIte
             setImageState(UPLOAD_STATE.IDLE);
             alert(`Image upload failed: ${err.message}`);
         }
-    }, [apiKey]);
+    }, [studioClient]);
 
     const handleVideoPick = useCallback(async (file) => {
         setVideoState(UPLOAD_STATE.UPLOADING);
         try {
-            const url = await uploadFile(apiKey, file);
+            const result = await studioClient.uploadAsset(file);
+            const url = result.data?.url || result.url;
             setVideoUrl(url);
             setVideoName(file.name);
             setVideoState(UPLOAD_STATE.READY);
@@ -296,12 +297,13 @@ export default function LipSyncStudio({ apiKey, onGenerationComplete, historyIte
             setVideoState(UPLOAD_STATE.IDLE);
             alert(`Video upload failed: ${err.message}`);
         }
-    }, [apiKey]);
+    }, [studioClient]);
 
     const handleAudioPick = useCallback(async (file) => {
         setAudioState(UPLOAD_STATE.UPLOADING);
         try {
-            const url = await uploadFile(apiKey, file);
+            const result = await studioClient.uploadAsset(file);
+            const url = result.data?.url || result.url;
             setAudioUrl(url);
             setAudioName(file.name);
             setAudioState(UPLOAD_STATE.READY);
@@ -309,7 +311,7 @@ export default function LipSyncStudio({ apiKey, onGenerationComplete, historyIte
             setAudioState(UPLOAD_STATE.IDLE);
             alert(`Audio upload failed: ${err.message}`);
         }
-    }, [apiKey]);
+    }, [studioClient]);
 
     // ── Mode toggle ─────────────────────────────────────────────────────────
     const switchToImage = () => {
@@ -379,7 +381,11 @@ export default function LipSyncStudio({ apiKey, onGenerationComplete, historyIte
             if (showResolution) lipsyncParams.resolution = selectedResolution;
             if (selectedModel?.hasSeed) lipsyncParams.seed = -1;
 
-            const res = await processLipSync(apiKey, lipsyncParams);
+            const res = await studioClient.createGeneration({
+                type: 'lip_sync',
+                model: selectedModel,
+                options: lipsyncParams,
+            });
 
             if (!res?.url) throw new Error('No video URL returned by API');
 
@@ -541,10 +547,9 @@ export default function LipSyncStudio({ apiKey, onGenerationComplete, historyIte
                                             </svg>
                                         }
                                         onUpload={handleImageUpload}
-                                        onClear={() => { setImageUrl(null); setImageState(UPLOAD_STATE.IDLE); setImageName(''); }}
+                                        onClear={() => { setImageUrl(null); setImageName(''); setImageState(UPLOAD_STATE.IDLE); }}
                                         uploadState={imageState}
                                         fileName={imageName}
-                                        apiKey={apiKey}
                                     />
                                 )}
 
@@ -555,10 +560,9 @@ export default function LipSyncStudio({ apiKey, onGenerationComplete, historyIte
                                         label="Video"
                                         icon={<VideoIcon />}
                                         onUpload={handleVideoPick}
-                                        onClear={() => { setVideoUrl(null); setVideoState(UPLOAD_STATE.IDLE); setVideoName(''); }}
+                                        onClear={() => { setVideoUrl(null); setVideoName(''); setVideoState(UPLOAD_STATE.IDLE); }}
                                         uploadState={videoState}
                                         fileName={videoName}
-                                        apiKey={apiKey}
                                     />
                                 )}
 
@@ -568,10 +572,9 @@ export default function LipSyncStudio({ apiKey, onGenerationComplete, historyIte
                                     label="Audio"
                                     icon={<MicIcon />}
                                     onUpload={handleAudioPick}
-                                    onClear={() => { setAudioUrl(null); setAudioState(UPLOAD_STATE.IDLE); setAudioName(''); }}
+                                    onClear={() => { setAudioUrl(null); setAudioName(''); setAudioState(UPLOAD_STATE.IDLE); }}
                                     uploadState={audioState}
                                     fileName={audioName}
-                                    apiKey={apiKey}
                                 />
 
                                 {/* Prompt textarea */}

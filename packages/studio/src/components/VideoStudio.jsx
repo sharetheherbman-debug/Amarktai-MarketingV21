@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { generateVideo, generateI2V, uploadFile } from '../muapi.js';
 import {
     t2vModels,
     i2vModels,
@@ -189,7 +188,7 @@ function DropdownPanel({ type, open, onClose, children }) {
 
 // ── Main component ────────────────────────────────────────────────────────────
 
-export default function VideoStudio({ apiKey, onGenerationComplete, historyItems }) {
+export default function VideoStudio({ studioClient, onGenerationComplete, historyItems }) {
     // ── mode state ──
     const [imageMode, setImageMode] = useState(false);   // i2v
     const [v2vMode, setV2vMode] = useState(false);
@@ -337,7 +336,8 @@ export default function VideoStudio({ apiKey, onGenerationComplete, historyItems
         if (!file) return;
         setImageUploading(true);
         try {
-            const url = await uploadFile(apiKey, file);
+            const result = await studioClient.uploadAsset(file);
+            const url = result.data?.url || result.url;
             setUploadedImageUrl(url);
             setUploadedImagePreview(URL.createObjectURL(file));
 
@@ -380,7 +380,8 @@ export default function VideoStudio({ apiKey, onGenerationComplete, historyItems
         if (!file) return;
         setVideoUploading(true);
         try {
-            const url = await uploadFile(apiKey, file);
+            const result = await studioClient.uploadAsset(file);
+            const url = result.data?.url || result.url;
             setUploadedVideoUrl(url);
             setUploadedVideoName(file.name);
 
@@ -481,9 +482,10 @@ export default function VideoStudio({ apiKey, onGenerationComplete, historyItems
 
             if (v2vMode) {
                 // V2V: use generateVideo with video_url (the v2v models use the video endpoint)
-                res = await generateVideo(apiKey, {
+                res = await studioClient.createGeneration({
+                    type: 'video_to_video',
                     model: selectedModel,
-                    video_url: uploadedVideoUrl,
+                    options: { video_url: uploadedVideoUrl },
                 });
                 if (!res?.url) throw new Error('No video URL returned by API');
 
@@ -506,7 +508,12 @@ export default function VideoStudio({ apiKey, onGenerationComplete, historyItems
                 if (selectedQuality) i2vParams.quality = selectedQuality;
                 if (selectedMode) i2vParams.mode = selectedMode;
 
-                res = await generateI2V(apiKey, i2vParams);
+                res = await studioClient.createGeneration({
+                    type: 'image_to_video',
+                    model: selectedModel,
+                    prompt: trimmedPrompt || undefined,
+                    options: i2vParams,
+                });
                 if (!res?.url) throw new Error('No video URL returned by API');
 
                 const genId = res.id || Date.now().toString();
@@ -540,7 +547,12 @@ export default function VideoStudio({ apiKey, onGenerationComplete, historyItems
                 if (selectedQuality) params.quality = selectedQuality;
                 if (selectedMode) params.mode = selectedMode;
 
-                res = await generateVideo(apiKey, params);
+                res = await studioClient.createGeneration({
+                    type: 'text_to_video',
+                    model: selectedModel,
+                    prompt: trimmedPrompt,
+                    options: params,
+                });
                 if (!res?.url) throw new Error('No video URL returned by API');
 
                 const genId = res.id || Date.now().toString();
@@ -565,7 +577,7 @@ export default function VideoStudio({ apiKey, onGenerationComplete, historyItems
             setGenerating(false);
         }
     }, [
-        apiKey, prompt, v2vMode, imageMode, selectedModel, selectedAr, selectedDuration,
+        studioClient, prompt, v2vMode, imageMode, selectedModel, selectedAr, selectedDuration,
         selectedResolution, selectedQuality, selectedMode, uploadedImageUrl, uploadedVideoUrl,
         lastGenerationId, getCurrentModel, addToLocalHistory, showVideoInCanvas, onGenerationComplete,
     ]);

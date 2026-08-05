@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { generateImage } from '../muapi.js';
 
 // ─── Constants (inlined from promptUtils) ───────────────────────────────────
 
@@ -420,7 +419,7 @@ function CameraControlsOverlay({ isOpen, onClose, settings, onSettingsChange }) 
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 
-export default function CinemaStudio({ apiKey, onGenerationComplete, historyItems }) {
+export default function CinemaStudio({ studioClient, onGenerationComplete, historyItems }) {
     // ── Settings state ──
     const [settings, setSettings] = useState({
         prompt: '',
@@ -480,12 +479,15 @@ export default function CinemaStudio({ apiKey, onGenerationComplete, historyItem
         );
 
         try {
-            const res = await generateImage(apiKey, {
+            const res = await studioClient.createGeneration({
+                type: 'text_to_image',
                 model: 'nano-banana-pro',
                 prompt: finalPrompt,
-                aspect_ratio: settings.aspect_ratio,
-                resolution: resolution.toLowerCase(),
-                negative_prompt: 'blurry, low quality, distortion, bad composition'
+                options: {
+                    aspect_ratio: settings.aspect_ratio,
+                    resolution: resolution.toLowerCase(),
+                    negative_prompt: 'blurry, low quality, distortion, bad composition'
+                },
             });
 
             if (res && res.url) {
@@ -528,7 +530,7 @@ export default function CinemaStudio({ apiKey, onGenerationComplete, historyItem
         } finally {
             setIsGenerating(false);
         }
-    }, [settings, resolution, apiKey, isGenerating, onGenerationComplete, historyItems]);
+    }, [settings, resolution, studioClient, isGenerating, onGenerationComplete, historyItems]);
 
     // ── Regenerate ──
     const handleRegenerate = useCallback(() => {
