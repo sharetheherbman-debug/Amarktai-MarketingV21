@@ -6,6 +6,7 @@ import crypto from 'crypto';
 import { requireAuth, AuthRequest } from '../middleware/auth';
 import { ApiResponse } from '../types';
 import * as studioService from '../services/studio.service';
+import * as genxRegistry from '../services/genx-model-registry.service';
 import { query } from '../config/database';
 
 const router = Router();
@@ -41,8 +42,35 @@ async function verifyOrgMembership(orgId: string, userId: string): Promise<boole
 // GET /api/v1/studio/models
 router.get('/models', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
   try {
-    const models = studioService.getAvailableModels();
-    res.json({ success: true, data: models });
+    const operation = req.query.operation as string;
+    const category = req.query.category as string;
+
+    let models;
+    if (operation) {
+      models = await genxRegistry.getAvailableModels(operation);
+    } else if (category) {
+      models = await genxRegistry.getModelsByCategory(category);
+    } else {
+      models = await genxRegistry.getAvailableModels();
+    }
+
+    const studioModels = models.map(m => ({
+      id: m.id,
+      name: m.name,
+      category: m.category,
+      provider: 'genx' as const,
+      operations: m.operations || [],
+      inputs: m.inputs || [],
+      outputs: m.outputs || [],
+      parameters: m.parameters || {},
+      supportsContinuation: m.operations?.includes('video_to_video') || false,
+      supportsStartFrame: m.operations?.includes('image_to_video') || false,
+      supportsEndFrame: false,
+      supportsAudio: m.operations?.includes('text_to_speech') || false,
+      status: m.available ? 'available' : 'unavailable',
+    }));
+
+    res.json({ success: true, data: studioModels });
   } catch (error) { next(error); }
 });
 
