@@ -2,6 +2,7 @@ import { Router, Response, NextFunction } from 'express';
 import { requireAuth, AuthRequest } from '../middleware/auth';
 import { ApiResponse } from '../types';
 import * as longformService from '../services/longform-video.service';
+import * as renderService from '../services/render-queue.service';
 import { query } from '../config/database';
 
 const router = Router();
@@ -140,6 +141,108 @@ router.post('/scenes/:id/generate', async (req: AuthRequest, res: Response<ApiRe
     if (error) { res.status(400).json({ success: false, error: { message: error, code: 'BAD_REQUEST' } }); return; }
     const scene = await longformService.generateScene(req.params.id, orgId);
     res.json({ success: true, data: scene });
+  } catch (error) { next(error); }
+});
+
+// ─── Project Generation Orchestration ─────────────────────────────────────
+
+router.post('/projects/:id/generate', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
+  try {
+    const { orgId, error } = await getOrgAndVerify(req, 'body');
+    if (error) { res.status(400).json({ success: false, error: { message: error, code: 'BAD_REQUEST' } }); return; }
+    const scenes = await longformService.listScenes(req.params.id, orgId);
+    const pendingScenes = scenes.filter(s => s.status === 'pending' || s.status === 'failed');
+    if (pendingScenes.length === 0) {
+      res.json({ success: true, data: { message: 'No pending scenes to generate' } });
+      return;
+    }
+    // Generate each pending scene sequentially
+    for (const scene of pendingScenes) {
+      await longformService.generateScene(scene.id, orgId);
+    }
+    res.json({ success: true, data: { message: `Started generation for ${pendingScenes.length} scenes` } });
+  } catch (error) { next(error); }
+});
+
+router.post('/projects/:id/cancel', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
+  try {
+    const { orgId, error } = await getOrgAndVerify(req, 'body');
+    if (error) { res.status(400).json({ success: false, error: { message: error, code: 'BAD_REQUEST' } }); return; }
+    const scenes = await longformService.listScenes(req.params.id, orgId);
+    const generatingScenes = scenes.filter(s => s.status === 'generating');
+    for (const scene of generatingScenes) {
+      await longformService.updateScene(scene.id, orgId, { status: 'cancelled' });
+    }
+    res.json({ success: true, data: { message: `Cancelled ${generatingScenes.length} scenes` } });
+  } catch (error) { next(error); }
+});
+
+router.post('/projects/:id/retry-failed', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
+  try {
+    const { orgId, error } = await getOrgAndVerify(req, 'body');
+    if (error) { res.status(400).json({ success: false, error: { message: error, code: 'BAD_REQUEST' } }); return; }
+    const scenes = await longformService.listScenes(req.params.id, orgId);
+    const failedScenes = scenes.filter(s => s.status === 'failed' && s.retry_count < 3);
+    for (const scene of failedScenes) {
+      await longformService.generateScene(scene.id, orgId);
+    }
+    res.json({ success: true, data: { message: `Retrying ${failedScenes.length} failed scenes` } });
+  } catch (error) { next(error); }
+});
+
+router.get('/projects/:id/progress', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
+  try {
+    const { orgId, error } = await getOrgAndVerify(req);
+    if (error) { res.status(400).json({ success: false, error: { message: error, code: 'BAD_REQUEST' } }); return; }
+    const stats = await longformService.getProjectStats(req.params.id, orgId);
+    res.json({ success: true, data: stats });
+  } catch (error) { next(error); }
+});
+
+// ─── Renders ────────────────────────────────────────────────────────────────
+
+router.post('/projects/:id/renders', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
+  try {
+    const { orgId, error } = await getOrgAndVerify(req, 'body');
+    if (error) { res.status(400).json({ success: false, error: { message: error, code: 'BAD_REQUEST' } }); return; }
+    const render = await renderService.createRender(req.params.id, orgId);
+    res.status(201).json({ success: true, data: render });
+  } catch (error) { next(error); }
+});
+
+router.get('/projects/:id/renders', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
+  try {
+    const { orgId, error } = await getOrgAndVerify(req);
+    if (error) { res.status(400).json({ success: false, error: { message: error, code: 'BAD_REQUEST' } }); return; }
+    const renders = await renderService.listRenders(req.params.id, orgId);
+    res.json({ success: true, data: renders });
+  } catch (error) { next(error); }
+});
+
+router.get('/renders/:id', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
+  try {
+    const { orgId, error } = await getOrgAndVerify(req);
+    if (error) { res.status(400).json({ success: false, error: { message: error, code: 'BAD_REQUEST' } }); return; }
+    const render = await renderService.getRender(req.params.id, orgId);
+    res.json({ success: true, data: render });
+  } catch (error) { next(error); }
+});
+
+router.post('/renders/:id/cancel', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
+  try {
+    const { orgId, error } = await getOrgAndVerify(req, 'body');
+    if (error) { res.status(400).json({ success: false, error: { message: error, code: 'BAD_REQUEST' } }); return; }
+    await renderService.cancelRender(req.params.id, orgId);
+    res.json({ success: true, data: { message: 'Render cancelled' } });
+  } catch (error) { next(error); }
+});
+
+router.get('/renders/:id/events', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
+  try {
+    const { orgId, error } = await getOrgAndVerify(req);
+    if (error) { res.status(400).json({ success: false, error: { message: error, code: 'BAD_REQUEST' } }); return; }
+    const events = await renderService.getRenderEvents(req.params.id, orgId);
+    res.json({ success: true, data: events });
   } catch (error) { next(error); }
 });
 

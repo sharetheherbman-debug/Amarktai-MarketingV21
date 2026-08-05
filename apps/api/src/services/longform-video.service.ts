@@ -1,6 +1,8 @@
 import { query } from '../config/database';
 import { logger } from '../utils/logger';
 import { NotFoundError, AppError } from '../middleware/errorHandler';
+import { genxMultimodalProvider } from '../providers/genx-multimodal.provider';
+import * as genxRegistry from './genx-model-registry.service';
 
 // Types
 export interface VideoProject {
@@ -222,14 +224,98 @@ export async function generateScene(sceneId: string, orgId: string): Promise<Vid
 
   // Mark as generating
   await query(
-    "UPDATE video_scenes SET status = 'generating', updated_at = NOW() WHERE id = $1",
+    "UPDATE video_scenes SET status = 'generating', error_message = NULL, updated_at = NOW() WHERE id = $1",
     [sceneId]
   );
 
-  // In a real implementation, this would call GenX
-  // For now, mark as pending generation
-  logger.info(`Scene generation started: ${sceneId}`);
+  // Execute generation asynchronously
+  executeSceneGeneration(sceneId, orgId, scene).catch(err => {
+    logger.error(`Scene generation failed: ${sceneId} - ${err}`);
+  });
+
   return { ...scene, status: 'generating' };
+}
+
+async function executeSceneGeneration(sceneId: string, orgId: string, scene: VideoScene): Promise<void> {
+  try {
+    // Find appropriate model
+    let modelId = scene.model_id;
+    if (!modelId) {
+      const models = await genxRegistry.getAvailableModels('text_to_video');
+      if (models.length === 0) {
+        throw new AppError(400, 'No video generation model available', 'NO_MODEL');
+      }
+      modelId = models[0].id;
+    }
+
+    // Build GenX parameters
+    const params: Record<string, unknown> = {
+      prompt: scene.visual_prompt,
+    };
+    if (scene.negative_prompt) params.negative_prompt = scene.negative_prompt;
+    if (scene.duration_seconds) params.duration = scene.duration_seconds;
+    if (scene.source_image_url) params.image = scene.source_image_url;
+    if (scene.start_frame_url) params.first_frame = scene.start_frame_url;
+    if (scene.end_frame_url) params.last_frame = scene.end_frame_url;
+
+    // Submit to GenX
+    const job = await genxMultimodalProvider.generate({
+      model: modelId,
+      params,
+      metadata: {
+        organization_id: orgId,
+        scene_id: sceneId,
+        project_id: scene.project_id,
+        type: 'text_to_video',
+      },
+    });
+
+    // Update with provider job ID
+    await query(
+      'UPDATE video_scenes SET provider_job_id = $1, status = $2, updated_at = NOW() WHERE id = $3',
+      [job.id, 'generating', sceneId]
+    );
+
+    // Poll for completion
+    const completedJob = await genxMultimodalProvider.waitForJob(job.id, {
+      maxWaitMs: 1200000, // 20 minutes for video
+      pollIntervalMs: 5000,
+    });
+
+    // Get result
+    let clipUrl: string | null = null;
+    if (completedJob.result_url) {
+      clipUrl = completedJob.result_url;
+    } else if (completedJob.status === 'completed') {
+      const result = await genxMultimodalProvider.getJobResult(job.id);
+      if (result.url) clipUrl = result.url;
+    }
+
+    if (completedJob.status === 'completed' && clipUrl) {
+      await query(
+        `UPDATE video_scenes SET status = 'completed', generated_clip_url = $1, error_message = NULL, updated_at = NOW() WHERE id = $2`,
+        [clipUrl, sceneId]
+      );
+      logger.info(`Scene generation completed: ${sceneId}`);
+    } else if (completedJob.status === 'failed') {
+      await query(
+        `UPDATE video_scenes SET status = 'failed', error_message = $1, retry_count = retry_count + 1, updated_at = NOW() WHERE id = $2`,
+        [completedJob.error || 'Generation failed', sceneId]
+      );
+    } else {
+      await query(
+        `UPDATE video_scenes SET status = 'failed', error_message = 'Generation timeout', retry_count = retry_count + 1, updated_at = NOW() WHERE id = $1`,
+        [sceneId]
+      );
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    await query(
+      `UPDATE video_scenes SET status = 'failed', error_message = $1, retry_count = retry_count + 1, updated_at = NOW() WHERE id = $2`,
+      [message, sceneId]
+    );
+    logger.error(`Scene generation error: ${sceneId} - ${message}`);
+  }
 }
 
 // ─── Project Statistics ──────────────────────────────────────────────────────
