@@ -1,3 +1,4 @@
+import { Queue } from 'bullmq';
 import { promises as fs } from 'fs';
 import path from 'path';
 import { query } from '../config/database';
@@ -6,6 +7,14 @@ import { NotFoundError, AppError } from '../middleware/errorHandler';
 import * as ffmpegService from './ffmpeg.service';
 import * as longformService from './longform-video.service';
 import { genxMultimodalProvider } from '../providers/genx-multimodal.provider';
+
+const renderQueue = new Queue('video-renders', {
+  connection: {
+    host: process.env.REDIS_HOST || 'localhost',
+    port: parseInt(process.env.REDIS_PORT || '6379'),
+    password: process.env.REDIS_PASSWORD || undefined,
+  },
+});
 
 // Types
 export interface VideoRender {
@@ -59,122 +68,20 @@ export async function createRender(projectId: string, orgId: string): Promise<Vi
 
   const render = mapRenderRow(result.rows[0]);
 
-  // Execute render asynchronously
-  executeRender(render.id, orgId, project, completedScenes).catch(err => {
-    logger.error(`Render failed: ${render.id} - ${err}`);
+  // Enqueue render job
+  await renderQueue.add('render', {
+    renderId: render.id,
+    projectId,
+    organizationId: orgId,
+  }, {
+    attempts: 2,
+    backoff: { type: 'exponential', delay: 10000 },
+    removeOnComplete: { age: 86400 },
+    removeOnFail: { age: 604800 },
   });
 
+  logger.info(`Render queued: ${render.id}`);
   return render;
-}
-
-async function executeRender(
-  renderId: string,
-  orgId: string,
-  project: longformService.VideoProject,
-  scenes: longformService.VideoScene[]
-): Promise<void> {
-  const tempDir = `/tmp/render_${renderId}`;
-
-  try {
-    // Create temp directory
-    await fs.mkdir(tempDir, { recursive: true });
-
-    // Update status to processing
-    await query(
-      "UPDATE video_renders SET status = 'processing', started_at = NOW(), updated_at = NOW() WHERE id = $1",
-      [renderId]
-    );
-    await logRenderEvent(renderId, 'render_started', 'Render processing started');
-
-    // Step 1: Download scene clips
-    await logRenderEvent(renderId, 'downloading_clips', `Downloading ${scenes.length} scene clips`);
-    const clipPaths: string[] = [];
-
-    for (let i = 0; i < scenes.length; i++) {
-      const scene = scenes[i];
-      const clipPath = path.join(tempDir, `scene_${i}.mp4`);
-
-      if (scene.generated_clip_url) {
-        // Download from URL
-        const response = await fetch(scene.generated_clip_url);
-        const buffer = Buffer.from(await response.arrayBuffer());
-        await fs.writeFile(clipPath, buffer);
-        clipPaths.push(clipPath);
-      }
-
-      // Update progress
-      const progress = Math.round(((i + 1) / scenes.length) * 30);
-      await query('UPDATE video_renders SET progress = $1 WHERE id = $2', [progress, renderId]);
-    }
-
-    // Step 2: Generate narration if needed
-    let narrationPath: string | undefined;
-    const projectWithSettings = project as longformService.VideoProject & { voice_settings?: Record<string, unknown> };
-    if (projectWithSettings.voice_settings?.enabled) {
-      await logRenderEvent(renderId, 'generating_narration', 'Generating narration audio');
-      // In production, this would call GenX TTS
-      narrationPath = undefined; // Placeholder
-    }
-
-    // Step 3: Final render
-    await logRenderEvent(renderId, 'rendering_final', 'Starting final video render');
-    const outputPath = path.join(tempDir, 'final.mp4');
-    const thumbnailPath = path.join(tempDir, 'thumbnail.jpg');
-
-    const renderResult = await ffmpegService.renderFinalVideo(clipPaths, outputPath, {
-      narrationPath,
-      resolution: project.resolution || '1920x1080',
-      frameRate: project.frame_rate || 24,
-      thumbnailPath,
-    });
-
-    if (!renderResult.success) {
-      throw new Error(renderResult.error || 'Render failed');
-    }
-
-    // Step 4: Upload result (in production, upload to storage)
-    const outputUrl = `/renders/${renderId}/final.mp4`;
-    const thumbnailUrl = `/renders/${renderId}/thumbnail.jpg`;
-
-    // Move files to permanent storage
-    const outputDir = path.join(process.cwd(), 'uploads', 'renders', renderId);
-    await fs.mkdir(outputDir, { recursive: true });
-    await fs.copyFile(outputPath, path.join(outputDir, 'final.mp4'));
-    await fs.copyFile(thumbnailPath, path.join(outputDir, 'thumbnail.jpg'));
-
-    // Update render record
-    await query(
-      `UPDATE video_renders SET
-        status = 'completed', progress = 100, output_url = $1, thumbnail_url = $2,
-        duration_seconds = $3, file_size_bytes = $4, completed_at = NOW(), updated_at = NOW()
-       WHERE id = $5`,
-      [outputUrl, thumbnailUrl, Math.round(renderResult.duration), renderResult.fileSize, renderId]
-    );
-
-    // Update project
-    await query(
-      `UPDATE video_projects SET status = 'completed', final_output_url = $1, thumbnail_url = $2, updated_at = NOW()
-       WHERE id = $3`,
-      [outputUrl, thumbnailUrl, project.id]
-    );
-
-    await logRenderEvent(renderId, 'render_completed', `Render completed. Duration: ${Math.round(renderResult.duration)}s, Size: ${renderResult.fileSize} bytes`);
-    logger.info(`Render completed: ${renderId}`);
-
-  } catch (error) {
-    const message = error instanceof Error ? error.message : 'Unknown error';
-    await query(
-      `UPDATE video_renders SET status = 'failed', error_message = $1, updated_at = NOW() WHERE id = $2`,
-      [message, renderId]
-    );
-    await logRenderEvent(renderId, 'render_failed', message);
-    logger.error(`Render failed: ${renderId} - ${message}`);
-  } finally {
-    // Cleanup temp directory
-    try {
-      await fs.rm(tempDir, { recursive: true, force: true });
-    } catch { /* ignore */ }
-  }
 }
 
 // ─── Render Queries ──────────────────────────────────────────────────────────
