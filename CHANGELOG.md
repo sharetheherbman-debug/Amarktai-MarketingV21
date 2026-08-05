@@ -2,6 +2,42 @@
 
 All notable changes to AmarktAI Marketing are documented in this file.
 
+## [1.0.0-RC1] - 2026-08-05
+
+### Milestone 10: Production Hardening, Quality, Observability & Release Candidate
+
+#### Testing
+- Added Jest test framework configuration
+- Added unit tests for billing, marketplace, and feature flags services
+- Added test scripts (test, test:coverage, test:watch)
+
+#### CI/CD
+- Added GitHub Actions workflow (`.github/workflows/ci.yml`)
+- TypeScript check, build, test, Docker build, security audit
+- Automatic release creation on master push
+
+#### Security
+- npm audit integration in CI pipeline
+- Security headers configured via Helmet
+- Rate limiting on all endpoints
+- JWT validation and CSRF protection
+
+#### Operations
+- Added `docs/OPERATIONS_GUIDE.md` - Monitoring, alerting, incident response
+- Added `docs/BACKUP_GUIDE.md` - Backup procedures, restore validation, disaster recovery
+- Added `scripts/backup-database.sh` - Automated database backup
+
+#### Documentation
+- Updated ROADMAP with Milestone 10 completion
+- Updated CHANGELOG with RC1 release notes
+- Operations and Backup guides complete
+
+#### Version
+- Release Candidate v1.0.0-RC1
+- 60 frontend pages, 30 API routes, 11 database migrations
+
+---
+
 ## [0.9.0-marketplace] - 2026-08-05
 
 ### Milestone 9: Marketplace, Developer Platform & Extensibility

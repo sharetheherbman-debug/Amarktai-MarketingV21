@@ -1,24 +1,19 @@
 {
   "name": "AmarktAI Marketing",
-  "version": "0.9.0",
-  "tag": "v0.9.0-marketplace",
-  "milestone": "Milestone 9: Marketplace, Developer Platform & Extensibility",
+  "version": "1.0.0-RC1",
+  "tag": "v1.0.0-RC1",
+  "milestone": "Milestone 10: Production Hardening, Quality, Observability & Release Candidate",
   "releaseDate": "2026-08-05",
-  "commit": "5a3ea8f",
-  "releaseChannel": "stable",
-  "buildNumber": "20260805.9",
-  "description": "Marketplace, developer platform, SDK, OAuth, API keys, and AI skill packs",
+  "commit": "pending",
+  "releaseChannel": "rc",
+  "buildNumber": "20260805.10",
+  "description": "Release Candidate with testing, CI/CD, security hardening, and operations documentation",
   "features": [
-    "Agent Marketplace",
-    "Prompt Marketplace",
-    "Workflow Marketplace",
-    "Plugin Marketplace",
-    "Public SDK",
-    "Developer Portal",
-    "Marketplace Administration",
-    "AI Skill Packs",
-    "11 database migrations",
-    "30 API routes",
-    "60 frontend pages"
+    "Automated Testing Framework",
+    "CI/CD Pipeline",
+    "Security Hardening",
+    "Operations Guide",
+    "Backup & Recovery",
+    "Release Candidate"
   ]
 }
