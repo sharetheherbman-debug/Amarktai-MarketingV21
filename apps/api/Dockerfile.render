@@ -1,0 +1,22 @@
+FROM node:20-alpine
+
+# Install FFmpeg
+RUN apk add --no-cache ffmpeg
+
+WORKDIR /app
+
+# Copy package files
+COPY apps/api/package.json ./
+COPY package.json ../
+COPY package-lock.json* ../
+
+# Install dependencies
+RUN npm install --production
+
+# Copy built files
+COPY apps/api/dist ./dist
+
+# Create directories
+RUN mkdir -p /app/uploads /app/renders
+
+CMD ["node", "dist/workers/render-worker.js"]
