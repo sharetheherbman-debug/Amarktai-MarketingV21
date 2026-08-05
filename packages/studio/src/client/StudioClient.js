@@ -6,13 +6,14 @@ const API_BASE = RAW_API_BASE.replace(/\/+$/, '').replace(/\/v1$/, '');
 function delay(ms, signal) {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(resolve, ms);
-    if (!signal) return;
-    const abort = () => {
-      clearTimeout(timer);
-      reject(new Error('Polling cancelled'));
-    };
-    if (signal.aborted) abort();
-    else signal.addEventListener('abort', abort, { once: true });
+    if (signal) {
+      const abort = () => {
+        clearTimeout(timer);
+        reject(new Error('Polling cancelled'));
+      };
+      if (signal.aborted) abort();
+      else signal.addEventListener('abort', abort, { once: true });
+    }
   });
 }
 
@@ -50,16 +51,35 @@ export class StudioClient {
     return result.data || [];
   }
 
+  async resolveModel(operation, requestedModel) {
+    this.modelCache ||= new Map();
+    if (!this.modelCache.has(operation)) this.modelCache.set(operation, await this.listModels(operation));
+    const models = this.modelCache.get(operation) || [];
+    const requestedId = typeof requestedModel === 'string' ? requestedModel : requestedModel?.id;
+    const requested = models.find((item) => item.id === requestedId);
+    return requested?.id || models[0]?.id || requestedId;
+  }
+
   async createGeneration({ type, model, prompt, negative_prompt, options }) {
+    const operation = options?.request_id ? 'video_extend' : type === 'cinema' ? 'text_to_video' : type;
+    const resolvedModel = await this.resolveModel(operation, model);
+    if (!resolvedModel) throw new Error(`No live GenX model is available for ${operation}`);
     const result = await this.request('POST', '/studio/generations', {
       organization_id: this.organizationId,
       type,
-      model: typeof model === 'string' ? model : model?.id,
+      model: resolvedModel,
       prompt,
       negative_prompt,
       options,
     });
-    return this.normalizeGeneration(result.data);
+    let generation = this.normalizeGeneration(result.data);
+    if (generation?.id && !generation.url && !['completed', 'failed', 'cancelled'].includes(generation.status)) {
+      const isLongRunning = type.includes('video') || type === 'cinema' || type === 'lip_sync';
+      generation = await this.waitForGeneration(generation.id, {
+        maxWaitMs: isLongRunning ? 20 * 60 * 1000 : 5 * 60 * 1000,
+      });
+    }
+    return generation;
   }
 
   async getGeneration(id) {
@@ -94,12 +114,7 @@ export class StudioClient {
   }
 
   async waitForGeneration(generationId, options = {}) {
-    const {
-      signal,
-      pollIntervalMs = 3000,
-      maxWaitMs = 300000,
-      onProgress,
-    } = options;
+    const { signal, pollIntervalMs = 3000, maxWaitMs = 300000, onProgress } = options;
     const startedAt = Date.now();
     let transientFailures = 0;
 
@@ -109,17 +124,12 @@ export class StudioClient {
         const generation = await this.getGeneration(generationId);
         transientFailures = 0;
         onProgress?.(generation);
-
         if (generation.status === 'completed') {
           if (!generation.url) throw new Error('Generation completed without a media output');
           return generation;
         }
-        if (generation.status === 'failed') {
-          throw new Error(generation.error_message || 'Generation failed');
-        }
-        if (generation.status === 'cancelled') {
-          throw new Error('Generation was cancelled');
-        }
+        if (generation.status === 'failed') throw new Error(generation.error_message || 'Generation failed');
+        if (generation.status === 'cancelled') throw new Error('Generation was cancelled');
         await delay(pollIntervalMs, signal);
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
@@ -128,9 +138,7 @@ export class StudioClient {
           message === 'Generation was cancelled' ||
           message === 'Generation failed' ||
           message.includes('completed without')
-        ) {
-          throw error;
-        }
+        ) throw error;
         transientFailures += 1;
         if (transientFailures > 4) throw error;
         await delay(Math.min(pollIntervalMs * 2 ** transientFailures, 15000), signal);
@@ -143,12 +151,10 @@ export class StudioClient {
     const history = await this.listHistory();
     const pending = history.filter((item) => ['pending', 'queued', 'processing'].includes(item.status));
     return Promise.allSettled(
-      pending.map((item) =>
-        this.waitForGeneration(item.id, {
-          maxWaitMs: item.type?.includes('video') ? 20 * 60 * 1000 : 10 * 60 * 1000,
-          onProgress: onUpdate,
-        })
-      )
+      pending.map((item) => this.waitForGeneration(item.id, {
+        maxWaitMs: item.type?.includes('video') ? 20 * 60 * 1000 : 10 * 60 * 1000,
+        onProgress: onUpdate,
+      }))
     );
   }
 
@@ -157,12 +163,7 @@ export class StudioClient {
     formData.append('file', file);
     const response = await fetch(
       `${API_BASE}/v1/studio/organizations/${encodeURIComponent(this.organizationId)}/uploads`,
-      {
-        method: 'POST',
-        credentials: 'include',
-        headers: this.getHeaders(false),
-        body: formData,
-      }
+      { method: 'POST', credentials: 'include', headers: this.getHeaders(false), body: formData }
     );
     if (!response.ok) {
       const error = await response.json().catch(() => ({ error: { message: response.statusText } }));
@@ -172,94 +173,56 @@ export class StudioClient {
   }
 
   async listLongFormProjects() {
-    const result = await this.request(
-      'GET',
-      `/longform-video/projects?organization_id=${encodeURIComponent(this.organizationId)}`
-    );
+    const result = await this.request('GET', `/longform-video/projects?organization_id=${encodeURIComponent(this.organizationId)}`);
     return result.data || [];
   }
 
   async createLongFormProject(data) {
-    const result = await this.request('POST', '/longform-video/projects', {
-      ...data,
-      organization_id: this.organizationId,
-    });
-    return result.data;
-  }
-
-  async updateLongFormProject(id, data) {
-    const result = await this.request('PUT', `/longform-video/projects/${id}`, {
-      ...data,
-      organization_id: this.organizationId,
-    });
+    const result = await this.request('POST', '/longform-video/projects', { ...data, organization_id: this.organizationId });
     return result.data;
   }
 
   async listScenes(projectId) {
-    const result = await this.request(
-      'GET',
-      `/longform-video/projects/${projectId}/scenes?organization_id=${encodeURIComponent(this.organizationId)}`
-    );
+    const result = await this.request('GET', `/longform-video/projects/${projectId}/scenes?organization_id=${encodeURIComponent(this.organizationId)}`);
     return result.data || [];
   }
 
   async addScene(projectId, data) {
-    const result = await this.request('POST', `/longform-video/projects/${projectId}/scenes`, {
-      ...data,
-      organization_id: this.organizationId,
-    });
+    const result = await this.request('POST', `/longform-video/projects/${projectId}/scenes`, { ...data, organization_id: this.organizationId });
     return result.data;
   }
 
   async updateScene(sceneId, data) {
-    const result = await this.request('PUT', `/longform-video/scenes/${sceneId}`, {
-      ...data,
-      organization_id: this.organizationId,
-    });
+    const result = await this.request('PUT', `/longform-video/scenes/${sceneId}`, { ...data, organization_id: this.organizationId });
     return result.data;
   }
 
   async deleteScene(sceneId) {
-    return this.request(
-      'DELETE',
-      `/longform-video/scenes/${sceneId}?organization_id=${encodeURIComponent(this.organizationId)}`
-    );
+    return this.request('DELETE', `/longform-video/scenes/${sceneId}?organization_id=${encodeURIComponent(this.organizationId)}`);
   }
 
   async generateScene(sceneId) {
-    const result = await this.request('POST', `/longform-video/scenes/${sceneId}/generate`, {
-      organization_id: this.organizationId,
-    });
+    const result = await this.request('POST', `/longform-video/scenes/${sceneId}/generate`, { organization_id: this.organizationId });
     return result.data;
   }
 
   async generateProject(projectId) {
-    const result = await this.request('POST', `/longform-video/projects/${projectId}/generate`, {
-      organization_id: this.organizationId,
-    });
+    const result = await this.request('POST', `/longform-video/projects/${projectId}/generate`, { organization_id: this.organizationId });
     return result.data;
   }
 
   async getProjectProgress(projectId) {
-    const result = await this.request(
-      'GET',
-      `/longform-video/projects/${projectId}/progress?organization_id=${encodeURIComponent(this.organizationId)}`
-    );
+    const result = await this.request('GET', `/longform-video/projects/${projectId}/progress?organization_id=${encodeURIComponent(this.organizationId)}`);
     return result.data;
   }
 
   async createRender(projectId) {
-    const result = await this.request('POST', `/longform-video/projects/${projectId}/renders`, {
-      organization_id: this.organizationId,
-    });
+    const result = await this.request('POST', `/longform-video/projects/${projectId}/renders`, { organization_id: this.organizationId });
     return result.data;
   }
 
   async getRender(renderId) {
-    const result = await this.request(
-      'GET',
-      `/longform-video/renders/${renderId}?organization_id=${encodeURIComponent(this.organizationId)}`
-    );
+    const result = await this.request('GET', `/longform-video/renders/${renderId}?organization_id=${encodeURIComponent(this.organizationId)}`);
     return result.data;
   }
 }

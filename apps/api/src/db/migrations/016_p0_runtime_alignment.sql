@@ -75,6 +75,8 @@ BEGIN
     END IF;
 END $$;
 
+ALTER TABLE video_render_events ADD COLUMN IF NOT EXISTS metadata JSONB NOT NULL DEFAULT '{}';
+
 CREATE INDEX IF NOT EXISTS idx_studio_assets_active
 ON studio_assets(organization_id, created_at DESC)
 WHERE deleted_at IS NULL;

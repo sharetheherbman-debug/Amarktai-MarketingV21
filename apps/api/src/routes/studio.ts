@@ -9,6 +9,52 @@ import * as studioService from '../services/studio.service';
 import { query } from '../config/database';
 
 const router = Router();
+
+function safeEqualSecret(a: string, b: string): boolean {
+  const left = Buffer.from(a);
+  const right = Buffer.from(b);
+  return left.length === right.length && crypto.timingSafeEqual(left, right);
+}
+
+router.post('/webhooks/genx', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const secret = process.env.GENX_WEBHOOK_SECRET;
+    const supplied = String(req.headers['x-genx-webhook-secret'] || req.headers['x-webhook-secret'] || '');
+    if (!secret || !supplied || !safeEqualSecret(supplied, secret)) {
+      res.status(401).json({ success: false, error: { message: 'Invalid webhook signature', code: 'INVALID_SIGNATURE' } });
+      return;
+    }
+    const payload = req.body || {};
+    const eventId = String(payload.event_id || payload.id || req.headers['x-genx-event-id'] || '');
+    const providerJobId = String(payload.job_id || payload.data?.job_id || payload.data?.id || '');
+    if (!eventId || !providerJobId) {
+      res.status(400).json({ success: false, error: { message: 'event_id and job_id required', code: 'BAD_REQUEST' } });
+      return;
+    }
+    const inserted = await query(
+      `INSERT INTO webhook_events (event_id, source, event_type, payload)
+       VALUES ($1, 'genx', $2, $3) ON CONFLICT (event_id) DO NOTHING RETURNING id`,
+      [eventId, String(payload.type || payload.event || 'unknown'), JSON.stringify(payload)]
+    );
+    if (inserted.rows.length === 0) {
+      res.json({ success: true, data: { duplicate: true } });
+      return;
+    }
+    const status = String(payload.status || payload.data?.status || '').toLowerCase();
+    const resultUrl = payload.result_url || payload.output_url || payload.data?.result_url || payload.data?.output_url || null;
+    const errorMessage = payload.error || payload.data?.error || null;
+    if (['completed', 'succeeded', 'success'].includes(status)) {
+      await query(`UPDATE studio_generations SET status = 'completed', progress = 100, output_urls = $1, completed_at = NOW(), updated_at = NOW() WHERE provider_job_id = $2`, [JSON.stringify(resultUrl ? [resultUrl] : []), providerJobId]);
+      await query(`UPDATE video_scenes SET status = 'completed', generated_clip_url = COALESCE($1, generated_clip_url), provider_result_url = COALESCE($1, provider_result_url), completed_at = NOW(), updated_at = NOW() WHERE provider_job_id = $2`, [resultUrl, providerJobId]);
+    } else if (['failed', 'error'].includes(status)) {
+      await query(`UPDATE studio_generations SET status = 'failed', error_message = $1, updated_at = NOW() WHERE provider_job_id = $2`, [errorMessage || 'GenX job failed', providerJobId]);
+      await query(`UPDATE video_scenes SET status = 'failed', error_message = $1, updated_at = NOW() WHERE provider_job_id = $2`, [errorMessage || 'GenX job failed', providerJobId]);
+    }
+    await query(`UPDATE webhook_events SET processed = TRUE, processing_result = $1, processed_at = NOW() WHERE event_id = $2`, [JSON.stringify({ providerJobId, status, resultUrl }), eventId]);
+    res.json({ success: true, data: { processed: true } });
+  } catch (error) { next(error); }
+});
+
 router.use(requireAuth);
 
 const upload = multer({
@@ -68,7 +114,9 @@ router.get('/models', async (req: AuthRequest, res: Response<ApiResponse>, next:
         status: model.available === false ? 'unavailable' : 'available',
       })),
     });
-  } catch (error) { next(error); }
+  } catch (error) {
+    next(error);
+  }
 });
 
 router.post('/generations', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction) => {
@@ -90,7 +138,9 @@ router.post('/generations', async (req: AuthRequest, res: Response<ApiResponse>,
       options: req.body.options,
     });
     res.status(201).json({ success: true, data: generation });
-  } catch (error) { next(error); }
+  } catch (error) {
+    next(error);
+  }
 });
 
 router.get('/generations/:id', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction) => {
@@ -104,7 +154,9 @@ router.get('/generations/:id', async (req: AuthRequest, res: Response<ApiRespons
       return;
     }
     res.json({ success: true, data: await studioService.getGeneration(req.params.id, orgId) });
-  } catch (error) { next(error); }
+  } catch (error) {
+    next(error);
+  }
 });
 
 router.post('/generations/:id/cancel', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction) => {
@@ -119,7 +171,9 @@ router.post('/generations/:id/cancel', async (req: AuthRequest, res: Response<Ap
     }
     await studioService.cancelGeneration(req.params.id, orgId);
     res.json({ success: true, data: { message: 'Generation cancelled' } });
-  } catch (error) { next(error); }
+  } catch (error) {
+    next(error);
+  }
 });
 
 router.get('/history', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction) => {
@@ -132,9 +186,12 @@ router.get('/history', async (req: AuthRequest, res: Response<ApiResponse>, next
       });
       return;
     }
-    const history = await studioService.listGenerations(orgId, req.user!.userId, Number(req.query.limit || 50));
+    const limit = Number(req.query.limit || 50);
+    const history = await studioService.listGenerations(orgId, req.user!.userId, limit);
     res.json({ success: true, data: history });
-  } catch (error) { next(error); }
+  } catch (error) {
+    next(error);
+  }
 });
 
 router.post(
@@ -146,7 +203,9 @@ router.post(
         return;
       }
       next();
-    } catch (error) { next(error); }
+    } catch (error) {
+      next(error);
+    }
   },
   upload.single('file'),
   async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction) => {
@@ -184,7 +243,9 @@ router.post(
         await fs.promises.unlink(filePath).catch(() => undefined);
         throw error;
       }
-    } catch (error) { next(error); }
+    } catch (error) {
+      next(error);
+    }
   }
 );
 
@@ -195,11 +256,13 @@ router.get('/assets/:id', async (req: AuthRequest, res: Response, next: NextFunc
       res.status(403).json({ success: false, error: { message: 'Forbidden', code: 'FORBIDDEN' } });
       return;
     }
+
     const stat = await fs.promises.stat(asset.storage_path).catch(() => null);
-    if (!stat?.isFile()) {
+    if (!stat || !stat.isFile()) {
       res.status(404).json({ success: false, error: { message: 'Asset file missing', code: 'NOT_FOUND' } });
       return;
     }
+
     res.setHeader('Content-Type', asset.mime_type);
     res.setHeader('Accept-Ranges', 'bytes');
     res.setHeader('Cache-Control', 'private, max-age=3600');
@@ -224,9 +287,12 @@ router.get('/assets/:id', async (req: AuthRequest, res: Response, next: NextFunc
       fs.createReadStream(asset.storage_path, { start, end }).pipe(res);
       return;
     }
+
     res.setHeader('Content-Length', String(stat.size));
     fs.createReadStream(asset.storage_path).pipe(res);
-  } catch (error) { next(error); }
+  } catch (error) {
+    next(error);
+  }
 });
 
 router.delete('/assets/:id', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction) => {
@@ -238,11 +304,19 @@ router.delete('/assets/:id', async (req: AuthRequest, res: Response<ApiResponse>
     }
     await studioService.deleteAsset(asset.id, asset.organization_id);
     res.json({ success: true, data: { message: 'Asset deleted' } });
-  } catch (error) { next(error); }
+  } catch (error) {
+    next(error);
+  }
 });
 
 router.post('/uploads', (_req, res) => {
-  res.status(410).json({ success: false, error: { message: 'Use the organization-scoped upload route', code: 'UPLOAD_ROUTE_MOVED' } });
+  res.status(410).json({
+    success: false,
+    error: {
+      message: 'Use /api/v1/studio/organizations/:organizationId/uploads',
+      code: 'UPLOAD_ROUTE_MOVED',
+    },
+  });
 });
 
 export default router;
