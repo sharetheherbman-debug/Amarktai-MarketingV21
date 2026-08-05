@@ -6,10 +6,44 @@ on:
   pull_request:
     branches: [master, development]
 
+permissions:
+  contents: write
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   NODE_VERSION: '22'
 
 jobs:
+  lockfile:
+    name: Refresh Secure Lockfile
+    if: github.event_name == 'pull_request' && github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - name: Apply package overrides to lockfile
+        run: npm install --package-lock-only --ignore-scripts
+      - name: Commit secure lockfile when changed
+        run: |
+          if git diff --quiet -- package-lock.json; then
+            echo "Lockfile already matches package manifests"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package-lock.json
+          git commit -m "chore: refresh audited dependency lockfile"
+          git push origin HEAD:${{ github.head_ref }}
+
   typescript:
     name: TypeScript Check
     runs-on: ubuntu-latest
