@@ -12,6 +12,7 @@
     "build": "turbo build",
     "start": "turbo start",
     "lint": "turbo lint",
+    "audit": "npm audit --audit-level=high",
     "db:migrate": "turbo db:migrate",
     "db:seed": "turbo db:seed",
     "docker:up": "docker compose -f docker/docker-compose.yml up -d",
