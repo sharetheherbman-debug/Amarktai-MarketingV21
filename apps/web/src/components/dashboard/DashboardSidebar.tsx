@@ -33,6 +33,8 @@ import {
   Globe,
   PieChart,
   Activity,
+  Store,
+  Code,
 } from 'lucide-react';
 import { useAuthStore } from '@/stores/auth.store';
 import { useUIStore } from '@/stores/ui.store';
@@ -104,6 +106,13 @@ const mainNav: NavSection[] = [
   {
     title: 'Analytics',
     items: [{ label: 'Analytics', href: '/analytics', icon: BarChart3 }],
+  },
+  {
+    title: 'Extend',
+    items: [
+      { label: 'Marketplace', href: '/marketplace', icon: Store },
+      { label: 'Developer', href: '/developer', icon: Code },
+    ],
   },
   {
     title: 'Agency',
