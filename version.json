@@ -4,7 +4,7 @@
   "tag": "v0.8.0-saas-billing",
   "milestone": "Milestone 8: SaaS Billing & Platform Operations",
   "releaseDate": "2026-08-04",
-  "commit": "pending",
+  "commit": "4bf4ec8",
   "releaseChannel": "stable",
   "buildNumber": "20260804.8",
   "description": "Complete SaaS billing with Stripe integration, feature flags, licensing, and admin console",
