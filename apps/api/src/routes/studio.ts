@@ -1,10 +1,53 @@
 import { Router, Response, NextFunction } from 'express';
+import multer from 'multer';
+import path from 'path';
+import crypto from 'crypto';
 import { requireAuth, AuthRequest } from '../middleware/auth';
 import { ApiResponse } from '../types';
 import * as studioService from '../services/studio.service';
+import { query } from '../config/database';
 
 const router = Router();
 router.use(requireAuth);
+
+// Configure multer for file uploads
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, path.join(process.cwd(), 'uploads', 'studio'));
+  },
+  filename: (req, file, cb) => {
+    const uniqueName = `${crypto.randomUUID()}${path.extname(file.originalname)}`;
+    cb(null, uniqueName);
+  },
+});
+
+const fileFilter = (req: Express.Request, file: Express.Multer.File, cb: multer.FileFilterCallback) => {
+  const allowedMimes = [
+    'image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/svg+xml',
+    'video/mp4', 'video/webm', 'video/ogg',
+    'audio/mpeg', 'audio/wav', 'audio/ogg', 'audio/webm',
+  ];
+  if (allowedMimes.includes(file.mimetype)) {
+    cb(null, true);
+  } else {
+    cb(new Error('File type not allowed'));
+  }
+};
+
+const upload = multer({
+  storage,
+  fileFilter,
+  limits: { fileSize: 50 * 1024 * 1024 }, // 50MB
+});
+
+// Helper: Verify organization membership
+async function verifyOrgMembership(orgId: string, userId: string): Promise<boolean> {
+  const result = await query(
+    'SELECT 1 FROM organization_members WHERE organization_id = $1 AND user_id = $2',
+    [orgId, userId]
+  );
+  return result.rows.length > 0;
+}
 
 // GET /api/v1/studio/models
 router.get('/models', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
@@ -23,13 +66,7 @@ router.post('/generations', async (req: AuthRequest, res: Response<ApiResponse>,
       return;
     }
 
-    // Verify user belongs to organization
-    const { query } = await import('../config/database');
-    const memberCheck = await query(
-      'SELECT 1 FROM organization_members WHERE organization_id = $1 AND user_id = $2',
-      [orgId, req.user!.userId]
-    );
-    if (memberCheck.rows.length === 0) {
+    if (!await verifyOrgMembership(orgId, req.user!.userId)) {
       res.status(403).json({ success: false, error: { message: 'Not a member of this organization', code: 'FORBIDDEN' } });
       return;
     }
@@ -54,6 +91,12 @@ router.get('/generations/:id', async (req: AuthRequest, res: Response<ApiRespons
       res.status(400).json({ success: false, error: { message: 'organization_id required', code: 'BAD_REQUEST' } });
       return;
     }
+
+    if (!await verifyOrgMembership(orgId, req.user!.userId)) {
+      res.status(403).json({ success: false, error: { message: 'Not a member of this organization', code: 'FORBIDDEN' } });
+      return;
+    }
+
     const generation = await studioService.getGeneration(req.params.id, orgId);
     res.json({ success: true, data: generation });
   } catch (error) { next(error); }
@@ -67,6 +110,12 @@ router.post('/generations/:id/cancel', async (req: AuthRequest, res: Response<Ap
       res.status(400).json({ success: false, error: { message: 'organization_id required', code: 'BAD_REQUEST' } });
       return;
     }
+
+    if (!await verifyOrgMembership(orgId, req.user!.userId)) {
+      res.status(403).json({ success: false, error: { message: 'Not a member of this organization', code: 'FORBIDDEN' } });
+      return;
+    }
+
     await studioService.cancelGeneration(req.params.id, orgId);
     res.json({ success: true, data: { message: 'Generation cancelled' } });
   } catch (error) { next(error); }
@@ -80,6 +129,12 @@ router.get('/history', async (req: AuthRequest, res: Response<ApiResponse>, next
       res.status(400).json({ success: false, error: { message: 'organization_id required', code: 'BAD_REQUEST' } });
       return;
     }
+
+    if (!await verifyOrgMembership(orgId, req.user!.userId)) {
+      res.status(403).json({ success: false, error: { message: 'Not a member of this organization', code: 'FORBIDDEN' } });
+      return;
+    }
+
     const limit = parseInt(req.query.limit as string) || 50;
     const history = await studioService.listGenerations(orgId, req.user!.userId, limit);
     res.json({ success: true, data: history });
@@ -87,7 +142,7 @@ router.get('/history', async (req: AuthRequest, res: Response<ApiResponse>, next
 });
 
 // POST /api/v1/studio/uploads
-router.post('/uploads', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
+router.post('/uploads', upload.single('file'), async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
   try {
     const orgId = req.body.organization_id;
     if (!orgId) {
@@ -95,11 +150,25 @@ router.post('/uploads', async (req: AuthRequest, res: Response<ApiResponse>, nex
       return;
     }
 
-    // Simple file upload placeholder - in production, use multer
-    res.status(501).json({
-      success: false,
-      error: { message: 'File upload not yet implemented - use external storage', code: 'NOT_IMPLEMENTED' }
+    if (!await verifyOrgMembership(orgId, req.user!.userId)) {
+      res.status(403).json({ success: false, error: { message: 'Not a member of this organization', code: 'FORBIDDEN' } });
+      return;
+    }
+
+    if (!req.file) {
+      res.status(400).json({ success: false, error: { message: 'No file provided', code: 'BAD_REQUEST' } });
+      return;
+    }
+
+    const result = await studioService.createUpload(orgId, req.user!.userId, {
+      filename: req.file.filename,
+      originalName: req.file.originalname,
+      mimeType: req.file.mimetype,
+      size: req.file.size,
+      path: req.file.path,
     });
+
+    res.status(201).json({ success: true, data: result });
   } catch (error) { next(error); }
 });
 
