@@ -4,7 +4,7 @@
   "tag": "v1.0.0-RC1",
   "milestone": "Milestone 10: Production Hardening, Quality, Observability & Release Candidate",
   "releaseDate": "2026-08-05",
-  "commit": "pending",
+  "commit": "8cd1842",
   "releaseChannel": "rc",
   "buildNumber": "20260805.10",
   "description": "Release Candidate with testing, CI/CD, security hardening, and operations documentation",
