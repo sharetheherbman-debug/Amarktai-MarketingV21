@@ -20,6 +20,7 @@ build/
 # Database
 *.sql
 !docker/init-scripts/
+!apps/api/src/db/migrations/*.sql
 
 # IDE
 .vscode/

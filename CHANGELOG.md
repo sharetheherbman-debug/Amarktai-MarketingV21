@@ -2,6 +2,47 @@
 
 All notable changes to AmarktAI Marketing are documented in this file.
 
+## [0.7.0-agency] - 2026-08-04
+
+### Milestone 7: Agency Platform & White Label
+
+#### Database
+- Added `agencies` table for agency management
+- Added `client_portals` table for white-labeled client portals
+- Added `white_label_configs` table for branding configurations
+- Added `custom_domains` table for domain mapping
+- Added `agency_team_members` table for team management
+- Added `agency_client_assignments` table for client assignments
+- Added `client_reports` table for client reporting
+- Added `portal_access_logs` table for audit trail
+- Added `template_library` table for reusable templates
+
+#### Backend Services
+- `agency.service.ts` - Multi-client management, team management, client assignments, agency stats
+- `white-label.service.ts` - White label config, custom domains, client portals, access logging
+- `template-library.service.ts` - Reusable templates with categories, system templates seeding
+
+#### API Routes
+- `/api/v1/agency` - Agency CRUD, team management, client assignments, stats, health
+- `/api/v1/white-label/config` - White label configuration
+- `/api/v1/white-label/domains` - Custom domain management
+- `/api/v1/white-label/portals` - Client portal management
+- `/api/v1/template-library` - Template CRUD, categories, duplication
+
+#### Features
+- **Multi-Client Management**: Agency dashboard, client workspaces, team assignments
+- **White Label**: Custom branding, logos, colors, fonts, CSS, email branding
+- **Custom Domains**: Domain mapping with SSL status tracking
+- **Client Portals**: White-labeled portals for client collaboration
+- **Template Library**: Reusable templates for campaigns, workflows, prompts, brand DNA, SEO, CRM, onboarding
+- **Agency Analytics**: Revenue overview, client health, team utilization
+- **Expanded RBAC**: Agency Owner, Admin, Manager, Member, Viewer roles
+
+#### Documentation
+- Agency Guide added (docs/AGENCY_GUIDE.md)
+
+---
+
 ## [0.6.0-integrations] - 2026-08-04
 
 ### Milestone 6: Integrations & Omnichannel Automation

@@ -77,15 +77,19 @@ AmarktAI Marketing platform development roadmap.
 - [x] Pipeline management
 - [x] Activity tracking
 
+### Milestone 8: Agency Platform & White Label
+- [x] Multi-client management with agency dashboard
+- [x] White label configuration (branding, logos, colors, fonts)
+- [x] Custom domain mapping with SSL tracking
+- [x] Client portals with white-labeled access
+- [x] Template library (campaign, workflow, prompt, brand DNA, SEO, CRM, onboarding)
+- [x] Agency team management with expanded RBAC
+- [x] Client reporting and analytics
+- [x] Client health monitoring
+
 ---
 
 ## In Progress
-
-### Milestone 8: White Label
-- [ ] Custom branding
-- [ ] Custom domain support
-- [ ] Tenant isolation
-- [ ] Per-tenant configuration
 
 ---
 

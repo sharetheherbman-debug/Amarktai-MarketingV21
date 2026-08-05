@@ -35,6 +35,9 @@ import amaiRoutes from './routes/amai';
 import crmRoutes from './routes/crm';
 import integrationRoutes from './routes/integrations';
 import billingRoutes from './routes/billing';
+import agencyRoutes from './routes/agency';
+import whiteLabelRoutes from './routes/white-label';
+import templateLibraryRoutes from './routes/template-library';
 import scheduler from './services/scheduler.service';
 
 const app = express();
@@ -104,6 +107,9 @@ app.use('/api/v1/amai', amaiRoutes);
 app.use('/api/v1/crm', crmRoutes);
 app.use('/api/v1/integrations', integrationRoutes);
 app.use('/api/v1/billing', billingRoutes);
+app.use('/api/v1/agency', agencyRoutes);
+app.use('/api/v1/white-label', whiteLabelRoutes);
+app.use('/api/v1/template-library', templateLibraryRoutes);
 
 app.use((_req: Request, res: Response) => {
   res.status(404).json({
