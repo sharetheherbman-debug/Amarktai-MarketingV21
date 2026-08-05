@@ -7,6 +7,22 @@ import { ApiResponse } from '../types';
 
 const router = Router();
 
+async function requireIncompleteOnboarding(_req: Request, res: Response<ApiResponse>, next: NextFunction) {
+  try {
+    const status = await onboardingService.getStatus();
+    if (status.isComplete) {
+      res.status(403).json({
+        success: false,
+        error: { message: 'Onboarding is already complete', code: 'ONBOARDING_LOCKED' },
+      });
+      return;
+    }
+    next();
+  } catch (error) {
+    next(error);
+  }
+}
+
 router.get('/status', async (_req: Request, res: Response<ApiResponse>, next: NextFunction) => {
   try {
     const status = await onboardingService.getStatus();
@@ -16,10 +32,12 @@ router.get('/status', async (_req: Request, res: Response<ApiResponse>, next: Ne
   }
 });
 
+router.use(requireIncompleteOnboarding);
+
 router.post('/admin', validateBody(onboardingAdminSchema), async (req: Request, res: Response<ApiResponse>, next: NextFunction) => {
   try {
     const user = await onboardingService.createAdmin(req.body);
-    const { password_hash, ...userWithoutPassword } = user;
+    const { password_hash: _passwordHash, ...userWithoutPassword } = user;
     res.status(201).json({ success: true, data: userWithoutPassword });
   } catch (error) {
     next(error);
@@ -46,8 +64,7 @@ router.post('/providers', validateBody(z.object({ providers: z.array(providerCon
 
 router.post('/test-providers', async (_req: Request, res: Response<ApiResponse>, next: NextFunction) => {
   try {
-    const results = await onboardingService.testProviders();
-    res.json({ success: true, data: results });
+    res.json({ success: true, data: await onboardingService.testProviders() });
   } catch (error) {
     next(error);
   }
@@ -56,7 +73,7 @@ router.post('/test-providers', async (_req: Request, res: Response<ApiResponse>,
 router.post('/organization', validateBody(z.object({ name: z.string().min(1), slug: z.string().min(1) })), async (req: Request, res: Response<ApiResponse>, next: NextFunction) => {
   try {
     const { query } = await import('../config/database');
-    const adminResult = await query("SELECT id FROM users WHERE role = 'admin' AND deleted_at IS NULL LIMIT 1");
+    const adminResult = await query("SELECT id FROM users WHERE role IN ('admin','superadmin') AND deleted_at IS NULL LIMIT 1");
     if (adminResult.rows.length === 0) {
       res.status(400).json({
         success: false,
@@ -74,6 +91,14 @@ router.post('/organization', validateBody(z.object({ name: z.string().min(1), sl
 
 router.post('/complete', async (_req: Request, res: Response<ApiResponse>, next: NextFunction) => {
   try {
+    const status = await onboardingService.getStatus();
+    if (status.needsAdmin || status.needsProviders || status.needsOrganization) {
+      res.status(400).json({
+        success: false,
+        error: { message: 'Complete all onboarding steps first', code: 'ONBOARDING_INCOMPLETE' },
+      });
+      return;
+    }
     await onboardingService.complete();
     res.json({ success: true, data: { message: 'Onboarding completed' } });
   } catch (error) {
