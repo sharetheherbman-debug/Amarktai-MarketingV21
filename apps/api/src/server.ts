@@ -1,4 +1,4 @@
-import express, { Request, Response, NextFunction } from 'express';
+import express, { Request, Response } from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import compression from 'compression';
@@ -11,6 +11,7 @@ import { logger } from './utils/logger';
 import { errorHandler } from './middleware/errorHandler';
 import { generalLimiter } from './middleware/rateLimit';
 import { csrfProtection } from './middleware/csrf';
+import { providerRouter } from './providers/provider-router';
 
 import healthRoutes from './routes/health';
 import authRoutes from './routes/auth';
@@ -48,34 +49,41 @@ import longformVideoRoutes from './routes/longform-video';
 import scheduler from './services/scheduler.service';
 
 const app = express();
+app.set('trust proxy', 1);
+app.disable('x-powered-by');
 
 app.use(cors({
-  origin: env.APP_URL,
+  origin(origin, callback) {
+    if (!origin || origin === env.APP_URL) return callback(null, true);
+    return callback(new Error('Origin is not allowed by CORS'));
+  },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Range'],
+  exposedHeaders: ['Content-Range', 'Accept-Ranges', 'Content-Length'],
 }));
 
 app.use(helmet({
-  contentSecurityPolicy: false,
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'none'"],
+      frameAncestors: ["'none'"],
+      baseUri: ["'none'"],
+      formAction: ["'none'"],
+    },
+  },
   crossOriginEmbedderPolicy: false,
+  crossOriginResourcePolicy: { policy: 'same-site' },
 }));
 
 app.use(compression());
-
 app.use(morgan('combined', {
-  stream: {
-    write: (message: string) => logger.http(message.trim()),
-  },
+  stream: { write: (message: string) => logger.http(message.trim()) },
 }));
-
 app.use(cookieParser());
-
 app.use(csrfProtection);
-
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
-
 app.use(generalLimiter);
 
 app.get('/', (_req: Request, res: Response) => {
@@ -136,34 +144,31 @@ app.use(errorHandler);
 
 async function startServer() {
   try {
-    const dbConnected = await testConnection();
-    if (!dbConnected) {
+    if (!await testConnection()) {
       logger.error('Failed to connect to database');
       process.exit(1);
     }
 
-    const redisConnected = await testRedisConnection();
-    if (!redisConnected) {
-      logger.warn('Redis connection failed, some features may be limited');
+    if (!await testRedisConnection()) {
+      logger.error('Redis connection failed; queue-backed features cannot start');
+      process.exit(1);
     }
+
+    await providerRouter.loadProviders();
 
     const server = app.listen(env.PORT, () => {
       logger.info(`Server running on port ${env.PORT}`);
       logger.info(`Environment: ${env.NODE_ENV}`);
       logger.info(`API URL: ${env.API_URL}`);
       logger.info(`App URL: ${env.APP_URL}`);
-
       scheduler.startScheduler();
     });
 
     const gracefulShutdown = async (signal: string) => {
       logger.info(`${signal} received. Starting graceful shutdown...`);
-
       server.close(async () => {
         logger.info('HTTP server closed');
-
         scheduler.stopScheduler();
-
         try {
           await closePool();
           await closeRedis();
@@ -178,19 +183,17 @@ async function startServer() {
       setTimeout(() => {
         logger.error('Graceful shutdown timed out, forcing exit');
         process.exit(1);
-      }, 30000);
+      }, 30000).unref();
     };
 
-    process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
-    process.on('SIGINT', () => gracefulShutdown('SIGINT'));
-
+    process.on('SIGTERM', () => void gracefulShutdown('SIGTERM'));
+    process.on('SIGINT', () => void gracefulShutdown('SIGINT'));
     process.on('unhandledRejection', (reason, promise) => {
       logger.error('Unhandled Rejection at:', promise, 'reason:', reason);
     });
-
     process.on('uncaughtException', (error) => {
       logger.error('Uncaught Exception:', error);
-      gracefulShutdown('uncaughtException');
+      void gracefulShutdown('uncaughtException');
     });
   } catch (error) {
     logger.error('Failed to start server', error);
@@ -198,6 +201,6 @@ async function startServer() {
   }
 }
 
-startServer();
+void startServer();
 
 export default app;
