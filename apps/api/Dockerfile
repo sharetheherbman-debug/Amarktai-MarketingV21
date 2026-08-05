@@ -45,6 +45,9 @@ COPY --from=build /app/apps/api/package.json ./
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/apps/api/node_modules ./app_modules
 
+# Create uploads directory
+RUN mkdir -p /app/uploads/studio && chown -R apiuser:nodejs /app/uploads
+
 ENV NODE_ENV=production
 ENV PORT=4000
 
@@ -55,4 +58,4 @@ USER apiuser
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
   CMD wget --no-verbose --tries=1 --spider http://localhost:4000/health || exit 1
 
-CMD ["node", "dist/index.js"]
+CMD ["node", "dist/server.js"]
