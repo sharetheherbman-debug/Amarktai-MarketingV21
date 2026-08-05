@@ -1,49 +1,19 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import {
   Image,
   Video,
   Mic,
   Film,
-  Sparkles,
   Loader2,
   AlertCircle,
   X,
-  Download,
   History,
-  Settings,
-  Send,
-  RefreshCw,
-  Clock,
-  CheckCircle2,
-  XCircle,
+  Download,
 } from 'lucide-react';
-import { api } from '@/lib/api';
-import type { ApiResponse } from '@/types';
-
-interface StudioModel {
-  id: string;
-  name: string;
-  type: string;
-  provider: string;
-  status: 'available' | 'pending' | 'unsupported';
-  description: string;
-}
-
-interface Generation {
-  id: string;
-  type: string;
-  model: string | null;
-  prompt: string | null;
-  status: string;
-  progress: number;
-  output_urls: string[];
-  error_code: string | null;
-  error_message: string | null;
-  created_at: string;
-  completed_at: string | null;
-}
+import { ImageStudio, VideoStudio, LipSyncStudio, CinemaStudio, StudioClient } from '@amarktai/studio';
+import { useAuthStore } from '@/stores/auth.store';
 
 const tabs = [
   { id: 'image', label: 'Image Studio', icon: Image },
@@ -54,113 +24,41 @@ const tabs = [
 
 type TabId = typeof tabs[number]['id'];
 
-const statusConfig: Record<string, { color: string; bg: string; icon: typeof CheckCircle2 }> = {
-  completed: { color: 'text-emerald-400', bg: 'bg-emerald-500/10', icon: CheckCircle2 },
-  processing: { color: 'text-blue-400', bg: 'bg-blue-500/10', icon: Loader2 },
-  pending: { color: 'text-amber-400', bg: 'bg-amber-500/10', icon: Clock },
-  failed: { color: 'text-red-400', bg: 'bg-red-500/10', icon: XCircle },
-  cancelled: { color: 'text-zinc-400', bg: 'bg-zinc-500/10', icon: XCircle },
-};
-
 export default function CreativeStudioPage() {
   const [activeTab, setActiveTab] = useState<TabId>('image');
-  const [models, setModels] = useState<StudioModel[]>([]);
-  const [history, setHistory] = useState<Generation[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [generating, setGenerating] = useState(false);
+  const [history, setHistory] = useState<Array<{ id: string; url: string; prompt?: string; model?: string; timestamp: string }>>([]);
   const [error, setError] = useState<string | null>(null);
 
-  // Form state
-  const [prompt, setPrompt] = useState('');
-  const [negativePrompt, setNegativePrompt] = useState('');
-  const [selectedModel, setSelectedModel] = useState('');
-  const [aspectRatio, setAspectRatio] = useState('1:1');
-  const [quality, setQuality] = useState('standard');
-
+  const { token, user } = useAuthStore();
   const orgId = typeof window !== 'undefined' ? localStorage.getItem('org_id') || '' : '';
 
-  const fetchData = useCallback(async () => {
-    if (!orgId) return;
-    try {
-      setLoading(true);
-      const [modelsRes, historyRes] = await Promise.all([
-        api.get<ApiResponse<StudioModel[]>>('/studio/models'),
-        api.get<ApiResponse<Generation[]>>('/studio/history', { params: { organization_id: orgId } }),
-      ]);
-      setModels(modelsRes.data);
-      setHistory(historyRes.data);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load');
-    } finally {
-      setLoading(false);
-    }
-  }, [orgId]);
+  // Create studio client
+  const studioClient = useMemo(() => {
+    return new StudioClient({
+      organizationId: orgId,
+      getToken: () => token,
+    });
+  }, [orgId, token]);
 
-  useEffect(() => { fetchData(); }, [fetchData]);
+  const handleGenerationComplete = useCallback((result: { url: string; model?: string; prompt?: string; type?: string }) => {
+    const entry = {
+      id: Date.now().toString(),
+      url: result.url,
+      prompt: result.prompt,
+      model: result.model,
+      timestamp: new Date().toISOString(),
+    };
+    setHistory(prev => [entry, ...prev]);
+  }, []);
 
-  const handleGenerate = async () => {
-    if (!prompt || !orgId) return;
-    try {
-      setGenerating(true);
-      setError(null);
-
-      const typeMap: Record<TabId, string> = {
-        image: 'text_to_image',
-        video: 'text_to_video',
-        lipsync: 'lip_sync',
-        cinema: 'cinema',
-      };
-
-      const res = await api.post<ApiResponse<Generation>>('/studio/generations', {
-        body: {
-          organization_id: orgId,
-          type: typeMap[activeTab],
-          model: selectedModel || undefined,
-          prompt,
-          negative_prompt: negativePrompt || undefined,
-          options: { aspect_ratio: aspectRatio, quality },
-        },
-      });
-
-      const gen = res.data;
-
-      if (gen.status === 'failed' && gen.error_code === 'GENX_MODALITY_NOT_AVAILABLE') {
-        setError(`This generation type is not yet available through GenX. ${gen.error_message || ''}`);
-      } else if (gen.status === 'completed') {
-        setHistory(prev => [gen, ...prev]);
-      } else {
-        // Poll for status
-        setHistory(prev => [gen, ...prev]);
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Generation failed');
-    } finally {
-      setGenerating(false);
-    }
-  };
-
-  const availableModels = models.filter(m =>
-    m.status === 'available' &&
-    (activeTab === 'image' ? m.type === 'text_to_image' || m.type === 'image_to_image' :
-     activeTab === 'video' ? m.type === 'text_to_video' || m.type === 'image_to_video' :
-     activeTab === 'lipsync' ? m.type === 'lip_sync' :
-     m.type === 'cinema')
-  );
-
-  const pendingModels = models.filter(m =>
-    m.status === 'pending' &&
-    (activeTab === 'image' ? m.type === 'text_to_image' || m.type === 'image_to_image' :
-     activeTab === 'video' ? m.type === 'text_to_video' || m.type === 'image_to_video' :
-     activeTab === 'lipsync' ? m.type === 'lip_sync' :
-     m.type === 'cinema')
-  );
-
-  const filteredHistory = history.filter(h =>
-    activeTab === 'image' ? ['text_to_image', 'image_to_image'].includes(h.type) :
-    activeTab === 'video' ? ['text_to_video', 'image_to_video'].includes(h.type) :
-    activeTab === 'lipsync' ? h.type === 'lip_sync' :
-    h.type === 'cinema'
-  );
+  const handleDownload = useCallback((url: string, filename: string) => {
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  }, []);
 
   return (
     <div className="space-y-6">
@@ -197,165 +95,75 @@ export default function CreativeStudioPage() {
         ))}
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-3">
-        {/* Generation Form */}
-        <div className="lg:col-span-2 space-y-4">
-          <div className="rounded-xl border border-white/[0.06] bg-surface-100 p-6">
-            <h2 className="text-lg font-semibold text-white mb-4">
-              {tabs.find(t => t.id === activeTab)?.label}
-            </h2>
-
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-zinc-300 mb-1.5">Prompt</label>
-                <textarea
-                  value={prompt}
-                  onChange={e => setPrompt(e.target.value)}
-                  placeholder={`Describe the ${activeTab} you want to generate...`}
-                  rows={4}
-                  className="w-full rounded-lg border border-white/[0.06] bg-white/[0.03] px-4 py-3 text-sm text-white placeholder-zinc-500 outline-none focus:border-brand-500/50"
-                />
-              </div>
-
-              {activeTab === 'image' && (
-                <div>
-                  <label className="block text-sm font-medium text-zinc-300 mb-1.5">Negative Prompt</label>
-                  <input
-                    type="text"
-                    value={negativePrompt}
-                    onChange={e => setNegativePrompt(e.target.value)}
-                    placeholder="What to exclude from the image..."
-                    className="w-full rounded-lg border border-white/[0.06] bg-white/[0.03] px-4 py-2.5 text-sm text-white placeholder-zinc-500 outline-none focus:border-brand-500/50"
-                  />
-                </div>
-              )}
-
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-zinc-300 mb-1.5">Aspect Ratio</label>
-                  <select
-                    value={aspectRatio}
-                    onChange={e => setAspectRatio(e.target.value)}
-                    className="w-full rounded-lg border border-white/[0.06] bg-white/[0.03] px-3 py-2.5 text-sm text-white outline-none focus:border-brand-500/50"
-                  >
-                    <option value="1:1">1:1 Square</option>
-                    <option value="16:9">16:9 Widescreen</option>
-                    <option value="9:16">9:16 Portrait</option>
-                    <option value="4:3">4:3 Standard</option>
-                    <option value="3:4">3:4 Portrait</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-zinc-300 mb-1.5">Quality</label>
-                  <select
-                    value={quality}
-                    onChange={e => setQuality(e.target.value)}
-                    className="w-full rounded-lg border border-white/[0.06] bg-white/[0.03] px-3 py-2.5 text-sm text-white outline-none focus:border-brand-500/50"
-                  >
-                    <option value="standard">Standard</option>
-                    <option value="high">High</option>
-                    <option value="ultra">Ultra</option>
-                  </select>
-                </div>
-              </div>
-
-              {/* Available Models */}
-              {availableModels.length > 0 && (
-                <div>
-                  <label className="block text-sm font-medium text-zinc-300 mb-1.5">Available Models</label>
-                  <div className="grid grid-cols-2 gap-2">
-                    {availableModels.map(model => (
-                      <button
-                        key={model.id}
-                        onClick={() => setSelectedModel(model.id)}
-                        className={`rounded-lg border p-3 text-left text-sm transition-colors ${
-                          selectedModel === model.id
-                            ? 'border-brand-500/50 bg-brand-500/10 text-white'
-                            : 'border-white/[0.06] bg-white/[0.02] text-zinc-300 hover:bg-white/[0.04]'
-                        }`}
-                      >
-                        {model.name}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Pending Models */}
-              {pendingModels.length > 0 && (
-                <div>
-                  <label className="block text-sm font-medium text-zinc-500 mb-1.5">GenX Mapping Pending</label>
-                  <div className="grid grid-cols-2 gap-2">
-                    {pendingModels.map(model => (
-                      <div
-                        key={model.id}
-                        className="rounded-lg border border-white/[0.04] bg-white/[0.01] p-3 text-sm text-zinc-600"
-                      >
-                        {model.name}
-                        <span className="ml-2 text-[10px] text-zinc-600">Phase 2</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              <button
-                onClick={handleGenerate}
-                disabled={generating || !prompt}
-                className="w-full inline-flex items-center justify-center gap-2 rounded-lg bg-brand-500 px-4 py-3 text-sm font-semibold text-white transition-all hover:bg-brand-400 disabled:opacity-50"
-              >
-                {generating ? (
-                  <Loader2 className="h-5 w-5 animate-spin" />
-                ) : (
-                  <Sparkles className="h-5 w-5" />
-                )}
-                {generating ? 'Generating...' : 'Generate'}
-              </button>
-            </div>
-          </div>
-        </div>
-
-        {/* History */}
-        <div className="space-y-4">
-          <div className="rounded-xl border border-white/[0.06] bg-surface-100 p-6">
-            <h2 className="flex items-center gap-2 text-lg font-semibold text-white mb-4">
-              <History className="h-5 w-5 text-brand-400" />
-              Recent Generations
-            </h2>
-            {filteredHistory.length === 0 ? (
-              <p className="text-sm text-zinc-500">No generations yet</p>
-            ) : (
-              <div className="space-y-3">
-                {filteredHistory.slice(0, 10).map(gen => {
-                  const status = statusConfig[gen.status] || statusConfig.pending;
-                  const StatusIcon = status.icon;
-                  return (
-                    <div key={gen.id} className="rounded-lg border border-white/[0.04] bg-white/[0.02] p-3">
-                      <div className="flex items-center justify-between">
-                        <p className="text-xs text-zinc-400 truncate flex-1">{gen.prompt}</p>
-                        <StatusIcon className={`h-4 w-4 ml-2 ${status.color} ${gen.status === 'processing' ? 'animate-spin' : ''}`} />
-                      </div>
-                      {gen.error_code && (
-                        <p className="mt-1 text-[11px] text-red-400">{gen.error_code}</p>
-                      )}
-                      {gen.output_urls.length > 0 && (
-                        <div className="mt-2">
-                          {gen.output_urls.map((url, i) => (
-                            <div key={i} className="text-xs text-brand-400 truncate">{typeof url === 'string' ? url : JSON.stringify(url)}</div>
-                          ))}
-                        </div>
-                      )}
-                      <p className="mt-1 text-[10px] text-zinc-600">
-                        {new Date(gen.created_at).toLocaleString()}
-                      </p>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        </div>
+      {/* Studio Content */}
+      <div className="min-h-[600px]">
+        {activeTab === 'image' && (
+          <ImageStudio
+            studioClient={studioClient}
+            onGenerationComplete={handleGenerationComplete}
+            historyItems={history}
+          />
+        )}
+        {activeTab === 'video' && (
+          <VideoStudio
+            studioClient={studioClient}
+            onGenerationComplete={handleGenerationComplete}
+            historyItems={history}
+          />
+        )}
+        {activeTab === 'lipsync' && (
+          <LipSyncStudio
+            studioClient={studioClient}
+            onGenerationComplete={handleGenerationComplete}
+            historyItems={history}
+          />
+        )}
+        {activeTab === 'cinema' && (
+          <CinemaStudio
+            studioClient={studioClient}
+            onGenerationComplete={handleGenerationComplete}
+            historyItems={history}
+          />
+        )}
       </div>
+
+      {/* Generation History */}
+      {history.length > 0 && (
+        <div className="rounded-xl border border-white/[0.06] bg-surface-100 p-6">
+          <h2 className="flex items-center gap-2 text-lg font-semibold text-white mb-4">
+            <History className="h-5 w-5 text-brand-400" />
+            Recent Generations
+          </h2>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            {history.slice(0, 8).map(item => (
+              <div key={item.id} className="group relative rounded-lg border border-white/[0.06] bg-white/[0.02] overflow-hidden">
+                {item.url && (
+                  <img
+                    src={item.url}
+                    alt={item.prompt || 'Generated content'}
+                    className="w-full h-32 object-cover"
+                    onError={(e) => {
+                      (e.target as HTMLImageElement).style.display = 'none';
+                    }}
+                  />
+                )}
+                <div className="p-3">
+                  <p className="text-xs text-zinc-400 truncate">{item.prompt || 'No prompt'}</p>
+                  <div className="mt-1 flex items-center justify-between">
+                    <span className="text-[10px] text-zinc-500">{new Date(item.timestamp).toLocaleTimeString()}</span>
+                    <button
+                      onClick={() => handleDownload(item.url, `generation-${item.id}.png`)}
+                      className="opacity-0 group-hover:opacity-100 transition-opacity rounded p-1 text-zinc-400 hover:text-white"
+                    >
+                      <Download className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
