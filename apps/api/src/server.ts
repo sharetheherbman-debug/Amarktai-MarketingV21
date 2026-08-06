@@ -49,6 +49,7 @@ import studioRoutes from './routes/studio';
 import genxAdminRoutes from './routes/genx-admin';
 import longformVideoRoutes from './routes/longform-video';
 import longformProductionRoutes from './routes/longform-production';
+import longformSceneProductionRoutes from './routes/longform-scene-production';
 import scheduler from './services/scheduler.service';
 
 const app = express();
@@ -134,6 +135,7 @@ app.use('/api/v1/marketplace', marketplaceRoutes);
 app.use('/api/v1/developer', developerRoutes);
 app.use('/api/v1/studio', studioRoutes);
 app.use('/api/v1/admin/genx', genxAdminRoutes);
+app.use('/api/v1/longform-video', longformSceneProductionRoutes);
 app.use('/api/v1/longform-video', longformVideoRoutes);
 app.use('/api/v1/longform-video', longformProductionRoutes);
 
