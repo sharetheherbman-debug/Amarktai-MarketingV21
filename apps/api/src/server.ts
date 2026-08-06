@@ -15,7 +15,7 @@ import { requireAuth } from './middleware/auth';
 import { requireOrganizationMembership } from './middleware/organization-access';
 import { providerRouter } from './providers/provider-router';
 
-import healthRoutes from './routes/health';
+import healthRoutes, { closeHealthQueues } from './routes/health';
 import authRoutes from './routes/auth';
 import organizationRoutes from './routes/organizations';
 import userRoutes from './routes/users';
@@ -54,18 +54,43 @@ import longformSceneProductionRoutes from './routes/longform-scene-production';
 import scheduler from './services/scheduler.service';
 
 const app = express();
-app.set('trust proxy', 1);
+app.set('trust proxy', env.TRUST_PROXY_HOPS);
 app.disable('x-powered-by');
+
+function toOrigin(value: string): string {
+  try {
+    return new URL(value).origin;
+  } catch {
+    return value.replace(/\/$/, '');
+  }
+}
+
+const allowedOrigins = new Set(
+  [env.APP_URL, env.API_URL, ...env.CORS_ORIGIN.split(',')]
+    .map((value) => value.trim())
+    .filter(Boolean)
+    .map(toOrigin)
+);
 
 app.use(cors({
   origin(origin, callback) {
-    if (!origin || origin === env.APP_URL) return callback(null, true);
+    if (!origin || allowedOrigins.has(toOrigin(origin))) return callback(null, true);
     return callback(new Error('Origin is not allowed by CORS'));
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Range'],
+  allowedHeaders: [
+    'Content-Type',
+    'Authorization',
+    'X-Requested-With',
+    'X-CSRF-Token',
+    'X-Organization-Id',
+    'X-Idempotency-Key',
+    'Idempotency-Key',
+    'Range',
+  ],
   exposedHeaders: ['Content-Range', 'Accept-Ranges', 'Content-Length'],
+  maxAge: 86400,
 }));
 
 app.use(helmet({
@@ -172,36 +197,44 @@ async function startServer() {
       scheduler.startScheduler();
     });
 
-    const gracefulShutdown = async (signal: string) => {
+    let shuttingDown = false;
+    const gracefulShutdown = async (signal: string, exitCode = 0) => {
+      if (shuttingDown) return;
+      shuttingDown = true;
       logger.info(`${signal} received. Starting graceful shutdown...`);
+
+      const forceExit = setTimeout(() => {
+        logger.error('Graceful shutdown timed out, forcing exit');
+        process.exit(1);
+      }, 30000);
+      forceExit.unref();
+
       server.close(async () => {
         logger.info('HTTP server closed');
         scheduler.stopScheduler();
         try {
+          await closeHealthQueues();
           await closePool();
           await closeRedis();
+          clearTimeout(forceExit);
           logger.info('All connections closed');
-          process.exit(0);
+          process.exit(exitCode);
         } catch (error) {
           logger.error('Error during shutdown', error);
           process.exit(1);
         }
       });
-
-      setTimeout(() => {
-        logger.error('Graceful shutdown timed out, forcing exit');
-        process.exit(1);
-      }, 30000).unref();
     };
 
     process.on('SIGTERM', () => void gracefulShutdown('SIGTERM'));
     process.on('SIGINT', () => void gracefulShutdown('SIGINT'));
     process.on('unhandledRejection', (reason, promise) => {
       logger.error('Unhandled Rejection at:', promise, 'reason:', reason);
+      void gracefulShutdown('unhandledRejection', 1);
     });
     process.on('uncaughtException', (error) => {
       logger.error('Uncaught Exception:', error);
-      void gracefulShutdown('uncaughtException');
+      void gracefulShutdown('uncaughtException', 1);
     });
   } catch (error) {
     logger.error('Failed to start server', error);
