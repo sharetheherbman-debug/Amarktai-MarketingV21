@@ -1,6 +1,6 @@
 import { Router, Response, NextFunction } from 'express';
 import { requireAuth, AuthRequest } from '../middleware/auth';
-import { query } from '../config/database';
+import { query, transaction } from '../config/database';
 import type { ApiResponse } from '../types';
 
 const router = Router();
@@ -45,9 +45,75 @@ async function authorize(req: AuthRequest) {
 function fail(res: Response<ApiResponse>, status: number, message: string) {
   return res.status(status).json({
     success: false,
-    error: { message, code: status === 403 ? 'FORBIDDEN' : 'BAD_REQUEST' },
+    error: { message, code: status === 403 ? 'FORBIDDEN' : status === 404 ? 'NOT_FOUND' : 'BAD_REQUEST' },
   });
 }
+
+router.post('/projects/:id/storyboard/apply', async (
+  req: AuthRequest,
+  res: Response<ApiResponse>,
+  next: NextFunction
+) => {
+  try {
+    const auth = await authorize(req);
+    if (auth.error) return fail(res, auth.status, auth.error);
+    const storyboard = Array.isArray(req.body.storyboard) ? req.body.storyboard : [];
+    if (storyboard.length === 0) return fail(res, 400, 'storyboard must contain at least one scene');
+
+    const project = await query(
+      'SELECT id FROM video_projects WHERE id = $1 AND organization_id = $2',
+      [req.params.id, auth.organizationId]
+    );
+    if (!project.rows[0]) return fail(res, 404, 'Video project not found');
+
+    const scenes = await transaction(async (client) => {
+      await client.query(
+        'DELETE FROM video_scenes WHERE project_id = $1 AND organization_id = $2',
+        [req.params.id, auth.organizationId]
+      );
+      const inserted: Record<string, unknown>[] = [];
+      for (let index = 0; index < storyboard.length; index += 1) {
+        const scene = storyboard[index] || {};
+        const result = await client.query(
+          `INSERT INTO video_scenes (
+             project_id, organization_id, scene_number, title, narration, dialogue,
+             visual_prompt, negative_prompt, model_id, duration_seconds,
+             camera_instructions, caption_text, metadata
+           ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+           RETURNING *`,
+          [
+            req.params.id,
+            auth.organizationId,
+            index + 1,
+            String(scene.title || `Scene ${index + 1}`),
+            String(scene.narration || ''),
+            String(scene.dialogue || ''),
+            String(scene.visual_prompt || scene.narration || ''),
+            scene.negative_prompt ? String(scene.negative_prompt) : null,
+            scene.model_id ? String(scene.model_id) : null,
+            Math.max(1, Number(scene.duration_seconds || 10)),
+            String(scene.camera_instructions || ''),
+            String(scene.caption_text || scene.narration || ''),
+            JSON.stringify({
+              ...(scene.metadata && typeof scene.metadata === 'object' ? scene.metadata : {}),
+              transition: scene.transition || (index === 0 ? 'cut' : 'crossfade'),
+            }),
+          ]
+        );
+        inserted.push(result.rows[0]);
+      }
+      await client.query(
+        `UPDATE video_projects
+         SET storyboard = $1, updated_at = NOW()
+         WHERE id = $2 AND organization_id = $3`,
+        [JSON.stringify(storyboard), req.params.id, auth.organizationId]
+      );
+      return inserted;
+    });
+
+    return res.json({ success: true, data: scenes });
+  } catch (error) { return next(error); }
+});
 
 router.put('/scenes/:id', async (
   req: AuthRequest,
