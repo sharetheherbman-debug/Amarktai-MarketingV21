@@ -15,7 +15,9 @@ RUN npm run build --workspace=@amarktai/api
 
 FROM node:20-alpine AS production
 WORKDIR /app
-RUN addgroup --system --gid 1001 nodejs && adduser --system --uid 1001 apiuser
+RUN apk add --no-cache ffmpeg && \
+    addgroup --system --gid 1001 nodejs && \
+    adduser --system --uid 1001 apiuser
 
 COPY --from=build /app/apps/api/dist ./dist
 COPY --from=build /app/apps/api/src/db/migrations ./dist/db/migrations
@@ -23,7 +25,7 @@ COPY --from=build /app/apps/api/package.json ./package.json
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/version.json ./version.json
 
-RUN mkdir -p /app/uploads/studio /app/uploads/studio/renders && \
+RUN mkdir -p /app/uploads/studio /app/uploads/studio/renders /app/uploads/studio/continuity && \
     chown -R apiuser:nodejs /app/uploads
 
 ENV NODE_ENV=production
