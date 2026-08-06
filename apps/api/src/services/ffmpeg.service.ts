@@ -90,16 +90,28 @@ async function normalizeClip(
   outputPath: string,
   resolution: string,
   frameRate: number
-): Promise<void> {
+): Promise<number> {
   const [width, height] = resolution.split('x').map(Number);
   if (!width || !height) throw new Error(`Invalid resolution: ${resolution}`);
-  await ffmpeg([
-    '-y', '-i', inputPath,
-    '-vf', `scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2,setsar=1`,
-    '-r', String(frameRate),
+  const info = await getVideoInfo(inputPath);
+  const streams = (info.streams as Array<Record<string, unknown>>) || [];
+  const hasAudio = streams.some((stream) => stream.codec_type === 'audio');
+  const duration = Math.max(0.1, Number((info.format as Record<string, unknown>)?.duration || 0));
+  const videoFilter = `scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=${frameRate},settb=AVTB`;
+
+  const args = ['-y', '-i', inputPath];
+  if (!hasAudio) {
+    args.push('-f', 'lavfi', '-t', String(duration), '-i', 'anullsrc=channel_layout=stereo:sample_rate=48000');
+  }
+  args.push('-map', '0:v:0', '-map', hasAudio ? '0:a:0' : '1:a:0');
+  args.push(
+    '-vf', videoFilter,
     '-c:v', 'libx264', '-preset', 'medium', '-crf', '23', '-pix_fmt', 'yuv420p',
-    '-c:a', 'aac', '-ar', '48000', '-ac', '2', '-movflags', '+faststart', outputPath,
-  ]);
+    '-c:a', 'aac', '-ar', '48000', '-ac', '2', '-b:a', '160k',
+    '-shortest', '-movflags', '+faststart', outputPath
+  );
+  await ffmpeg(args);
+  return duration;
 }
 
 function summarize(filePath: string, info: Record<string, unknown>, stat: { size: number }, resolution: string): FFmpegResult {
@@ -118,26 +130,109 @@ function summarize(filePath: string, info: Record<string, unknown>, stat: { size
   };
 }
 
+const TRANSITIONS: Record<string, string> = {
+  crossfade: 'fade',
+  fade: 'fade',
+  fadeblack: 'fadeblack',
+  fadewhite: 'fadewhite',
+  wipeleft: 'wipeleft',
+  wiperight: 'wiperight',
+  wipeup: 'wipeup',
+  wipedown: 'wipedown',
+  slideleft: 'slideleft',
+  slideright: 'slideright',
+  slideup: 'slideup',
+  slidedown: 'slidedown',
+  dissolve: 'dissolve',
+  pixelize: 'pixelize',
+  circleopen: 'circleopen',
+  circleclose: 'circleclose',
+};
+
+async function transitionVideos(
+  normalized: string[],
+  durations: number[],
+  transitions: string[],
+  defaultDuration: number,
+  outputPath: string
+): Promise<void> {
+  const args: string[] = ['-y'];
+  normalized.forEach((item) => args.push('-i', item));
+  const filters: string[] = [];
+  let videoLabel = '[0:v]';
+  let audioLabel = '[0:a]';
+  let elapsed = durations[0];
+
+  for (let index = 1; index < normalized.length; index += 1) {
+    const requested = String(transitions[index] || 'cut').toLowerCase();
+    const isCut = requested === 'cut' || requested === 'none';
+    const duration = isCut
+      ? 0.01
+      : Math.max(0.05, Math.min(defaultDuration, durations[index - 1] / 3, durations[index] / 3));
+    const transition = isCut ? 'fade' : (TRANSITIONS[requested] || 'fade');
+    const offset = Math.max(0, elapsed - duration);
+    const nextVideo = `[video${index}]`;
+    const nextAudio = `[audio${index}]`;
+    filters.push(
+      `${videoLabel}[${index}:v]xfade=transition=${transition}:duration=${duration.toFixed(3)}:offset=${offset.toFixed(3)}${nextVideo}`
+    );
+    filters.push(
+      `${audioLabel}[${index}:a]acrossfade=d=${duration.toFixed(3)}:c1=tri:c2=tri${nextAudio}`
+    );
+    videoLabel = nextVideo;
+    audioLabel = nextAudio;
+    elapsed += durations[index] - duration;
+  }
+
+  args.push('-filter_complex', filters.join(';'));
+  args.push('-map', videoLabel, '-map', audioLabel);
+  args.push(
+    '-c:v', 'libx264', '-preset', 'medium', '-crf', '22', '-pix_fmt', 'yuv420p',
+    '-c:a', 'aac', '-ar', '48000', '-ac', '2', '-b:a', '160k',
+    '-movflags', '+faststart', outputPath
+  );
+  await ffmpeg(args);
+}
+
 export async function concatenateVideos(
   clipPaths: string[],
   outputPath: string,
-  options: { resolution?: string; frameRate?: number } = {}
+  options: {
+    resolution?: string;
+    frameRate?: number;
+    transitions?: string[];
+    transitionDuration?: number;
+  } = {}
 ): Promise<FFmpegResult> {
   const tempDir = path.dirname(outputPath);
   const resolution = options.resolution || '1920x1080';
   const frameRate = options.frameRate || 24;
+  const transitions = options.transitions || [];
   const normalized: string[] = [];
+  const durations: number[] = [];
   const listPath = path.join(tempDir, `concat_${Date.now()}.txt`);
 
   try {
     if (clipPaths.length === 0) throw new Error('At least one video clip is required');
     for (let index = 0; index < clipPaths.length; index += 1) {
       const normalizedPath = path.join(tempDir, `normalized_${index}.mp4`);
-      await normalizeClip(clipPaths[index], normalizedPath, resolution, frameRate);
+      durations.push(await normalizeClip(clipPaths[index], normalizedPath, resolution, frameRate));
       normalized.push(normalizedPath);
     }
-    await fs.writeFile(listPath, normalized.map((item) => `file '${item.replace(/'/g, "'\\''")}'`).join('\n'));
-    await ffmpeg(['-y', '-f', 'concat', '-safe', '0', '-i', listPath, '-c', 'copy', '-movflags', '+faststart', outputPath]);
+
+    const hasVisualTransition = transitions.slice(1).some((item) => !['', 'cut', 'none'].includes(String(item).toLowerCase()));
+    if (normalized.length > 1 && hasVisualTransition) {
+      await transitionVideos(
+        normalized,
+        durations,
+        transitions,
+        Math.max(0.1, Number(options.transitionDuration || 0.5)),
+        outputPath
+      );
+    } else {
+      await fs.writeFile(listPath, normalized.map((item) => `file '${item.replace(/'/g, "'\\''")}'`).join('\n'));
+      await ffmpeg(['-y', '-f', 'concat', '-safe', '0', '-i', listPath, '-c', 'copy', '-movflags', '+faststart', outputPath]);
+    }
 
     const info = await getVideoInfo(outputPath);
     const stat = await fs.stat(outputPath);
