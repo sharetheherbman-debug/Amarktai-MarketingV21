@@ -166,6 +166,21 @@ jobs:
       - uses: actions/checkout@v4
       - name: Validate VPS shell scripts
         run: bash -n scripts/vps-*.sh scripts/lib/vps-common.sh
+      - name: Validate Caddy configuration
+        run: >-
+          docker run --rm
+          -e DOMAIN="${DOMAIN}"
+          -e TLS_EMAIL="${TLS_EMAIL}"
+          -v "${PWD}/docker/caddy/Caddyfile:/etc/caddy/Caddyfile:ro"
+          caddy:2.9-alpine
+          caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+      - name: Validate Nginx configuration
+        run: >-
+          docker run --rm
+          --add-host amarktai-web:127.0.0.1
+          --add-host amarktai-api:127.0.0.1
+          -v "${PWD}/docker/nginx/nginx.conf:/etc/nginx/nginx.conf:ro"
+          nginx:1.27-alpine nginx -t
       - name: Build API Docker image
         run: docker build -f apps/api/Dockerfile -t amarktai-api:test .
       - name: Build render worker Docker image
