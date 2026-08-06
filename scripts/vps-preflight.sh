@@ -40,6 +40,11 @@ done
 [[ ",${CORS_ORIGIN}," == *",https://${DOMAIN},"* ]] || fail "CORS_ORIGIN must include https://${DOMAIN}"
 [[ "${GENX_WEBHOOK_URL}" == "https://${DOMAIN}/api/v1/webhooks/genx" ]] || fail "GENX_WEBHOOK_URL must use the public signed webhook route"
 
+if [[ -n "${STRIPE_SECRET_KEY:-}" || -n "${STRIPE_WEBHOOK_SECRET:-}" ]]; then
+  [[ "${STRIPE_SECRET_KEY:-}" == sk_* ]] || fail "STRIPE_SECRET_KEY must be a Stripe secret key when paid Marketplace checkout is enabled"
+  [[ "${STRIPE_WEBHOOK_SECRET:-}" == whsec_* ]] || fail "STRIPE_WEBHOOK_SECRET must be a Stripe webhook signing secret when paid Marketplace checkout is enabled"
+fi
+
 chmod 600 "${ENV_FILE}"
 
 docker info >/dev/null 2>&1 || fail "Docker daemon is not available"
