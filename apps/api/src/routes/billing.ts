@@ -1,243 +1,163 @@
 import { Router, Response, NextFunction } from 'express';
+import { z } from 'zod';
 import { requireAuth, AuthRequest } from '../middleware/auth';
+import { requireOrganizationMembership, requireOrganizationRole } from '../middleware/organization-access';
+import { validateBody } from '../middleware/validator';
 import { ApiResponse } from '../types';
 import * as billingService from '../services/billing.service';
-import { query } from '../config/database';
+import * as stripeBilling from '../services/billing-stripe.service';
 
 const router = Router();
 router.use(requireAuth);
 
-async function requireOrganizationMembership(
-  req: AuthRequest,
-  res: Response<ApiResponse>,
-  next: NextFunction
-): Promise<void> {
-  try {
-    const orgId = String(req.body?.organization_id || req.query.organization_id || '');
-    if (!orgId) {
-      res.status(400).json({
-        success: false,
-        error: { message: 'organization_id required', code: 'BAD_REQUEST' },
-      });
-      return;
-    }
+const subscriptionSchema = z.object({
+  organization_id: z.string().uuid(),
+  plan_slug: z.string().min(1).max(100),
+  billing_cycle: z.enum(['monthly', 'yearly']).optional(),
+});
+const changePlanSchema = z.object({
+  organization_id: z.string().uuid(),
+  plan_slug: z.string().min(1).max(100),
+  billing_cycle: z.enum(['monthly', 'yearly']).optional(),
+});
+const invoiceSchema = z.object({
+  organization_id: z.string().uuid(),
+  amount_cents: z.number().int().positive(),
+  description: z.string().min(1).max(1000),
+  due_days: z.number().int().min(1).max(90).optional(),
+});
+const couponSchema = z.object({ organization_id: z.string().uuid(), code: z.string().min(1).max(100) });
+const paymentMethodSchema = z.object({ organization_id: z.string().uuid(), payment_method_id: z.string().min(3).max(255) });
 
-    const membership = await query(
-      'SELECT 1 FROM organization_members WHERE organization_id = $1 AND user_id = $2',
-      [orgId, req.user!.userId]
+router.get('/plans', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction) => {
+  try {
+    const includeInactive = ['admin', 'superadmin'].includes(req.user!.role) && (req.query.all === 'true' || req.query.include_inactive === 'true');
+    res.json({ success: true, data: await billingService.listPlans(includeInactive) });
+  } catch (error) { next(error); }
+});
+
+router.get('/plans/:slug', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction) => {
+  try { res.json({ success: true, data: await billingService.getPlanBySlug(req.params.slug) }); }
+  catch (error) { next(error); }
+});
+
+router.get('/subscription', requireOrganizationMembership, async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction) => {
+  try { res.json({ success: true, data: await billingService.getSubscription(String(req.query.organization_id)) }); }
+  catch (error) { next(error); }
+});
+
+router.post('/subscription', requireOrganizationRole('owner', 'admin'), validateBody(subscriptionSchema), async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction) => {
+  try {
+    const result = await stripeBilling.createSubscriptionCheckout(
+      req.body.organization_id,
+      req.user!.userId,
+      req.body.plan_slug,
+      req.body.billing_cycle || 'monthly'
     );
-    if (membership.rows.length === 0) {
-      res.status(403).json({
-        success: false,
-        error: { message: 'Not a member of this organization', code: 'FORBIDDEN' },
-      });
-      return;
-    }
-
-    next();
-  } catch (error) {
-    next(error);
-  }
-}
-
-// ─── Plans ───────────────────────────────────────────────────────────────────
-
-router.get('/plans', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
-  try {
-    const plans = await billingService.listPlans(req.query.all === 'true');
-    res.json({ success: true, data: plans });
+    res.status(result.checkout_url ? 201 : 200).json({ success: true, data: result });
   } catch (error) { next(error); }
 });
 
-router.get('/plans/:slug', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
+router.put('/subscription/cancel', requireOrganizationRole('owner', 'admin'), async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction) => {
   try {
-    const plan = await billingService.getPlanBySlug(req.params.slug);
-    res.json({ success: true, data: plan });
+    await stripeBilling.cancelSubscription(req.body.organization_id, req.body.immediately === true);
+    res.json({ success: true, data: { message: 'Cancellation submitted to Stripe' } });
   } catch (error) { next(error); }
 });
 
-// Every remaining billing endpoint operates on a tenant and must verify membership.
-router.use(requireOrganizationMembership);
-
-// ─── Subscriptions ───────────────────────────────────────────────────────────
-
-router.get('/subscription', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
+router.put('/subscription/change-plan', requireOrganizationRole('owner', 'admin'), validateBody(changePlanSchema), async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction) => {
   try {
-    const orgId = req.query.organization_id as string;
-    const sub = await billingService.getSubscription(orgId);
-    res.json({ success: true, data: sub });
+    await stripeBilling.changeSubscriptionPlan(req.body.organization_id, req.body.plan_slug, req.body.billing_cycle || 'monthly');
+    res.json({ success: true, data: { message: 'Subscription plan updated by Stripe' } });
   } catch (error) { next(error); }
 });
 
-router.post('/subscription', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
+router.put('/subscription/reactivate', requireOrganizationRole('owner', 'admin'), async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction) => {
   try {
-    const { organization_id, plan_slug, billing_cycle } = req.body;
-    if (!plan_slug) {
-      res.status(400).json({ success: false, error: { message: 'plan_slug required', code: 'BAD_REQUEST' } }); return;
-    }
-    const sub = await billingService.createSubscription(organization_id, plan_slug, billing_cycle || 'monthly');
-    res.status(201).json({ success: true, data: sub });
+    await stripeBilling.reactivateSubscription(req.body.organization_id);
+    res.json({ success: true, data: { message: 'Subscription reactivated by Stripe' } });
   } catch (error) { next(error); }
 });
 
-router.put('/subscription/cancel', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
+router.post('/portal', requireOrganizationRole('owner', 'admin'), async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction) => {
+  try { res.json({ success: true, data: await stripeBilling.createBillingPortalSession(req.body.organization_id) }); }
+  catch (error) { next(error); }
+});
+
+router.get('/usage', requireOrganizationMembership, async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction) => {
+  try { res.json({ success: true, data: await billingService.getCurrentUsage(String(req.query.organization_id)) }); }
+  catch (error) { next(error); }
+});
+
+router.get('/usage/history', requireOrganizationMembership, async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction) => {
+  try { res.json({ success: true, data: await billingService.getUsage(String(req.query.organization_id), req.query.metric ? String(req.query.metric) : undefined) }); }
+  catch (error) { next(error); }
+});
+
+router.get('/usage/check/:metric', requireOrganizationMembership, async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction) => {
+  try { res.json({ success: true, data: await billingService.checkLimit(String(req.query.organization_id), req.params.metric) }); }
+  catch (error) { next(error); }
+});
+
+router.get('/invoices', requireOrganizationMembership, async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction) => {
+  try { res.json({ success: true, data: await billingService.listInvoices(String(req.query.organization_id)) }); }
+  catch (error) { next(error); }
+});
+
+router.post('/invoices', requireOrganizationRole('owner', 'admin'), validateBody(invoiceSchema), async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction) => {
+  try { res.status(201).json({ success: true, data: await stripeBilling.createStripeInvoice(req.body.organization_id, req.body) }); }
+  catch (error) { next(error); }
+});
+
+router.get('/invoices/:invoiceId/payment-link', requireOrganizationMembership, async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction) => {
+  try { res.json({ success: true, data: await stripeBilling.getInvoicePaymentUrl(String(req.query.organization_id), req.params.invoiceId) }); }
+  catch (error) { next(error); }
+});
+
+router.get('/payment-methods', requireOrganizationMembership, async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction) => {
+  try { res.json({ success: true, data: await stripeBilling.listStripePaymentMethods(String(req.query.organization_id)) }); }
+  catch (error) { next(error); }
+});
+
+router.post('/payment-methods/manage', requireOrganizationRole('owner', 'admin'), async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction) => {
+  try { res.json({ success: true, data: await stripeBilling.createBillingPortalSession(req.body.organization_id) }); }
+  catch (error) { next(error); }
+});
+
+router.put('/payment-methods/default', requireOrganizationRole('owner', 'admin'), validateBody(paymentMethodSchema), async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction) => {
   try {
-    const { organization_id, immediately } = req.body;
-    await billingService.cancelSubscription(organization_id, immediately || false);
-    res.json({ success: true, data: { message: 'Subscription canceled' } });
+    await stripeBilling.setDefaultStripePaymentMethod(req.body.organization_id, req.body.payment_method_id);
+    res.json({ success: true, data: { message: 'Default payment method updated by Stripe' } });
   } catch (error) { next(error); }
 });
 
-router.put('/subscription/change-plan', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
+router.delete('/payment-methods/:paymentMethodId', requireOrganizationRole('owner', 'admin'), async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction) => {
   try {
-    const { organization_id, plan_slug } = req.body;
-    if (!plan_slug) {
-      res.status(400).json({ success: false, error: { message: 'plan_slug required', code: 'BAD_REQUEST' } }); return;
-    }
-    const sub = await billingService.changePlan(organization_id, plan_slug);
-    res.json({ success: true, data: sub });
+    await stripeBilling.removeStripePaymentMethod(String(req.query.organization_id), req.params.paymentMethodId);
+    res.json({ success: true, data: { message: 'Payment method removed by Stripe' } });
   } catch (error) { next(error); }
 });
 
-router.put('/subscription/reactivate', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
+router.get('/tenant', requireOrganizationMembership, async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction) => {
+  try { res.json({ success: true, data: await billingService.getTenantSettings(String(req.query.organization_id)) }); }
+  catch (error) { next(error); }
+});
+
+router.put('/tenant', requireOrganizationRole('owner', 'admin'), async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction) => {
+  try { res.json({ success: true, data: await billingService.updateTenantSettings(req.body.organization_id, req.body) }); }
+  catch (error) { next(error); }
+});
+
+router.post('/coupons/redeem', requireOrganizationRole('owner', 'admin'), validateBody(couponSchema), async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction) => {
   try {
-    await billingService.reactivateSubscription(req.body.organization_id);
-    res.json({ success: true, data: { message: 'Subscription reactivated' } });
+    await billingService.redeemCoupon(req.body.organization_id, req.body.code);
+    res.json({ success: true, data: { message: 'Stripe promotion will be applied to the next checkout' } });
   } catch (error) { next(error); }
 });
 
-// ─── Usage ───────────────────────────────────────────────────────────────────
-
-router.get('/usage', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
-  try {
-    const usage = await billingService.getCurrentUsage(req.query.organization_id as string);
-    res.json({ success: true, data: usage });
-  } catch (error) { next(error); }
-});
-
-router.get('/usage/history', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
-  try {
-    const history = await billingService.getUsage(req.query.organization_id as string, req.query.metric as string);
-    res.json({ success: true, data: history });
-  } catch (error) { next(error); }
-});
-
-router.post('/usage/record', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
-  try {
-    const { organization_id, metric, quantity } = req.body;
-    if (!metric || quantity === undefined) {
-      res.status(400).json({ success: false, error: { message: 'metric and quantity required', code: 'BAD_REQUEST' } }); return;
-    }
-    await billingService.recordUsage(organization_id, metric, quantity);
-    res.json({ success: true, data: { message: 'Usage recorded' } });
-  } catch (error) { next(error); }
-});
-
-router.get('/usage/check/:metric', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
-  try {
-    const check = await billingService.checkLimit(req.query.organization_id as string, req.params.metric);
-    res.json({ success: true, data: check });
-  } catch (error) { next(error); }
-});
-
-// ─── Invoices ────────────────────────────────────────────────────────────────
-
-router.get('/invoices', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
-  try {
-    const invoices = await billingService.listInvoices(req.query.organization_id as string);
-    res.json({ success: true, data: invoices });
-  } catch (error) { next(error); }
-});
-
-router.post('/invoices', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
-  try {
-    const orgId = req.body.organization_id;
-    if (!req.body.amount_cents || !req.body.description) {
-      res.status(400).json({ success: false, error: { message: 'amount_cents and description required', code: 'BAD_REQUEST' } }); return;
-    }
-    const invoice = await billingService.createInvoice(orgId, req.body);
-    res.status(201).json({ success: true, data: invoice });
-  } catch (error) { next(error); }
-});
-
-router.put('/invoices/:id/pay', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
-  try {
-    const orgId = req.body.organization_id || req.query.organization_id as string;
-    await billingService.markInvoicePaid(req.params.id, orgId);
-    res.json({ success: true, data: { message: 'Invoice marked as paid' } });
-  } catch (error) { next(error); }
-});
-
-// ─── Payment Methods ─────────────────────────────────────────────────────────
-
-router.get('/payment-methods', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
-  try {
-    const methods = await billingService.listPaymentMethods(req.query.organization_id as string);
-    res.json({ success: true, data: methods });
-  } catch (error) { next(error); }
-});
-
-router.post('/payment-methods', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
-  try {
-    const orgId = req.body.organization_id;
-    if (!req.body.type) {
-      res.status(400).json({ success: false, error: { message: 'type required', code: 'BAD_REQUEST' } }); return;
-    }
-    const method = await billingService.addPaymentMethod(orgId, req.body);
-    res.status(201).json({ success: true, data: method });
-  } catch (error) { next(error); }
-});
-
-router.put('/payment-methods/:id/default', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
-  try {
-    await billingService.setDefaultPaymentMethod(req.params.id, req.body.organization_id);
-    res.json({ success: true, data: { message: 'Default payment method set' } });
-  } catch (error) { next(error); }
-});
-
-router.delete('/payment-methods/:id', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
-  try {
-    await billingService.removePaymentMethod(req.params.id, req.query.organization_id as string);
-    res.json({ success: true, data: { message: 'Payment method removed' } });
-  } catch (error) { next(error); }
-});
-
-// ─── Tenant Settings ─────────────────────────────────────────────────────────
-
-router.get('/tenant', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
-  try {
-    const settings = await billingService.getTenantSettings(req.query.organization_id as string);
-    res.json({ success: true, data: settings });
-  } catch (error) { next(error); }
-});
-
-router.put('/tenant', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
-  try {
-    const settings = await billingService.updateTenantSettings(req.body.organization_id, req.body);
-    res.json({ success: true, data: settings });
-  } catch (error) { next(error); }
-});
-
-// ─── Coupons ─────────────────────────────────────────────────────────────────
-
-router.post('/coupons/redeem', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
-  try {
-    const { organization_id, code } = req.body;
-    if (!code) {
-      res.status(400).json({ success: false, error: { message: 'code required', code: 'BAD_REQUEST' } }); return;
-    }
-    await billingService.redeemCoupon(organization_id, code);
-    res.json({ success: true, data: { message: 'Coupon redeemed' } });
-  } catch (error) { next(error); }
-});
-
-// ─── Events ──────────────────────────────────────────────────────────────────
-
-router.get('/events', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
-  try {
-    const events = await billingService.getBillingEvents(req.query.organization_id as string);
-    res.json({ success: true, data: events });
-  } catch (error) { next(error); }
+router.get('/events', requireOrganizationMembership, async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction) => {
+  try { res.json({ success: true, data: await billingService.getBillingEvents(String(req.query.organization_id), Number(req.query.limit || 50)) }); }
+  catch (error) { next(error); }
 });
 
 export default router;
