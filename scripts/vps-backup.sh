@@ -62,7 +62,10 @@ openssl enc -aes-256-cbc -salt -pbkdf2 -iter 200000 \
   -in "${plain_bundle}" \
   -out "${encrypted_bundle}" \
   -pass env:BACKUP_ENCRYPTION_PASSPHRASE
-sha256sum "${encrypted_bundle}" > "${encrypted_bundle}.sha256"
+(
+  cd "${backup_dir}"
+  sha256sum "$(basename "${encrypted_bundle}")" > "$(basename "${encrypted_bundle}").sha256"
+)
 chmod 600 "${encrypted_bundle}" "${encrypted_bundle}.sha256"
 rm -f "${plain_bundle}"
 
