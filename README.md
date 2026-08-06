@@ -1,282 +1,162 @@
 # AmarktAI Marketing
 
-<div align="center">
+**AmarktAI Marketing** is a multi-tenant AI marketing operating system with campaign automation, content workflows, provider routing, Creative Studio generation, and a persistent long-form video production pipeline.
 
-**The AI Marketing Operating System**
+Production domain: `https://marketing.amarktai.co.za`
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Docker](https://img.shields.io/badge/Docker-Ready-blue?logo=docker)](docker-compose.yml)
-[![TypeScript](https://img.shields.io/badge/TypeScript-5.7-blue?logo=typescript)](tsconfig.json)
-[![Next.js](https://img.shields.io/badge/Next.js-15-black?logo=next.js)](apps/web)
-[![Express](https://img.shields.io/badge/Express-4.18-green?logo=express)](apps/api)
+## Current runtime
 
-</div>
+The repository contains:
 
----
+- Next.js 15 and React 19 web application
+- Express and TypeScript API
+- PostgreSQL 16 with pgvector
+- Redis 7 and BullMQ
+- Dedicated generation and FFmpeg render workers
+- GenX Router integration with server-side credentials
+- Secure organization-owned media assets
+- Creative Studio image, video, audio and lip-sync workflows
+- Long-form projects, scripts, storyboards, scenes, continuity, narration, music, captions, rendering and exports
+- Docker images for API, web and render worker
+- Nginx internal reverse proxy
+- Caddy automatic HTTPS edge for VPS deployment
+- Encrypted database and media backup/restore scripts
+- Backup-first update and rollback workflow
 
-AmarktAI Marketing is an autonomous AI marketing platform that deploys an AI workforce to handle content creation, SEO, social media, email marketing, analytics, and campaign automation. Built for businesses that want to scale their marketing operations without scaling their team.
-
-**Domain:** [marketing.amarktai.co.za](https://marketing.amarktai.co.za)
-
-## Quick Start
-
-Get up and running in under 5 minutes with Docker:
-
-```bash
-# Clone the repository
-git clone https://github.com/amarktai/marketing.git
-cd marketing
-
-# Copy environment configuration
-cp .env.example .env
-
-# Edit .env with your configuration
-# At minimum, set JWT_SECRET, JWT_REFRESH_SECRET, and ENCRYPTION_KEY
-
-# Start all services
-docker compose -f docker/docker-compose.yml up -d
-
-# Access the application
-# Frontend: http://localhost:3000
-# API: http://localhost:4000
-```
-
-On first visit, the onboarding wizard will guide you through:
-1. Creating your admin account
-2. Configuring your organization
-3. Setting up AI providers (GenX Router, Together AI, DeepInfra)
-
-## Architecture
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                         Nginx (Port 80/443)                     │
-│                    Reverse Proxy + SSL Termination              │
-└─────────────┬───────────────────────────────┬───────────────────┘
-              │                               │
-              ▼                               ▼
-┌─────────────────────────┐     ┌─────────────────────────────────┐
-│   Next.js Frontend      │     │      Express API                │
-│   (Port 3000)           │     │      (Port 4000)                │
-│                         │     │                                 │
-│   - App Router           │     │   - REST API v1                 │
-│   - React 19             │     │   - JWT Authentication          │
-│   - Tailwind CSS         │     │   - Service Layer               │
-│   - Zustand State        │     │   - Repository Pattern          │
-└─────────────────────────┘     └───────────┬─────────────────────┘
-                                            │
-                    ┌───────────────────────┼───────────────────────┐
-                    │                       │                       │
-                    ▼                       ▼                       ▼
-        ┌──────────────────┐    ┌──────────────────┐    ┌──────────────────┐
-        │   PostgreSQL 16   │    │    Redis 7       │    │   AI Providers   │
-        │   (Port 5432)     │    │   (Port 6379)    │    │                  │
-        │                   │    │                  │    │   - GenX Router  │
-        │   - Users         │    │   - Sessions     │    │   - Together AI  │
-        │   - Organizations │    │   - Job Queues   │    │   - DeepInfra    │
-        │   - Campaigns     │    │   - Rate Limiting│    │                  │
-        │   - Content       │    │   - Caching      │    └──────────────────┘
-        │   - Agents        │    └──────────────────┘
-        │   - Memory        │
-        └──────────────────┘
-```
-
-## Tech Stack
-
-| Layer | Technology | Version |
-|-------|-----------|---------|
-| Frontend | Next.js | 15.x |
-| UI Library | React | 19.x |
-| Styling | Tailwind CSS | 3.4.x |
-| State Management | Zustand | 5.x |
-| Backend | Express | 4.18.x |
-| Language | TypeScript | 5.7.x |
-| Database | PostgreSQL | 16 |
-| Cache/Queue | Redis | 7 |
-| Job Queue | BullMQ | 5.x |
-| Validation | Zod | 3.x |
-| Build System | Turborepo | 2.x |
-| Containerization | Docker | Latest |
-
-### AI Providers
-
-| Provider | Use Case | Models |
-|----------|----------|--------|
-| **GenX Router** | Primary LLM provider | GPT-4o, Claude 3, Gemini Pro, Llama 3.1 |
-| **Together AI** | Open-source models | Llama 3.1 405B, Mixtral 8x22B, Qwen2 72B |
-| **DeepInfra** | Cost-effective inference | Llama 3.1, Mixtral, Gemma 2, DeepSeek |
-
-## Features
-
-### Core Capabilities
-- **AI Content Generation** - Blog posts, social media content, email copy, ad copy
-- **Campaign Automation** - Multi-channel campaign management with scheduling
-- **Agent System** - Configurable AI agents for specialized marketing tasks
-- **Memory Service** - Business context, brand voice, and conversation memory
-- **Plugin System** - Extensible architecture with lifecycle hooks
-
-### Management
-- **Organization Management** - Multi-tenant with role-based access control
-- **User Management** - Profiles, password management, email verification
-- **Provider Management** - Configure and monitor multiple AI providers
-- **Onboarding Wizard** - Guided setup for first-time users
-
-### Security
-- JWT-based authentication with refresh tokens
-- Encrypted API key storage
-- Rate limiting and request validation
-- CORS and security headers
-- Audit logging
-
-## Installation
-
-### Docker Installation (Recommended)
+## Repository
 
 ```bash
-# Prerequisites: Docker and Docker Compose installed
-
-# Clone repository
-git clone https://github.com/amarktai/marketing.git
-cd marketing
-
-# Configure environment
-cp .env.example .env
-# Edit .env with your settings
-
-# Build and start
-docker compose -f docker/docker-compose.yml up -d
-
-# Check status
-docker compose -f docker/docker-compose.yml ps
-
-# View logs
-docker compose -f docker/docker-compose.yml logs -f api
+git clone https://github.com/sharetheherbman-debug/Amarktai-MarketingV21.git
+cd Amarktai-MarketingV21
 ```
 
-### Manual Installation
+## Development
+
+Prerequisites:
+
+- Node.js 20 or newer
+- npm 10 or newer
+- PostgreSQL 16
+- Redis 7
 
 ```bash
-# Prerequisites: Node.js 20+, PostgreSQL 16, Redis 7
-
-# Clone repository
-git clone https://github.com/amarktai/marketing.git
-cd marketing
-
-# Install dependencies
-npm install
-
-# Configure environment
+npm ci
 cp .env.example .env
-# Edit .env with your database and Redis credentials
-
-# Run database migrations
+# Fill in the development database, Redis and provider settings.
 npm run db:migrate
-
-# Seed initial data (optional)
-npm run db:seed
-
-# Start development servers
 npm run dev
 ```
 
-## Environment Variables
+The default development services are:
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `NODE_ENV` | Environment mode | `development` |
-| `PORT` | API server port | `4000` |
-| `APP_URL` | Frontend URL | `http://localhost:3000` |
-| `API_URL` | Backend URL | `http://localhost:4000` |
-| `DATABASE_URL` | PostgreSQL connection string | Required |
-| `REDIS_URL` | Redis connection string | `redis://localhost:6379` |
-| `JWT_SECRET` | JWT signing secret | Required in production |
-| `JWT_REFRESH_SECRET` | Refresh token secret | Required in production |
-| `JWT_EXPIRES_IN` | Access token expiry | `15m` |
-| `JWT_REFRESH_EXPIRES_IN` | Refresh token expiry | `7d` |
-| `ENCRYPTION_KEY` | API key encryption key | Required in production |
-| `GENX_API_KEY` | GenX Router API key | Optional |
-| `TOGETHER_API_KEY` | Together AI API key | Optional |
-| `DEEPINFRA_API_KEY` | DeepInfra API key | Optional |
-| `SMTP_HOST` | SMTP server host | Optional |
-| `SMTP_PORT` | SMTP server port | `587` |
-| `SMTP_USER` | SMTP username | Optional |
-| `SMTP_PASS` | SMTP password | Optional |
-| `FIRST_RUN` | Enable onboarding wizard | `true` |
+- Web: `http://localhost:3000`
+- API: `http://localhost:4000`
 
-## API Documentation
+## Docker validation
 
-The API follows REST conventions and returns JSON responses.
+The base Compose stack is intended for a complete local or server-like Docker run. It requires strong database, Redis, JWT, encryption and GenX values.
 
-**Base URL:** `http://localhost:4000/api/v1`
-
-**Authentication:** Bearer token in Authorization header
-```
-Authorization: Bearer <access_token>
+```bash
+cp .env.example .env
+# Replace all placeholder values, including GENX_API_KEY.
+npm run docker:build
+npm run docker:up
 ```
 
-See [docs/API.md](docs/API.md) for complete endpoint documentation.
+The internal Nginx proxy is bound to `http://127.0.0.1:8080` by default. PostgreSQL, Redis, API and web ports are not exposed publicly.
 
-## Project Structure
-
-```
-amarktai-marketing/
-├── apps/
-│   ├── api/                    # Express.js backend
-│   │   ├── src/
-│   │   │   ├── config/         # Database, Redis, environment config
-│   │   │   ├── db/             # Migrations and seeds
-│   │   │   ├── memory/         # Memory service (business, brand, conversation)
-│   │   │   ├── middleware/      # Auth, validation, rate limiting, error handling
-│   │   │   ├── plugins/        # Plugin system
-│   │   │   ├── providers/      # AI provider integrations
-│   │   │   ├── queue/          # BullMQ job queue
-│   │   │   ├── routes/         # API route handlers
-│   │   │   ├── services/       # Business logic layer
-│   │   │   ├── types/          # TypeScript type definitions
-│   │   │   └── utils/          # Encryption, JWT, logging, validation
-│   │   └── Dockerfile
-│   └── web/                    # Next.js frontend
-│       ├── app/
-│       │   ├── (auth)/         # Auth pages (login, register, etc.)
-│       │   ├── (dashboard)/    # Dashboard pages
-│       │   ├── (marketing)/    # Marketing pages
-│       │   └── onboarding/     # Onboarding wizard
-│       └── Dockerfile
-├── packages/
-│   └── ui/                     # Shared UI components
-├── docker/
-│   ├── docker-compose.yml      # Production compose
-│   ├── docker-compose.dev.yml  # Development compose
-│   ├── init-scripts/           # Database initialization
-│   └── nginx/                  # Nginx configuration
-├── docs/                       # Documentation
-├── turbo.json                  # Turborepo configuration
-└── package.json                # Root package.json
+```bash
+npm run docker:down
 ```
 
-## Documentation
+## Production VPS deployment
 
-- [Architecture](docs/ARCHITECTURE.md) - System architecture and design decisions
-- [API Reference](docs/API.md) - Complete API endpoint documentation
-- [Database](docs/DATABASE.md) - Schema, migrations, and data model
-- [Deployment](docs/DEPLOYMENT.md) - Production deployment guide
-- [AI Providers](docs/PROVIDERS.md) - Provider configuration and management
-- [Development](docs/DEVELOPMENT.md) - Developer setup and contribution guide
+Use an Ubuntu 22.04 or 24.04 VPS with at least 4 CPU cores, 8 GB RAM, 20 GB free disk, Docker Engine 24+, Docker Compose v2.20+, and public ports 80 and 443.
 
-## Contributing
+```bash
+cp .env.production.example .env.production
+chmod 600 .env.production
+# Replace every placeholder and provide the production GenX credentials.
+npm run vps:preflight
+npm run vps:deploy
+```
 
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
+The production stack publishes only Caddy on ports 80 and 443. Caddy obtains and renews TLS automatically for the configured domain, then proxies through internal Nginx to the web and API services.
 
-See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) for detailed development guidelines.
+Canonical instructions: [`docs/VPS_DEPLOYMENT.md`](docs/VPS_DEPLOYMENT.md)
+
+## Health and readiness
+
+- `/health` — public edge liveness
+- `/ready` — PostgreSQL and Redis readiness through the API
+- `/api/v1/health` — API liveness and version
+- `/api/v1/health/version` — build metadata
+
+Docker separately validates the generation worker and render worker processes and their Redis connectivity. The production smoke test waits for all eight services before passing.
+
+```bash
+npm run vps:smoke
+```
+
+## Backups and updates
+
+Create an encrypted database and Studio-media backup:
+
+```bash
+npm run vps:backup
+```
+
+Restore a verified backup:
+
+```bash
+npm run vps:restore -- /opt/amarktai/backups/amarktai-YYYYMMDDTHHMMSSZ.tar.gz.enc --yes
+```
+
+Apply a backup-first update with automatic Git rollback when deployment fails:
+
+```bash
+npm run vps:update
+```
+
+## Main commands
+
+| Command | Purpose |
+|---|---|
+| `npm run dev` | Start development services |
+| `npm run build` | Build all workspaces |
+| `npm run audit` | Reject high-severity dependency findings |
+| `npm run verify` | Run repository verification |
+| `npm run db:migrate` | Apply database migrations |
+| `npm run docker:build` | Build the base Docker stack |
+| `npm run docker:up` | Start the base Docker stack |
+| `npm run vps:preflight` | Validate VPS resources and production settings |
+| `npm run vps:deploy` | Build, migrate, deploy, wait and smoke-test production |
+| `npm run vps:backup` | Create encrypted database and media backup |
+| `npm run vps:restore` | Restore a verified encrypted backup |
+| `npm run vps:update` | Backup, update, deploy and roll back on failure |
+
+## Project structure
+
+```text
+apps/api/                 Express API, providers, queues, workers and migrations
+apps/web/                 Next.js web application
+packages/studio/          Creative Studio and long-form production UI
+scripts/                  Verification and VPS operational workflows
+docker/                   Base and production Compose, Nginx and Caddy
+docs/                     Architecture, API, deployment and runtime evidence
+```
+
+## Production acceptance
+
+Repository CI verifies compilation, tests, security, migrations, application images, proxy configuration and Compose configuration. A public launch still requires the production GenX key and VPS to run the external acceptance steps:
+
+1. Runtime-test the selected GenX image, video, voice, audio and lip-sync models.
+2. Verify a real signed provider webhook.
+3. Generate and render the required six-scene film of at least 60 seconds.
+4. Record provider job IDs, result URLs, usage and costs.
+5. Restart workers during queued work and verify recovery.
+6. Run the public production smoke test after DNS and TLS are active.
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
----
-
-**AmarktAI Marketing** - Automate your marketing with AI.
+This project is licensed under the MIT License. See [`LICENSE`](LICENSE).

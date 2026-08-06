@@ -1,194 +1,246 @@
-version: "3.9"
+name: amarktai-marketing
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "20m"
+    max-file: "5"
+
+x-service-defaults: &service-defaults
+  restart: unless-stopped
+  init: true
+  security_opt:
+    - no-new-privileges:true
+  logging: *default-logging
+  networks:
+    - amarktai-network
+
+x-api-environment: &api-environment
+  NODE_ENV: production
+  DATABASE_URL: postgresql://${POSTGRES_USER:-amarktai}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}@postgres:5432/${POSTGRES_DB:-amarktai_marketing}
+  POSTGRES_USER: ${POSTGRES_USER:-amarktai}
+  POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}
+  POSTGRES_DB: ${POSTGRES_DB:-amarktai_marketing}
+  REDIS_URL: redis://:${REDIS_PASSWORD:?REDIS_PASSWORD required}@redis:6379
+  REDIS_HOST: redis
+  REDIS_PORT: "6379"
+  REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD required}
+  JWT_SECRET: ${JWT_SECRET:?JWT_SECRET required}
+  JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?JWT_REFRESH_SECRET required}
+  JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-15m}
+  JWT_REFRESH_EXPIRES_IN: ${JWT_REFRESH_EXPIRES_IN:-7d}
+  ENCRYPTION_KEY: ${ENCRYPTION_KEY:?ENCRYPTION_KEY required}
+  GENX_API_KEY: ${GENX_API_KEY:?GENX_API_KEY required}
+  GENX_BASE_URL: ${GENX_BASE_URL:-https://query.genx.sh}
+  GENX_WEBHOOK_SECRET: ${GENX_WEBHOOK_SECRET:-}
+  GENX_WEBHOOK_URL: ${GENX_WEBHOOK_URL:-}
+  DEFAULT_TEXT_MODEL: ${DEFAULT_TEXT_MODEL:-gpt-5.6-luna}
+  TOGETHER_API_KEY: ${TOGETHER_API_KEY:-}
+  TOGETHER_BASE_URL: ${TOGETHER_BASE_URL:-https://api.together.xyz/v1}
+  TOGETHER_DEFAULT_TEXT_MODEL: ${TOGETHER_DEFAULT_TEXT_MODEL:-meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo}
+  TOGETHER_EMBEDDING_MODEL: ${TOGETHER_EMBEDDING_MODEL:-}
+  DEEPINFRA_API_KEY: ${DEEPINFRA_API_KEY:-}
+  DEEPINFRA_BASE_URL: ${DEEPINFRA_BASE_URL:-https://api.deepinfra.com/v1/openai}
+  DEEPINFRA_DEFAULT_TEXT_MODEL: ${DEEPINFRA_DEFAULT_TEXT_MODEL:-meta-llama/Meta-Llama-3.1-70B-Instruct}
+  DEEPINFRA_EMBEDDING_MODEL: ${DEEPINFRA_EMBEDDING_MODEL:-}
+  LOCAL_EMBEDDINGS_ENABLED: ${LOCAL_EMBEDDINGS_ENABLED:-true}
+  EMBEDDING_DIMENSIONS: ${EMBEDDING_DIMENSIONS:-1536}
+  STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+  STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+  SMTP_HOST: ${SMTP_HOST:-smtp.gmail.com}
+  SMTP_PORT: ${SMTP_PORT:-587}
+  SMTP_USER: ${SMTP_USER:-}
+  SMTP_PASS: ${SMTP_PASS:-}
+  SMTP_FROM: ${SMTP_FROM:-noreply@amarktai.co.za}
+  APP_URL: ${APP_URL:-https://marketing.amarktai.co.za}
+  API_URL: ${API_URL:-https://marketing.amarktai.co.za/api}
+  CORS_ORIGIN: ${CORS_ORIGIN:-https://marketing.amarktai.co.za}
+  TRUST_PROXY_HOPS: ${TRUST_PROXY_HOPS:-2}
+  HEALTHCHECK_TIMEOUT_MS: ${HEALTHCHECK_TIMEOUT_MS:-3000}
+  RATE_LIMIT_WINDOW_MS: ${RATE_LIMIT_WINDOW_MS:-900000}
+  RATE_LIMIT_MAX_REQUESTS: ${RATE_LIMIT_MAX_REQUESTS:-100}
+  FIRST_RUN: ${FIRST_RUN:-true}
 
 services:
   postgres:
+    <<: *service-defaults
     image: pgvector/pgvector:pg16
     container_name: amarktai-postgres
-    restart: unless-stopped
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-postgres}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_USER: ${POSTGRES_USER:-amarktai}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}
       POSTGRES_DB: ${POSTGRES_DB:-amarktai_marketing}
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./init-scripts:/docker-entrypoint-initdb.d:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-amarktai_marketing}"]
-      interval: 10s
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-amarktai} -d ${POSTGRES_DB:-amarktai_marketing}"]
+      interval: 5s
       timeout: 5s
-      retries: 5
-      start_period: 30s
-    networks:
-      - amarktai-network
+      retries: 20
+      start_period: 10s
+    stop_grace_period: 60s
 
   redis:
+    <<: *service-defaults
     image: redis:7-alpine
     container_name: amarktai-redis
-    restart: unless-stopped
-    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-redis}
+    command: ["sh", "-c", "exec redis-server --appendonly yes --appendfsync everysec --requirepass \"$$REDIS_PASSWORD\""]
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD required}
     volumes:
       - redis_data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-redis}", "ping"]
-      interval: 10s
+      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" ping | grep -q PONG"]
+      interval: 5s
       timeout: 5s
-      retries: 5
+      retries: 20
       start_period: 10s
-    networks:
-      - amarktai-network
+    stop_grace_period: 30s
+
+  migrate:
+    <<: *service-defaults
+    build:
+      context: ..
+      dockerfile: apps/api/Dockerfile
+    restart: "no"
+    command: ["node", "dist/db/migrate.js"]
+    environment: *api-environment
+    depends_on:
+      postgres:
+        condition: service_healthy
 
   api:
+    <<: *service-defaults
     build:
       context: ..
       dockerfile: apps/api/Dockerfile
     container_name: amarktai-api
-    restart: unless-stopped
+    environment:
+      <<: *api-environment
+      PORT: "4000"
     depends_on:
-      postgres:
-        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
       redis:
         condition: service_healthy
-    environment:
-      NODE_ENV: production
-      PORT: 4000
-      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-amarktai_marketing}
-      REDIS_URL: redis://:${REDIS_PASSWORD:-redis}@redis:6379
-      REDIS_HOST: redis
-      REDIS_PORT: "6379"
-      REDIS_PASSWORD: ${REDIS_PASSWORD:-redis}
-      JWT_SECRET: ${JWT_SECRET}
-      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET}
-      ENCRYPTION_KEY: ${ENCRYPTION_KEY}
-      APP_URL: ${APP_URL:-https://marketing.amarktai.co.za}
-      API_URL: ${API_URL:-https://marketing.amarktai.co.za/api}
-      GENX_API_KEY: ${GENX_API_KEY}
-      GENX_BASE_URL: ${GENX_BASE_URL:-https://query.genx.sh}
-      CORS_ORIGIN: ${CORS_ORIGIN:-https://marketing.amarktai.co.za}
-    ports:
-      - "4000:4000"
-    healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:4000/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
     volumes:
       - studio_uploads:/app/uploads
-      - render_output:/app/renders
-    networks:
-      - amarktai-network
-
-  web:
-    build:
-      context: ..
-      dockerfile: apps/web/Dockerfile
-    container_name: amarktai-web
-    restart: unless-stopped
-    depends_on:
-      api:
-        condition: service_healthy
-    environment:
-      NODE_ENV: production
-      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-https://marketing.amarktai.co.za/api}
-    ports:
-      - "3000:3000"
     healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
-    networks:
-      - amarktai-network
-
-  nginx:
-    image: nginx:alpine
-    container_name: amarktai-nginx
-    restart: unless-stopped
-    depends_on:
-      - web
-      - api
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-      - studio_uploads:/app/uploads:ro
-      - render_output:/app/renders:ro
-    healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:80/api/v1/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-    networks:
-      - amarktai-network
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:4000/api/v1/health/ready"]
+      interval: 15s
+      timeout: 8s
+      retries: 12
+      start_period: 45s
+    stop_grace_period: 35s
 
   generation-worker:
+    <<: *service-defaults
     build:
       context: ..
       dockerfile: apps/api/Dockerfile
     container_name: amarktai-generation-worker
-    restart: unless-stopped
+    command: ["node", "dist/workers/generation-worker.js"]
+    environment:
+      <<: *api-environment
+      GENERATION_WORKER_CONCURRENCY: ${GENERATION_WORKER_CONCURRENCY:-2}
+      GENX_REQUESTS_PER_MINUTE: ${GENX_REQUESTS_PER_MINUTE:-10}
     depends_on:
-      postgres:
-        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
       redis:
         condition: service_healthy
-    environment:
-      NODE_ENV: production
-      WORKER_TYPE: generation
-      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-amarktai_marketing}
-      REDIS_URL: redis://:${REDIS_PASSWORD:-redis}@redis:6379
-      REDIS_HOST: redis
-      REDIS_PORT: "6379"
-      REDIS_PASSWORD: ${REDIS_PASSWORD:-redis}
-      JWT_SECRET: ${JWT_SECRET}
-      ENCRYPTION_KEY: ${ENCRYPTION_KEY}
-      GENX_API_KEY: ${GENX_API_KEY}
-      GENX_BASE_URL: ${GENX_BASE_URL:-https://query.genx.sh}
     volumes:
       - studio_uploads:/app/uploads
-    networks:
-      - amarktai-network
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          found=0; for cmd in /proc/[0-9]*/cmdline; do grep -aq 'generation-worker.js' "$$cmd" && found=1 && break; done;
+          [ "$$found" -eq 1 ] &&
+          node -e "const Redis=require('ioredis');const r=new Redis(process.env.REDIS_URL,{connectTimeout:2000,maxRetriesPerRequest:1});r.ping().then(v=>{r.disconnect();process.exit(v==='PONG'?0:1)}).catch(()=>process.exit(1))"
+      interval: 20s
+      timeout: 8s
+      retries: 5
+      start_period: 20s
+    stop_grace_period: 35s
 
   render-worker:
+    <<: *service-defaults
     build:
       context: ..
       dockerfile: apps/api/Dockerfile.render
     container_name: amarktai-render-worker
-    restart: unless-stopped
+    environment:
+      <<: *api-environment
+      RENDER_WORKER_CONCURRENCY: ${RENDER_WORKER_CONCURRENCY:-1}
     depends_on:
-      postgres:
-        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
       redis:
         condition: service_healthy
+    volumes:
+      - studio_uploads:/app/uploads
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          found=0; for cmd in /proc/[0-9]*/cmdline; do grep -aq 'render-worker.js' "$$cmd" && found=1 && break; done;
+          [ "$$found" -eq 1 ] &&
+          node -e "const Redis=require('ioredis');const r=new Redis(process.env.REDIS_URL,{connectTimeout:2000,maxRetriesPerRequest:1});r.ping().then(v=>{r.disconnect();process.exit(v==='PONG'?0:1)}).catch(()=>process.exit(1))"
+      interval: 20s
+      timeout: 8s
+      retries: 5
+      start_period: 20s
+    stop_grace_period: 60s
+
+  web:
+    <<: *service-defaults
+    build:
+      context: ..
+      dockerfile: apps/web/Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-/api}
+    container_name: amarktai-web
     environment:
       NODE_ENV: production
-      WORKER_TYPE: render
-      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-amarktai_marketing}
-      REDIS_URL: redis://:${REDIS_PASSWORD:-redis}@redis:6379
-      REDIS_HOST: redis
-      REDIS_PORT: "6379"
-      REDIS_PASSWORD: ${REDIS_PASSWORD:-redis}
-      JWT_SECRET: ${JWT_SECRET}
-      ENCRYPTION_KEY: ${ENCRYPTION_KEY}
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-/api}
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000"]
+      interval: 15s
+      timeout: 5s
+      retries: 8
+      start_period: 30s
+    stop_grace_period: 30s
+
+  nginx:
+    <<: *service-defaults
+    image: nginx:1.27-alpine
+    container_name: amarktai-nginx
+    depends_on:
+      web:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${HTTP_PORT:-8080}:80"
     volumes:
-      - render_output:/app/renders
-      - studio_uploads:/app/uploads
-    networks:
-      - amarktai-network
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost/ready"]
+      interval: 15s
+      timeout: 8s
+      retries: 8
+      start_period: 20s
+    stop_grace_period: 30s
 
 volumes:
   postgres_data:
-    name: amarktai-postgres-data
   redis_data:
-    name: amarktai-redis-data
   studio_uploads:
-    name: amarktai-studio-uploads
-  render_output:
-    name: amarktai-render-output
 
 networks:
   amarktai-network:
     driver: bridge
-    name: amarktai-network

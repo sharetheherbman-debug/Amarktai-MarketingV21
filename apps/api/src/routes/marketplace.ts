@@ -1,69 +1,67 @@
 import { Router, Response, NextFunction } from 'express';
 import { requireAuth, AuthRequest } from '../middleware/auth';
 import { ApiResponse } from '../types';
+import { query } from '../config/database';
+import { AppError, NotFoundError } from '../middleware/errorHandler';
 import * as marketplaceService from '../services/marketplace.service';
+import * as marketplaceRuntime from '../services/marketplace-runtime.service';
 
 const router = Router();
 
-// Public routes (no auth required)
+function objectValue(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+async function requirePublisherOwner(publisherId: string, userId: string): Promise<void> {
+  const result = await query('SELECT id FROM marketplace_publishers WHERE id = $1 AND user_id = $2 AND status = $3', [publisherId, userId, 'active']);
+  if (result.rows.length === 0) throw new AppError(403, 'Publisher does not belong to the current user', 'FORBIDDEN');
+}
+
+async function requireOrganizationMember(orgId: string, userId: string): Promise<void> {
+  const result = await query('SELECT role FROM organization_members WHERE organization_id = $1 AND user_id = $2', [orgId, userId]);
+  if (result.rows.length === 0) throw new AppError(403, 'Not a member of this organization', 'FORBIDDEN');
+}
+
+function requirePlatformAdmin(req: AuthRequest): void {
+  const role = String((req.user as unknown as Record<string, unknown>)?.role || '');
+  if (!['admin', 'superadmin'].includes(role)) throw new AppError(403, 'Platform administrator access required', 'FORBIDDEN');
+}
+
 router.get('/items', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
   try {
-    const items = await marketplaceService.listItems({
-      category: req.query.category as string,
-      search: req.query.search as string,
-      sort: req.query.sort as string,
-    });
-    res.json({ success: true, data: items });
+    res.json({ success: true, data: await marketplaceService.listItems({ category: req.query.category as string, search: req.query.search as string, sort: req.query.sort as string }) });
   } catch (error) { next(error); }
 });
 
 router.get('/items/:id', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
-  try {
-    const item = await marketplaceService.getItemById(req.params.id);
-    res.json({ success: true, data: item });
-  } catch (error) { next(error); }
+  try { res.json({ success: true, data: await marketplaceService.getItemById(req.params.id) }); } catch (error) { next(error); }
 });
 
 router.get('/items/:id/reviews', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
-  try {
-    const reviews = await marketplaceService.listReviews(req.params.id);
-    res.json({ success: true, data: reviews });
-  } catch (error) { next(error); }
+  try { res.json({ success: true, data: await marketplaceService.listReviews(req.params.id) }); } catch (error) { next(error); }
 });
 
-router.get('/categories', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
+router.get('/categories', async (_req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
   try {
-    const { query } = await import('../config/database');
     const result = await query('SELECT * FROM marketplace_categories WHERE is_active = TRUE ORDER BY sort_order');
     res.json({ success: true, data: result.rows });
   } catch (error) { next(error); }
 });
 
 router.get('/skill-packs', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
-  try {
-    const packs = await marketplaceService.listSkillPacks(req.query.industry as string);
-    res.json({ success: true, data: packs });
-  } catch (error) { next(error); }
+  try { res.json({ success: true, data: await marketplaceService.listSkillPacks(req.query.industry as string) }); } catch (error) { next(error); }
 });
 
 router.get('/skill-packs/:slug', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
-  try {
-    const pack = await marketplaceService.getSkillPackBySlug(req.params.slug);
-    res.json({ success: true, data: pack });
-  } catch (error) { next(error); }
+  try { res.json({ success: true, data: await marketplaceService.getSkillPackBySlug(req.params.slug) }); } catch (error) { next(error); }
 });
 
-router.get('/stats', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
-  try {
-    const stats = await marketplaceService.getMarketplaceStats();
-    res.json({ success: true, data: stats });
-  } catch (error) { next(error); }
+router.get('/stats', async (_req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
+  try { res.json({ success: true, data: await marketplaceService.getMarketplaceStats() }); } catch (error) { next(error); }
 });
 
-// Protected routes
 router.use(requireAuth);
 
-// Publishers
 router.post('/publishers', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
   try {
     const publisher = await marketplaceService.createPublisher(req.user!.userId, req.body);
@@ -73,123 +71,157 @@ router.post('/publishers', async (req: AuthRequest, res: Response<ApiResponse>, 
 
 router.get('/publishers', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
   try {
-    const publishers = await marketplaceService.listPublishers();
-    res.json({ success: true, data: publishers });
+    const result = await query('SELECT * FROM marketplace_publishers WHERE user_id = $1 AND status = $2 ORDER BY created_at DESC', [req.user!.userId, 'active']);
+    res.json({ success: true, data: result.rows });
   } catch (error) { next(error); }
 });
 
-// Items (publisher management)
 router.post('/items', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
   try {
-    const { publisher_id, ...data } = req.body;
-    if (!publisher_id) {
-      res.status(400).json({ success: false, error: { message: 'publisher_id required', code: 'BAD_REQUEST' } });
-      return;
-    }
-    const item = await marketplaceService.createItem(publisher_id, data);
-    res.status(201).json({ success: true, data: item });
+    const publisherId = String(req.body.publisher_id || '');
+    if (!publisherId || !req.body.name || !req.body.category) throw new AppError(400, 'publisher_id, name, and category are required', 'BAD_REQUEST');
+    await requirePublisherOwner(publisherId, req.user!.userId);
+    const manifest = objectValue(req.body.package_manifest);
+    const status = String(req.body.status || 'draft');
+    if (status === 'published' && Object.keys(manifest).length === 0) throw new AppError(400, 'Published items require a package_manifest', 'MARKETPLACE_PACKAGE_EMPTY');
+    const item = await query(
+      `INSERT INTO marketplace_items
+         (publisher_id, name, slug, description, long_description, category, subcategory, version,
+          dependencies, compatibility, config_schema, package_manifest, license, price_cents, is_free, tags, status, published_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,CASE WHEN $17='published' THEN NOW() ELSE NULL END)
+       RETURNING *`,
+      [
+        publisherId,
+        req.body.name,
+        req.body.slug || String(req.body.name).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''),
+        req.body.description || null,
+        req.body.long_description || null,
+        req.body.category,
+        req.body.subcategory || null,
+        req.body.version || '1.0.0',
+        JSON.stringify(req.body.dependencies || []),
+        JSON.stringify(req.body.compatibility || {}),
+        JSON.stringify(req.body.config_schema || {}),
+        JSON.stringify(manifest),
+        req.body.license || 'MIT',
+        Number(req.body.price_cents || 0),
+        Number(req.body.price_cents || 0) === 0,
+        JSON.stringify(req.body.tags || []),
+        status,
+      ]
+    );
+    res.status(201).json({ success: true, data: item.rows[0] });
   } catch (error) { next(error); }
 });
 
 router.put('/items/:id', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
   try {
-    const { publisher_id, ...data } = req.body;
-    if (!publisher_id) {
-      res.status(400).json({ success: false, error: { message: 'publisher_id required', code: 'BAD_REQUEST' } });
-      return;
-    }
-    const item = await marketplaceService.updateItem(req.params.id, publisher_id, data);
-    res.json({ success: true, data: item });
+    const publisherId = String(req.body.publisher_id || '');
+    if (!publisherId) throw new AppError(400, 'publisher_id required', 'BAD_REQUEST');
+    await requirePublisherOwner(publisherId, req.user!.userId);
+    const current = await query('SELECT * FROM marketplace_items WHERE id = $1 AND publisher_id = $2 AND deleted_at IS NULL', [req.params.id, publisherId]);
+    if (current.rows.length === 0) throw new NotFoundError('Marketplace item');
+    const manifest = req.body.package_manifest !== undefined ? objectValue(req.body.package_manifest) : objectValue(current.rows[0].package_manifest);
+    const status = String(req.body.status || current.rows[0].status);
+    if (status === 'published' && Object.keys(manifest).length === 0) throw new AppError(400, 'Published items require a package_manifest', 'MARKETPLACE_PACKAGE_EMPTY');
+    const result = await query(
+      `UPDATE marketplace_items SET
+         name = COALESCE($1,name), description = COALESCE($2,description), long_description = COALESCE($3,long_description),
+         version = COALESCE($4,version), tags = COALESCE($5,tags), config_schema = COALESCE($6,config_schema),
+         package_manifest = $7, status = $8,
+         published_at = CASE WHEN $8='published' THEN COALESCE(published_at,NOW()) ELSE published_at END,
+         updated_at = NOW()
+       WHERE id = $9 AND publisher_id = $10 RETURNING *`,
+      [
+        req.body.name || null,
+        req.body.description ?? null,
+        req.body.long_description ?? null,
+        req.body.version || null,
+        req.body.tags !== undefined ? JSON.stringify(req.body.tags) : null,
+        req.body.config_schema !== undefined ? JSON.stringify(req.body.config_schema) : null,
+        JSON.stringify(manifest),
+        status,
+        req.params.id,
+        publisherId,
+      ]
+    );
+    res.json({ success: true, data: result.rows[0] });
   } catch (error) { next(error); }
 });
 
 router.delete('/items/:id', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
   try {
-    const publisherId = req.query.publisher_id as string;
-    if (!publisherId) {
-      res.status(400).json({ success: false, error: { message: 'publisher_id required', code: 'BAD_REQUEST' } });
-      return;
-    }
-    await marketplaceService.deleteItem(req.params.id, publisherId);
+    const publisherId = String(req.query.publisher_id || '');
+    if (!publisherId) throw new AppError(400, 'publisher_id required', 'BAD_REQUEST');
+    await requirePublisherOwner(publisherId, req.user!.userId);
+    const result = await query('UPDATE marketplace_items SET deleted_at = NOW(), updated_at = NOW() WHERE id = $1 AND publisher_id = $2 RETURNING id', [req.params.id, publisherId]);
+    if (result.rows.length === 0) throw new NotFoundError('Marketplace item');
     res.json({ success: true, data: { message: 'Item deleted' } });
   } catch (error) { next(error); }
 });
 
-// Installations
 router.post('/items/:id/install', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
   try {
     const orgId = req.body.organization_id;
-    if (!orgId) {
-      res.status(400).json({ success: false, error: { message: 'organization_id required', code: 'BAD_REQUEST' } });
-      return;
-    }
-    const installation = await marketplaceService.installItem(orgId, req.params.id, req.user!.userId, req.body.config);
-    res.status(201).json({ success: true, data: installation });
+    if (!orgId) throw new AppError(400, 'organization_id required', 'BAD_REQUEST');
+    await requireOrganizationMember(orgId, req.user!.userId);
+    res.status(201).json({ success: true, data: await marketplaceRuntime.installItem(orgId, req.params.id, req.user!.userId, req.body.config || {}) });
   } catch (error) { next(error); }
 });
 
 router.delete('/items/:id/install', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
   try {
     const orgId = req.query.organization_id as string;
-    if (!orgId) {
-      res.status(400).json({ success: false, error: { message: 'organization_id required', code: 'BAD_REQUEST' } });
-      return;
-    }
-    await marketplaceService.uninstallItem(orgId, req.params.id);
-    res.json({ success: true, data: { message: 'Item uninstalled' } });
+    if (!orgId) throw new AppError(400, 'organization_id required', 'BAD_REQUEST');
+    await requireOrganizationMember(orgId, req.user!.userId);
+    await marketplaceRuntime.uninstallItem(orgId, req.params.id);
+    res.json({ success: true, data: { message: 'Item and installed assets removed' } });
   } catch (error) { next(error); }
 });
 
 router.get('/installations', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
   try {
     const orgId = req.query.organization_id as string;
-    if (!orgId) {
-      res.status(400).json({ success: false, error: { message: 'organization_id required', code: 'BAD_REQUEST' } });
-      return;
-    }
-    const installations = await marketplaceService.listInstallations(orgId);
-    res.json({ success: true, data: installations });
+    if (!orgId) throw new AppError(400, 'organization_id required', 'BAD_REQUEST');
+    await requireOrganizationMember(orgId, req.user!.userId);
+    res.json({ success: true, data: await marketplaceRuntime.listInstallations(orgId) });
   } catch (error) { next(error); }
 });
 
-// Reviews
 router.post('/items/:id/reviews', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
   try {
-    const review = await marketplaceService.createReview(req.params.id, req.user!.userId, req.body);
-    res.status(201).json({ success: true, data: review });
+    const orgId = req.body.organization_id;
+    if (!orgId) throw new AppError(400, 'organization_id required', 'BAD_REQUEST');
+    await requireOrganizationMember(orgId, req.user!.userId);
+    const installed = await query('SELECT 1 FROM marketplace_installations WHERE organization_id = $1 AND item_id = $2', [orgId, req.params.id]);
+    if (installed.rows.length === 0) throw new AppError(403, 'Install the item before reviewing it', 'VERIFIED_INSTALL_REQUIRED');
+    res.status(201).json({ success: true, data: await marketplaceService.createReview(req.params.id, req.user!.userId, req.body) });
   } catch (error) { next(error); }
 });
 
-// Skill Packs
 router.post('/skill-packs/:slug/install', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
   try {
     const orgId = req.body.organization_id;
-    if (!orgId) {
-      res.status(400).json({ success: false, error: { message: 'organization_id required', code: 'BAD_REQUEST' } });
-      return;
-    }
+    if (!orgId) throw new AppError(400, 'organization_id required', 'BAD_REQUEST');
+    await requireOrganizationMember(orgId, req.user!.userId);
     await marketplaceService.installSkillPack(orgId, req.params.slug, req.user!.userId);
     res.json({ success: true, data: { message: 'Skill pack installed' } });
   } catch (error) { next(error); }
 });
 
-// Admin routes
 router.get('/admin/submissions', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
   try {
-    const submissions = await marketplaceService.listSubmissions(req.query.status as string);
-    res.json({ success: true, data: submissions });
+    requirePlatformAdmin(req);
+    res.json({ success: true, data: await marketplaceService.listSubmissions(req.query.status as string) });
   } catch (error) { next(error); }
 });
 
 router.put('/admin/submissions/:id', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
   try {
-    const { decision, notes } = req.body;
-    if (!decision) {
-      res.status(400).json({ success: false, error: { message: 'decision required', code: 'BAD_REQUEST' } });
-      return;
-    }
-    await marketplaceService.reviewSubmission(req.params.id, req.user!.userId, decision, notes);
-    res.json({ success: true, data: { message: `Submission ${decision}` } });
+    requirePlatformAdmin(req);
+    if (!req.body.decision) throw new AppError(400, 'decision required', 'BAD_REQUEST');
+    await marketplaceService.reviewSubmission(req.params.id, req.user!.userId, req.body.decision, req.body.notes);
+    res.json({ success: true, data: { message: `Submission ${req.body.decision}` } });
   } catch (error) { next(error); }
 });
 

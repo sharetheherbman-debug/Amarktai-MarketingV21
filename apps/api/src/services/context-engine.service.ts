@@ -1,11 +1,12 @@
 import { query } from '../config/database';
 import { logger } from '../utils/logger';
 import { NotFoundError } from '../middleware/errorHandler';
-import * as memoryService from '../memory/memory.service';
+import * as brandDnaService from './brand-dna.service';
+import * as knowledgeService from './knowledge.service';
 
 export interface ContextOptions {
   orgId: string;
-  agentId: string;
+  agentId?: string;
   includeBrandDna?: boolean;
   includeKnowledge?: boolean;
   includeHistory?: boolean;
@@ -32,117 +33,59 @@ interface AgentRow {
   model: string | null;
 }
 
-async function loadAgent(agentId: string, orgId: string): Promise<AgentRow> {
+function objectValue(value: unknown): Record<string, unknown> {
+  if (!value) return {};
+  if (typeof value === 'string') {
+    try { return JSON.parse(value) as Record<string, unknown>; }
+    catch { return {}; }
+  }
+  return typeof value === 'object' ? value as Record<string, unknown> : {};
+}
+
+async function loadAgent(agentId: string | undefined, orgId: string): Promise<AgentRow | null> {
+  if (!agentId) return null;
   const result = await query(
-    `SELECT * FROM agents WHERE id = $1 AND organization_id = $2 AND deleted_at IS NULL`,
+    'SELECT * FROM agents WHERE id = $1 AND organization_id = $2 AND deleted_at IS NULL',
     [agentId, orgId]
   );
-
-  if (result.rows.length === 0) {
-    throw new NotFoundError('Agent');
-  }
-
-  return result.rows[0];
+  if (result.rows.length === 0) throw new NotFoundError('Agent');
+  return { ...result.rows[0], config: objectValue(result.rows[0].config) } as AgentRow;
 }
 
 async function getBrandDna(orgId: string): Promise<string> {
   try {
-    const brandMemories = await memoryService.getBrandMemory(orgId);
-
-    if (brandMemories.length === 0) {
-      const result = await query(
-        `SELECT * FROM brand_dna WHERE organization_id = $1 AND deleted_at IS NULL ORDER BY created_at DESC LIMIT 1`,
-        [orgId]
-      );
-
-      if (result.rows.length === 0) {
-        return '';
-      }
-
-      const dna = result.rows[0];
-      const parts: string[] = [];
-
-      if (dna.name) parts.push(`Brand Name: ${dna.name}`);
-      if (dna.industry) parts.push(`Industry: ${dna.industry}`);
-      if (dna.tone) parts.push(`Tone: ${dna.tone}`);
-      if (dna.voice) parts.push(`Voice: ${dna.voice}`);
-      if (dna.values) parts.push(`Values: ${JSON.stringify(dna.values)}`);
-      if (dna.target_audience) parts.push(`Target Audience: ${JSON.stringify(dna.target_audience)}`);
-      if (dna.style_guide) parts.push(`Style Guide: ${JSON.stringify(dna.style_guide)}`);
-
-      return parts.length > 0 ? `Brand DNA:\n${parts.join('\n')}` : '';
-    }
-
-    const parts: string[] = ['Brand Memory:'];
-    for (const memory of brandMemories) {
-      parts.push(`- ${memory.key}: ${JSON.stringify(memory.value)}`);
-    }
-
-    return parts.join('\n');
+    return await brandDnaService.getContextString(orgId);
   } catch (error) {
-    logger.warn(`Failed to load Brand DNA: ${error}`);
+    logger.warn(`Failed to load Brand DNA for ${orgId}: ${error}`);
     return '';
   }
 }
 
-async function getRelevantKnowledge(orgId: string, searchQuery: string, limit: number = 5): Promise<string> {
-  if (!searchQuery || searchQuery.trim().length === 0) {
-    return '';
-  }
-
+async function getRelevantKnowledge(orgId: string, searchText: string, limit = 5): Promise<string> {
+  const normalized = searchText.trim();
+  if (!normalized) return '';
   try {
-    const result = await query(
-      `SELECT title, content, type, metadata
-       FROM knowledge_items
-       WHERE organization_id = $1
-         AND deleted_at IS NULL
-         AND status = 'active'
-         AND (
-           title ILIKE $2
-           OR content ILIKE $2
-           OR tags::text ILIKE $2
-         )
-       ORDER BY
-         CASE WHEN title ILIKE $2 THEN 0 ELSE 1 END,
-         updated_at DESC
-       LIMIT $3`,
-      [orgId, `%${searchQuery}%`, limit]
-    );
-
-    if (result.rows.length === 0) {
-      const memoryResults = await memoryService.search(searchQuery, orgId, 'knowledge', limit);
-
-      if (memoryResults.length === 0) {
-        return '';
-      }
-
-      const parts: string[] = ['Relevant Knowledge:'];
-      for (const item of memoryResults) {
-        parts.push(`- ${item.key}: ${JSON.stringify(item.value)}`);
-      }
-
-      return parts.join('\n');
+    const rows = await knowledgeService.search(orgId, normalized, limit);
+    if (rows.length === 0) return '';
+    const parts = ['RELEVANT KNOWLEDGE:'];
+    for (const row of rows) {
+      const title = String(row.title || 'Untitled');
+      const content = String(row.content || '').slice(0, 1200);
+      const source = row.url ? ` (${String(row.url)})` : '';
+      parts.push(`- ${title}${source}: ${content}`);
     }
-
-    const parts: string[] = ['Relevant Knowledge:'];
-    for (const item of result.rows) {
-      const title = item.title || 'Untitled';
-      const content = item.content ? item.content.substring(0, 500) : '';
-      parts.push(`- [${item.type}] ${title}: ${content}`);
-    }
-
     return parts.join('\n');
   } catch (error) {
-    logger.warn(`Failed to search knowledge: ${error}`);
+    logger.warn(`Failed to search knowledge for ${orgId}: ${error}`);
     return '';
   }
 }
 
-async function getRecentHistory(agentId: string, orgId: string, limit: number = 10): Promise<string> {
+async function getRecentHistory(agentId: string | undefined, orgId: string, limit = 10): Promise<string> {
+  if (!agentId) return '';
   try {
     const result = await query(
-      `SELECT ac.id, ac.title, ac.updated_at,
-              am.role, am.content, am.created_at
+      `SELECT ac.id, ac.title, ac.updated_at, am.role, am.content, am.created_at
        FROM agent_conversations ac
        JOIN agent_messages am ON am.conversation_id = ac.id
        WHERE ac.agent_id = $1
@@ -150,46 +93,28 @@ async function getRecentHistory(agentId: string, orgId: string, limit: number = 
          AND am.role IN ('user', 'assistant')
        ORDER BY ac.updated_at DESC, am.created_at ASC
        LIMIT $3`,
-      [agentId, orgId, limit * 3]
+      [agentId, orgId, Math.max(1, Math.min(limit, 50)) * 3]
     );
+    if (result.rows.length === 0) return '';
 
-    if (result.rows.length === 0) {
-      return '';
-    }
-
-    const conversationGroups: Record<string, typeof result.rows> = {};
+    const groups = new Map<string, typeof result.rows>();
     for (const row of result.rows) {
-      if (!conversationGroups[row.id]) {
-        conversationGroups[row.id] = [];
-      }
-      conversationGroups[row.id].push(row);
+      const id = String(row.id);
+      groups.set(id, [...(groups.get(id) || []), row]);
     }
-
-    const parts: string[] = ['Recent Conversation History:'];
-
-    const sortedConversations = Object.entries(conversationGroups)
-      .sort(([, a], [, b]) => {
-        const aTime = a[0]?.updated_at ? new Date(a[0].updated_at).getTime() : 0;
-        const bTime = b[0]?.updated_at ? new Date(b[0].updated_at).getTime() : 0;
-        return bTime - aTime;
-      })
+    const conversations = [...groups.values()]
+      .sort((left, right) => new Date(right[0]?.updated_at || 0).getTime() - new Date(left[0]?.updated_at || 0).getTime())
       .slice(0, 3);
-
-    for (const [convId, messages] of sortedConversations) {
-      const title = messages[0]?.title || 'Untitled Conversation';
-      parts.push(`\nConversation: ${title}`);
-
-      const recentMessages = messages.slice(-6);
-      for (const msg of recentMessages) {
-        const role = msg.role === 'user' ? 'User' : 'Assistant';
-        const content = msg.content ? msg.content.substring(0, 200) : '';
-        parts.push(`  ${role}: ${content}`);
+    const parts = ['RECENT CONVERSATION HISTORY:'];
+    for (const messages of conversations) {
+      parts.push(`Conversation: ${String(messages[0]?.title || 'Untitled')}`);
+      for (const message of messages.slice(-6)) {
+        parts.push(`${message.role === 'user' ? 'User' : 'Assistant'}: ${String(message.content || '').slice(0, 500)}`);
       }
     }
-
     return parts.join('\n');
   } catch (error) {
-    logger.warn(`Failed to load conversation history: ${error}`);
+    logger.warn(`Failed to load conversation history for ${agentId}: ${error}`);
     return '';
   }
 }
@@ -202,52 +127,21 @@ export async function assemble(options: ContextOptions): Promise<AssembledContex
     includeKnowledge = true,
     includeHistory = true,
     historyLimit = 10,
-    knowledgeQuery,
+    knowledgeQuery = '',
   } = options;
 
   const agent = await loadAgent(agentId, orgId);
+  const config = agent?.config || {};
+  const [brandDna, knowledge, recentHistory] = await Promise.all([
+    includeBrandDna && config.include_brand_dna !== false ? getBrandDna(orgId) : Promise.resolve(''),
+    includeKnowledge && config.include_knowledge !== false ? getRelevantKnowledge(orgId, knowledgeQuery, 5) : Promise.resolve(''),
+    includeHistory && config.include_history !== false ? getRecentHistory(agentId, orgId, historyLimit) : Promise.resolve(''),
+  ]);
 
-  const agentConfig = agent.config as Record<string, unknown>;
-  const configBrandDna = agentConfig?.include_brand_dna !== false;
-  const configKnowledge = agentConfig?.include_knowledge !== false;
-  const configHistory = agentConfig?.include_history !== false;
-
-  const tasks: Promise<string>[] = [];
-
-  tasks.push(includeBrandDna && configBrandDna ? getBrandDna(orgId) : Promise.resolve(''));
-  tasks.push(
-    includeKnowledge && configKnowledge
-      ? getRelevantKnowledge(orgId, knowledgeQuery || '', 5)
-      : Promise.resolve('')
-  );
-  tasks.push(
-    includeHistory && configHistory
-      ? getRecentHistory(agentId, orgId, historyLimit)
-      : Promise.resolve('')
-  );
-
-  const [brandDna, knowledge, recentHistory] = await Promise.all(tasks);
-
-  const contextParts: string[] = [];
-
-  if (brandDna) {
-    contextParts.push(brandDna);
-  }
-
-  if (knowledge) {
-    contextParts.push(knowledge);
-  }
-
-  if (recentHistory) {
-    contextParts.push(recentHistory);
-  }
-
-  const fullContext = contextParts.join('\n\n---\n\n');
-
-  logger.debug(`Context assembled for agent ${agentId}: ${fullContext.length} chars`);
-
+  const fullContext = [brandDna, knowledge, recentHistory].filter(Boolean).join('\n\n---\n\n');
+  logger.debug(`Context assembled for ${agentId || 'unscoped generation'}: ${fullContext.length} chars`);
   return {
-    systemPrompt: agent.system_prompt || '',
+    systemPrompt: agent?.system_prompt || '',
     brandDna,
     knowledge,
     recentHistory,
@@ -255,8 +149,5 @@ export async function assemble(options: ContextOptions): Promise<AssembledContex
   };
 }
 
-export const contextEngine = {
-  assemble,
-};
-
+export const contextEngine = { assemble };
 export default contextEngine;

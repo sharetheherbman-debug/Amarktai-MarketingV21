@@ -1,22 +1,12 @@
-# Stage 1: Install dependencies
 FROM node:20-alpine AS deps
 WORKDIR /app
 
-COPY package.json package-lock.json* yarn.lock* pnpm-lock.yaml* ./
-COPY apps/web/package.json ./apps/web/
+COPY package.json package-lock.json ./
+COPY apps/api/package.json ./apps/api/package.json
+COPY apps/web/package.json ./apps/web/package.json
+COPY packages/studio/package.json ./packages/studio/package.json
+RUN npm ci
 
-RUN \
-  if [ -f pnpm-lock.yaml ]; then \
-    corepack enable pnpm && pnpm install --frozen-lockfile; \
-  elif [ -f yarn.lock ]; then \
-    yarn install --frozen-lockfile; \
-  elif [ -f package-lock.json ]; then \
-    npm ci; \
-  else \
-    npm install; \
-  fi
-
-# Stage 2: Build
 FROM node:20-alpine AS build
 WORKDIR /app
 
@@ -24,18 +14,12 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY --from=deps /app/apps/web/node_modules ./apps/web/node_modules
 COPY . .
 
+ARG NEXT_PUBLIC_API_URL=/api
+ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
 ENV NEXT_TELEMETRY_DISABLED=1
 
-RUN \
-  if [ -f pnpm-lock.yaml ]; then \
-    corepack enable pnpm && pnpm --filter web build; \
-  elif [ -f yarn.lock ]; then \
-    yarn workspace web build; \
-  else \
-    npm run build --workspace=web; \
-  fi
+RUN npm run build --workspace=@amarktai/web
 
-# Stage 3: Production (standalone)
 FROM node:20-alpine AS production
 WORKDIR /app
 
@@ -47,12 +31,11 @@ ENV NEXT_TELEMETRY_DISABLED=1
 ENV PORT=3000
 ENV HOSTNAME="0.0.0.0"
 
-COPY --from=build /app/apps/web/public ./public
+COPY --from=build /app/apps/web/public ./apps/web/public
 COPY --from=build --chown=nextjs:nodejs /app/apps/web/.next/standalone ./
 COPY --from=build --chown=nextjs:nodejs /app/apps/web/.next/static ./apps/web/.next/static
 
 EXPOSE 3000
-
 USER nextjs
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \

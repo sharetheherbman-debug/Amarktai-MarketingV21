@@ -6,14 +6,7 @@ import { toolService } from './tool.service';
 import { providerRouter } from '../providers/provider-router';
 import * as usageService from './usage.service';
 import { v4 as uuidv4 } from 'uuid';
-import {
-  Agent,
-  AgentDefinition,
-  AgentConversation,
-  ConversationMessage,
-  ChatMessage,
-  ToolCallResult,
-} from '../types';
+import { ChatMessage, ToolCallResult } from '../types';
 
 export interface ExecuteOptions {
   agentId: string;
@@ -47,10 +40,6 @@ interface AgentDefinitionRow {
   status: string;
   capabilities: string[];
   tools: string[];
-  created_by: string | null;
-  created_at: Date;
-  updated_at: Date;
-  deleted_at: Date | null;
 }
 
 interface ConversationRow {
@@ -74,54 +63,47 @@ interface MessageRow {
   created_at: Date;
 }
 
-async function loadAgent(agentId: string, orgId: string): Promise<AgentDefinitionRow> {
-  const result = await query(
-    `SELECT * FROM agents WHERE id = $1 AND organization_id = $2 AND deleted_at IS NULL`,
-    [agentId, orgId]
-  );
-
-  if (result.rows.length === 0) {
-    throw new NotFoundError('Agent');
-  }
-
-  return result.rows[0];
+interface RequestedToolCall {
+  tool: string;
+  input: Record<string, unknown>;
 }
 
-async function getOrCreateConversation(
-  conversationId: string | undefined,
-  agentId: string,
-  orgId: string
-): Promise<ConversationRow> {
-  if (conversationId) {
-    const result = await query(
-      `SELECT * FROM agent_conversations WHERE id = $1 AND organization_id = $2 AND agent_id = $3`,
-      [conversationId, orgId, agentId]
-    );
-
-    if (result.rows.length === 0) {
-      throw new NotFoundError('Conversation');
-    }
-
-    return result.rows[0];
+function jsonValue<T>(value: unknown, fallback: T): T {
+  if (typeof value === 'string') {
+    try { return JSON.parse(value) as T; } catch { return fallback; }
   }
+  return (value as T) ?? fallback;
+}
 
+async function loadAgent(agentId: string, orgId: string): Promise<AgentDefinitionRow> {
+  const result = await query('SELECT * FROM agents WHERE id = $1 AND organization_id = $2 AND deleted_at IS NULL', [agentId, orgId]);
+  if (result.rows.length === 0) throw new NotFoundError('Agent');
+  const row = result.rows[0];
+  return {
+    ...row,
+    config: jsonValue(row.config, {}),
+    capabilities: jsonValue(row.capabilities, []),
+    tools: jsonValue(row.tools, []),
+  } as AgentDefinitionRow;
+}
+
+async function getOrCreateConversation(conversationId: string | undefined, agentId: string, orgId: string, title: string): Promise<ConversationRow> {
+  if (conversationId) {
+    const result = await query('SELECT * FROM agent_conversations WHERE id = $1 AND organization_id = $2 AND agent_id = $3', [conversationId, orgId, agentId]);
+    if (result.rows.length === 0) throw new NotFoundError('Conversation');
+    return result.rows[0] as ConversationRow;
+  }
   const result = await query(
     `INSERT INTO agent_conversations (id, organization_id, agent_id, title, metadata)
-     VALUES ($1, $2, $3, $4, $5)
-     RETURNING *`,
-    [uuidv4(), orgId, agentId, null, JSON.stringify({})]
+     VALUES ($1,$2,$3,$4,'{}'::jsonb) RETURNING *`,
+    [uuidv4(), orgId, agentId, title.slice(0, 160)]
   );
-
-  return result.rows[0];
+  return result.rows[0] as ConversationRow;
 }
 
 async function getConversationMessages(conversationId: string): Promise<MessageRow[]> {
-  const result = await query(
-    `SELECT * FROM agent_messages WHERE conversation_id = $1 ORDER BY created_at ASC`,
-    [conversationId]
-  );
-
-  return result.rows;
+  const result = await query('SELECT * FROM agent_messages WHERE conversation_id = $1 ORDER BY created_at ASC', [conversationId]);
+  return result.rows as MessageRow[];
 }
 
 async function storeMessage(
@@ -131,73 +113,49 @@ async function storeMessage(
   toolCalls?: Record<string, unknown>[],
   toolCallId?: string,
   metadata?: Record<string, unknown>
-): Promise<MessageRow> {
-  const result = await query(
+): Promise<void> {
+  await query(
     `INSERT INTO agent_messages (id, conversation_id, role, content, tool_calls, tool_call_id, metadata)
-     VALUES ($1, $2, $3, $4, $5, $6, $7)
-     RETURNING *`,
-    [
-      uuidv4(),
-      conversationId,
-      role,
-      content,
-      toolCalls ? JSON.stringify(toolCalls) : null,
-      toolCallId || null,
-      JSON.stringify(metadata || {}),
-    ]
+     VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+    [uuidv4(), conversationId, role, content, toolCalls ? JSON.stringify(toolCalls) : null, toolCallId || null, JSON.stringify(metadata || {})]
   );
-
-  return result.rows[0];
 }
 
-async function buildMessagesArray(
-  agent: AgentDefinitionRow,
-  context: string,
-  history: MessageRow[],
-  userMessage: string,
-  input?: Record<string, unknown>
-): Promise<ChatMessage[]> {
-  const messages: ChatMessage[] = [];
+function toolInstruction(tools: Record<string, unknown>[]): string {
+  if (tools.length === 0) return '';
+  return `You can use the following tools:\n${JSON.stringify(tools, null, 2)}\n\nWhen a tool is needed, return ONLY valid JSON in this exact shape:\n{"response":"brief reason","tool_calls":[{"name":"tool_name","input":{}}]}\nWhen no tool is needed, answer normally. Never invent a tool name or tool result.`;
+}
 
-  const systemParts: string[] = [];
-
-  if (agent.system_prompt) {
-    systemParts.push(agent.system_prompt);
+function parseToolCalls(content: string, allowedTools: Set<string>): { response: string; calls: RequestedToolCall[] } {
+  const candidates = [content.trim(), content.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim()];
+  for (const candidate of candidates) {
+    try {
+      const parsed = JSON.parse(candidate) as Record<string, unknown>;
+      const rawCalls = Array.isArray(parsed.tool_calls) ? parsed.tool_calls : [];
+      const calls = rawCalls.flatMap((value): RequestedToolCall[] => {
+        if (!value || typeof value !== 'object') return [];
+        const row = value as Record<string, unknown>;
+        const name = String(row.name || row.tool || '');
+        if (!allowedTools.has(name)) return [];
+        const input = row.input && typeof row.input === 'object' ? row.input as Record<string, unknown> : {};
+        return [{ tool: name, input }];
+      });
+      if (calls.length > 0) return { response: String(parsed.response || ''), calls };
+    } catch {
+      // Normal assistant text is not a tool request.
+    }
   }
+  return { response: content, calls: [] };
+}
 
-  if (context) {
-    systemParts.push(context);
+function buildMessages(agent: AgentDefinitionRow, context: string, history: MessageRow[], userMessage: string, input: Record<string, unknown> | undefined, tools: Record<string, unknown>[]): ChatMessage[] {
+  const systemParts = [agent.system_prompt || '', context, input && Object.keys(input).length > 0 ? `Structured input:\n${JSON.stringify(input, null, 2)}` : '', toolInstruction(tools)].filter(Boolean);
+  const messages: ChatMessage[] = systemParts.length > 0 ? [{ role: 'system', content: systemParts.join('\n\n---\n\n') }] : [];
+  for (const message of history.slice(-40)) {
+    if (message.role === 'user' || message.role === 'assistant') messages.push({ role: message.role, content: message.content });
+    if (message.role === 'tool') messages.push({ role: 'user', content: `Tool result (${message.tool_call_id || 'tool'}): ${message.content}` });
   }
-
-  if (input && Object.keys(input).length > 0) {
-    systemParts.push(`User Input:\n${JSON.stringify(input, null, 2)}`);
-  }
-
-  if (systemParts.length > 0) {
-    messages.push({
-      role: 'system',
-      content: systemParts.join('\n\n---\n\n'),
-    });
-  }
-
-  for (const msg of history) {
-    if (msg.role === 'system') continue;
-
-    const chatMsg: ChatMessage = {
-      role: msg.role as 'user' | 'assistant',
-      content: msg.content,
-    };
-
-    messages.push(chatMsg);
-  }
-
-  if (userMessage) {
-    messages.push({
-      role: 'user',
-      content: userMessage,
-    });
-  }
-
+  messages.push({ role: 'user', content: userMessage });
   return messages;
 }
 
@@ -207,57 +165,20 @@ async function runTurn(
   tools: Record<string, unknown>[],
   orgId: string,
   userId?: string
-): Promise<{ response: string; toolCalls: ToolCallResult[]; tokensIn: number; tokensOut: number }> {
-  const model = agent.model || 'gpt-4o-mini';
-  const providerName = agent.provider || undefined;
-
-  let result;
-
-  if (providerName) {
-    const providers = await query(
-      `SELECT * FROM ai_providers WHERE name = $1 AND enabled = true`,
-      [providerName]
-    );
-
-    if (providers.rows.length > 0) {
-      result = await providerRouter.routeRequest(messages, model, undefined, {
-        organizationId: orgId,
-        userId,
-      });
-    } else {
-      result = await providerRouter.routeRequest(messages, model, undefined, {
-        organizationId: orgId,
-        userId,
-      });
-    }
-  } else {
-    result = await providerRouter.routeRequest(messages, model, undefined, {
-      organizationId: orgId,
-      userId,
-    });
-  }
-
-  const toolCalls: ToolCallResult[] = [];
-
-  return {
-    response: result.content,
-    toolCalls,
-    tokensIn: result.tokensIn,
-    tokensOut: result.tokensOut,
-  };
+): Promise<{ response: string; requestedCalls: RequestedToolCall[]; tokensIn: number; tokensOut: number }> {
+  const result = await providerRouter.routeRequest(messages, agent.model || 'gpt-4o-mini', undefined, { organizationId: orgId, userId });
+  const allowedTools = new Set(tools.map((tool) => String((tool.function as Record<string, unknown> | undefined)?.name || '')));
+  const parsed = parseToolCalls(result.content, allowedTools);
+  return { response: parsed.response, requestedCalls: parsed.calls, tokensIn: result.tokensIn, tokensOut: result.tokensOut };
 }
 
 export async function execute(options: ExecuteOptions): Promise<AgentResponse> {
   const { agentId, orgId, userId, task, input, conversationId, maxTurns = 5 } = options;
-
-  logger.info(`Executing agent ${agentId} for org ${orgId}`);
-
+  if (!orgId) throw new AppError(400, 'Organization ID required', 'BAD_REQUEST');
   const agent = await loadAgent(agentId, orgId);
+  if (agent.status !== 'active') throw new AppError(400, 'Agent is not active', 'AGENT_INACTIVE');
 
-  if (agent.status !== 'active') {
-    throw new AppError(400, 'Agent is not active', 'AGENT_INACTIVE');
-  }
-
+  const userMessage = task || (input ? JSON.stringify(input) : 'Please proceed with the task.');
   const context = await contextEngine.assemble({
     orgId,
     agentId,
@@ -265,96 +186,57 @@ export async function execute(options: ExecuteOptions): Promise<AgentResponse> {
     includeKnowledge: true,
     includeHistory: !!conversationId,
     historyLimit: 20,
-    knowledgeQuery: task || JSON.stringify(input),
+    knowledgeQuery: userMessage,
   });
-
-  const conversation = await getOrCreateConversation(conversationId, agentId, orgId);
-
+  const conversation = await getOrCreateConversation(conversationId, agentId, orgId, userMessage);
   const history = await getConversationMessages(conversation.id);
-
-  const userMessage = task || (input ? JSON.stringify(input) : 'Please proceed with the task.');
-
-  await storeMessage(conversation.id, 'user', userMessage, undefined, undefined, {
-    input,
-    task,
-  });
+  await storeMessage(conversation.id, 'user', userMessage, undefined, undefined, { input, task });
 
   const tools = await toolService.getToolDefinitions(agent.tools || []);
-
+  let messages = buildMessages(agent, context.fullContext, history, userMessage, input, tools);
   let totalTokensIn = 0;
   let totalTokensOut = 0;
   let totalCostCents = 0;
-  let turns = 0;
   let finalResponse = '';
+  let turns = 0;
   const allToolCalls: ToolCallResult[] = [];
 
-  let currentMessages = await buildMessagesArray(agent, context.fullContext, history, userMessage, input);
-
-  for (let turn = 0; turn < maxTurns; turn++) {
+  for (let turn = 0; turn < Math.max(1, Math.min(maxTurns, 10)); turn++) {
     turns++;
+    const result = await runTurn(agent, messages, tools, orgId, userId);
+    totalTokensIn += result.tokensIn;
+    totalTokensOut += result.tokensOut;
+    totalCostCents += usageService.estimateCost(agent.provider || 'default', agent.model || 'gpt-4o-mini', result.tokensIn, result.tokensOut);
+    finalResponse = result.response;
 
-    const turnResult = await runTurn(agent, currentMessages, tools, orgId, userId);
-
-    totalTokensIn += turnResult.tokensIn;
-    totalTokensOut += turnResult.tokensOut;
-
-    const costCents = usageService.estimateCost(
-      agent.provider || 'default',
-      agent.model || 'gpt-4o-mini',
-      turnResult.tokensIn,
-      turnResult.tokensOut
+    await storeMessage(
+      conversation.id,
+      'assistant',
+      result.response,
+      result.requestedCalls.map((call) => ({ tool: call.tool, input: call.input })),
+      undefined,
+      { tokensIn: result.tokensIn, tokensOut: result.tokensOut }
     );
-    totalCostCents += costCents;
 
-    finalResponse = turnResult.response;
+    if (result.requestedCalls.length === 0) break;
 
-    if (turnResult.toolCalls.length === 0) {
-      await storeMessage(conversation.id, 'assistant', turnResult.response, undefined, undefined, {
-        tokensIn: turnResult.tokensIn,
-        tokensOut: turnResult.tokensOut,
-      });
-      break;
-    }
-
-    await storeMessage(conversation.id, 'assistant', turnResult.response, turnResult.toolCalls as any, undefined, {
-      tokensIn: turnResult.tokensIn,
-      tokensOut: turnResult.tokensOut,
-    });
-
-    for (const toolCall of turnResult.toolCalls) {
-      const toolResult = await toolService.execute(toolCall.tool, toolCall.input, orgId);
+    const turnResults: ToolCallResult[] = [];
+    for (const call of result.requestedCalls) {
+      const toolResult = await toolService.execute(call.tool, call.input, orgId);
       allToolCalls.push(toolResult);
-
-      await storeMessage(
-        conversation.id,
-        'tool',
-        JSON.stringify(toolResult.output),
-        undefined,
-        toolCall.tool,
-        { toolName: toolCall.tool, success: toolResult.success }
-      );
-
-      currentMessages.push({
-        role: 'assistant',
-        content: '',
-      });
-
-      currentMessages.push({
-        role: 'user' as any,
-        content: `Tool result for ${toolCall.tool}:\n${JSON.stringify(toolResult.output)}`,
-      });
+      turnResults.push(toolResult);
+      await storeMessage(conversation.id, 'tool', JSON.stringify(toolResult.output), undefined, call.tool, { success: toolResult.success, error: toolResult.error });
     }
+
+    messages.push({ role: 'assistant', content: result.response || 'I will use the requested tools.' });
+    messages.push({
+      role: 'user',
+      content: `Tool execution results:\n${JSON.stringify(turnResults, null, 2)}\n\nUse these real results to continue. Request another tool only when necessary; otherwise provide the final answer.`,
+    });
   }
 
-  await query(
-    `UPDATE agent_conversations SET updated_at = NOW() WHERE id = $1`,
-    [conversation.id]
-  );
-
-  logger.info(
-    `Agent execution complete: ${turns} turns, ${totalTokensIn} tokens in, ${totalTokensOut} tokens out, $${(totalCostCents / 100).toFixed(4)}`
-  );
-
+  await query('UPDATE agent_conversations SET updated_at = NOW() WHERE id = $1', [conversation.id]);
+  logger.info(`Agent ${agentId} completed ${turns} turns with ${allToolCalls.length} tool calls`);
   return {
     conversationId: conversation.id,
     response: finalResponse,
@@ -365,66 +247,26 @@ export async function execute(options: ExecuteOptions): Promise<AgentResponse> {
   };
 }
 
-export async function getConversation(
-  conversationId: string,
-  orgId: string
-): Promise<{ conversation: ConversationRow; messages: MessageRow[] }> {
-  const convResult = await query(
-    `SELECT * FROM agent_conversations WHERE id = $1 AND organization_id = $2`,
-    [conversationId, orgId]
-  );
-
-  if (convResult.rows.length === 0) {
-    throw new NotFoundError('Conversation');
-  }
-
-  const messages = await getConversationMessages(conversationId);
-
-  return {
-    conversation: convResult.rows[0],
-    messages,
-  };
+export async function getConversation(conversationId: string, orgId: string): Promise<{ conversation: ConversationRow; messages: MessageRow[] }> {
+  const result = await query('SELECT * FROM agent_conversations WHERE id = $1 AND organization_id = $2', [conversationId, orgId]);
+  if (result.rows.length === 0) throw new NotFoundError('Conversation');
+  return { conversation: result.rows[0] as ConversationRow, messages: await getConversationMessages(conversationId) };
 }
 
-export async function listConversations(
-  orgId: string,
-  agentId?: string,
-  limit: number = 20
-): Promise<ConversationRow[]> {
-  let sql = `SELECT * FROM agent_conversations WHERE organization_id = $1`;
-  const params: any[] = [orgId];
-  let paramCount = 2;
-
-  if (agentId) {
-    sql += ` AND agent_id = $${paramCount++}`;
-    params.push(agentId);
-  }
-
-  sql += ` ORDER BY updated_at DESC LIMIT $${paramCount}`;
-  params.push(limit);
-
+export async function listConversations(orgId: string, agentId?: string, limit = 20): Promise<ConversationRow[]> {
+  const params: unknown[] = [orgId];
+  let sql = 'SELECT * FROM agent_conversations WHERE organization_id = $1';
+  if (agentId) { sql += ' AND agent_id = $2'; params.push(agentId); }
+  sql += ` ORDER BY updated_at DESC LIMIT $${params.length + 1}`;
+  params.push(Math.max(1, Math.min(limit, 100)));
   const result = await query(sql, params);
-  return result.rows;
+  return result.rows as ConversationRow[];
 }
 
 export async function deleteConversation(conversationId: string, orgId: string): Promise<void> {
-  const result = await query(
-    `DELETE FROM agent_conversations WHERE id = $1 AND organization_id = $2 RETURNING id`,
-    [conversationId, orgId]
-  );
-
-  if (result.rows.length === 0) {
-    throw new NotFoundError('Conversation');
-  }
-
-  logger.info(`Conversation deleted: ${conversationId}`);
+  const result = await query('DELETE FROM agent_conversations WHERE id = $1 AND organization_id = $2 RETURNING id', [conversationId, orgId]);
+  if (result.rows.length === 0) throw new NotFoundError('Conversation');
 }
 
-export const agentOrchestrator = {
-  execute,
-  getConversation,
-  listConversations,
-  deleteConversation,
-};
-
+export const agentOrchestrator = { execute, getConversation, listConversations, deleteConversation };
 export default agentOrchestrator;
