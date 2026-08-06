@@ -55,7 +55,8 @@ import longformVideoRoutes from './routes/longform-video';
 import longformProductionRoutes from './routes/longform-production';
 import longformSceneProductionRoutes from './routes/longform-scene-production';
 import scheduler from './services/scheduler.service';
-import { processStripeEvent, verifyStripeEvent } from './services/marketplace-payment.service';
+import { verifyStripeWebhook } from './services/stripe-client.service';
+import { processStripeEvent } from './services/stripe-webhook.service';
 
 const app = express();
 app.set('trust proxy', env.TRUST_PROXY_HOPS);
@@ -91,18 +92,21 @@ app.use(helmet({
 app.use(compression());
 app.use(morgan('combined', { stream: { write: (message: string) => logger.http(message.trim()) } }));
 
-app.post('/api/v1/marketplace/stripe/webhook', express.raw({ type: 'application/json', limit: '1mb' }), async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+const stripeWebhookHandler = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const signature = req.header('stripe-signature');
     if (!signature || !Buffer.isBuffer(req.body)) {
       res.status(400).json({ success: false, error: { message: 'Stripe signature and raw body required', code: 'STRIPE_SIGNATURE_REQUIRED' } });
       return;
     }
-    const event = verifyStripeEvent(req.body, signature);
+    const event = verifyStripeWebhook(req.body, signature);
     await processStripeEvent(event);
     res.json({ received: true });
   } catch (error) { next(error); }
-});
+};
+
+app.post('/api/v1/stripe/webhook', express.raw({ type: 'application/json', limit: '1mb' }), stripeWebhookHandler);
+app.post('/api/v1/marketplace/stripe/webhook', express.raw({ type: 'application/json', limit: '1mb' }), stripeWebhookHandler);
 
 app.use(cookieParser());
 app.use(csrfProtection);
