@@ -4,12 +4,29 @@ import { query } from '../config/database';
 import type { ApiResponse } from '../types';
 
 const router = Router();
-router.use(requireAuth);
 
 function normalizeOperation(type: string): string {
   if (type === 'cinema') return 'text_to_video';
   if (type === 'audio') return 'audio_generation';
   return type;
+}
+
+function parseArray(value: unknown): string[] {
+  if (Array.isArray(value)) return value.map(String);
+  if (!value) return [];
+  try {
+    const parsed = JSON.parse(String(value));
+    return Array.isArray(parsed) ? parsed.map(String) : [];
+  } catch { return []; }
+}
+
+function parseObject(value: unknown): Record<string, unknown> {
+  if (value && typeof value === 'object') return value as Record<string, unknown>;
+  if (!value) return {};
+  try {
+    const parsed = JSON.parse(String(value));
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch { return {}; }
 }
 
 function mapModel(row: Record<string, any>) {
@@ -18,22 +35,22 @@ function mapModel(row: Record<string, any>) {
     name: row.name,
     category: row.category,
     provider: 'genx',
-    operations: Array.isArray(row.operations) ? row.operations : JSON.parse(row.operations || '[]'),
-    inputs: Array.isArray(row.inputs) ? row.inputs : JSON.parse(row.inputs || '[]'),
-    outputs: Array.isArray(row.outputs) ? row.outputs : JSON.parse(row.outputs || '[]'),
-    parameters: typeof row.parameters === 'object' ? row.parameters : JSON.parse(row.parameters || '{}'),
-    required_parameters: Array.isArray(row.required_parameters)
-      ? row.required_parameters
-      : JSON.parse(row.required_parameters || '[]'),
-    optional_parameters: Array.isArray(row.optional_parameters)
-      ? row.optional_parameters
-      : JSON.parse(row.optional_parameters || '[]'),
+    operations: parseArray(row.operations),
+    inputs: parseArray(row.inputs),
+    outputs: parseArray(row.outputs),
+    parameters: parseObject(row.parameters),
+    required_parameters: parseArray(row.required_parameters),
+    optional_parameters: parseArray(row.optional_parameters),
     verification_status: row.verification_status,
     status: 'runtime_confirmed',
   };
 }
 
-router.get('/models', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction) => {
+router.get('/models', requireAuth, async (
+  req: AuthRequest,
+  res: Response<ApiResponse>,
+  next: NextFunction
+) => {
   try {
     const operation = req.query.operation ? normalizeOperation(String(req.query.operation)) : null;
     const values: unknown[] = [];
@@ -51,7 +68,11 @@ router.get('/models', async (req: AuthRequest, res: Response<ApiResponse>, next:
   } catch (error) { next(error); }
 });
 
-router.post('/generations', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction) => {
+router.post('/generations', requireAuth, async (
+  req: AuthRequest,
+  res: Response<ApiResponse>,
+  next: NextFunction
+) => {
   try {
     const operation = normalizeOperation(String(req.body.type || ''));
     if (!operation) {
