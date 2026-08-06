@@ -1,278 +1,202 @@
 import { Router, Response, NextFunction } from 'express';
+import { z } from 'zod';
 import { requireAuth, AuthRequest } from '../middleware/auth';
-import { validateBody, validateQuery } from '../middleware/validator';
-import { createAgentSchema, executeAgentSchema, paginationSchema } from '../utils/validation';
 import { query } from '../config/database';
 import { NotFoundError, AppError } from '../middleware/errorHandler';
-import { addJob } from '../queue/queue.service';
 import { agentOrchestrator } from '../services/agent-orchestrator.service';
 import { taskPlanner } from '../services/task-planner.service';
-import { ApiResponse, PaginatedResponse } from '../types';
+import { toolService } from '../services/tool.service';
+import { ApiResponse } from '../types';
 
 const router = Router();
-
 router.use(requireAuth);
 
-router.get('/', validateQuery(paginationSchema), async (req: AuthRequest, res: Response<PaginatedResponse<any>>, next: NextFunction) => {
+function orgId(req: AuthRequest): string {
+  return String(req.body?.organization_id || req.query.organization_id || '');
+}
+
+function jsonValue<T>(value: unknown, fallback: T): T {
+  if (typeof value === 'string') {
+    try { return JSON.parse(value) as T; } catch { return fallback; }
+  }
+  return (value as T) ?? fallback;
+}
+
+function mapAgent(row: Record<string, unknown>): Record<string, unknown> {
+  const capabilities = jsonValue(row.capabilities, [] as string[]);
+  const tools = jsonValue(row.tools, [] as string[]);
+  return {
+    ...row,
+    slug: row.slug || String(row.name || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''),
+    systemPrompt: row.system_prompt || '',
+    capabilities,
+    tools,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    lastUsedAt: row.last_used_at || null,
+  };
+}
+
+// Static routes must be declared before /:id.
+router.get('/tools', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
   try {
-    const { page, limit, sort, order, search } = req.query as any;
+    const organizationId = orgId(req);
+    if (!organizationId) throw new AppError(400, 'Organization ID required', 'BAD_REQUEST');
+    const tools = await toolService.list(organizationId, req.query.category as string);
+    res.json({ success: true, data: tools });
+  } catch (error) { next(error); }
+});
+
+router.get('/conversations', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
+  try {
+    const organizationId = orgId(req);
+    if (!organizationId) throw new AppError(400, 'Organization ID required', 'BAD_REQUEST');
+    const conversations = await agentOrchestrator.listConversations(organizationId, req.query.agent_id as string, parseInt(req.query.limit as string) || 20);
+    res.json({ success: true, data: conversations });
+  } catch (error) { next(error); }
+});
+
+router.get('/conversations/:conversationId', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
+  try {
+    const organizationId = orgId(req);
+    if (!organizationId) throw new AppError(400, 'Organization ID required', 'BAD_REQUEST');
+    res.json({ success: true, data: await agentOrchestrator.getConversation(req.params.conversationId, organizationId) });
+  } catch (error) { next(error); }
+});
+
+router.delete('/conversations/:conversationId', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
+  try {
+    const organizationId = orgId(req);
+    if (!organizationId) throw new AppError(400, 'Organization ID required', 'BAD_REQUEST');
+    await agentOrchestrator.deleteConversation(req.params.conversationId, organizationId);
+    res.json({ success: true, data: { message: 'Conversation deleted' } });
+  } catch (error) { next(error); }
+});
+
+const createPlanSchema = z.object({ goal: z.string().min(1), organization_id: z.string().uuid(), context: z.record(z.unknown()).optional(), max_tasks: z.number().int().min(1).max(20).optional() });
+router.post('/plan', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
+  try {
+    const input = createPlanSchema.parse(req.body);
+    const plan = await taskPlanner.createPlan({ orgId: input.organization_id, userId: req.user!.userId, goal: input.goal, context: input.context, maxTasks: input.max_tasks });
+    res.status(201).json({ success: true, data: plan });
+  } catch (error) { next(error); }
+});
+
+router.post('/plan/execute', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
+  try {
+    const organizationId = orgId(req);
+    if (!organizationId || !req.body.plan) throw new AppError(400, 'organization_id and plan are required', 'BAD_REQUEST');
+    const taskIds = await taskPlanner.executePlan(req.body.plan, organizationId, req.user!.userId);
+    res.status(201).json({ success: true, data: { plan_id: req.body.plan.id, task_ids: taskIds, tasks_created: taskIds.length } });
+  } catch (error) { next(error); }
+});
+
+router.get('/', async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const organizationId = orgId(req);
+    if (!organizationId) throw new AppError(400, 'Organization ID required', 'BAD_REQUEST');
+    const page = Math.max(1, parseInt(req.query.page as string) || 1);
+    const limit = Math.max(1, Math.min(parseInt(req.query.limit as string) || 50, 100));
     const offset = (page - 1) * limit;
-    const orgId = req.query.organization_id as string;
-    const type = req.query.type as string;
+    const params: unknown[] = [organizationId];
+    let where = 'WHERE organization_id = $1 AND deleted_at IS NULL';
+    if (req.query.type) { params.push(req.query.type); where += ` AND type = $${params.length}`; }
+    if (req.query.search) { params.push(`%${req.query.search}%`); where += ` AND (name ILIKE $${params.length} OR description ILIKE $${params.length})`; }
+    const count = await query(`SELECT COUNT(*) FROM agents ${where}`, params);
+    params.push(limit, offset);
+    const result = await query(`SELECT * FROM agents ${where} ORDER BY updated_at DESC LIMIT $${params.length - 1} OFFSET $${params.length}`, params);
+    const total = Number(count.rows[0].count);
+    res.json({ success: true, data: result.rows.map(mapAgent), pagination: { page, limit, total, totalPages: Math.ceil(total / limit) } });
+  } catch (error) { next(error); }
+});
 
-    let whereClause = 'WHERE a.deleted_at IS NULL';
-    const params: any[] = [];
-    let paramCount = 1;
-
-    if (orgId) {
-      whereClause += ` AND a.organization_id = $${paramCount++}`;
-      params.push(orgId);
-    }
-
-    if (type) {
-      whereClause += ` AND a.type = $${paramCount++}`;
-      params.push(type);
-    }
-
-    if (search) {
-      whereClause += ` AND (a.name ILIKE $${paramCount} OR a.description ILIKE $${paramCount})`;
-      params.push(`%${search}%`);
-      paramCount++;
-    }
-
-    const countResult = await query(`SELECT COUNT(*) FROM agents a ${whereClause}`, params);
-    const total = parseInt(countResult.rows[0].count);
-
-    const allowedSortFields = ['created_at', 'updated_at', 'name', 'type', 'status'];
-    const sortField = allowedSortFields.includes(sort) ? sort : 'created_at';
-    const sortOrder = order === 'asc' ? 'ASC' : 'DESC';
-
+router.post('/', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
+  try {
+    const organizationId = orgId(req);
+    const { name, description, type = 'worker', config = {}, model, provider, capabilities = [], tools = [], status = 'active' } = req.body;
+    const systemPrompt = req.body.system_prompt ?? req.body.systemPrompt ?? '';
+    if (!organizationId || !name) throw new AppError(400, 'organization_id and name are required', 'BAD_REQUEST');
     const result = await query(
-      `SELECT a.* FROM agents a ${whereClause} ORDER BY a.${sortField} ${sortOrder} LIMIT $${paramCount} OFFSET $${paramCount + 1}`,
-      [...params, limit, offset]
+      `INSERT INTO agents (organization_id, name, description, type, config, system_prompt, model, provider, capabilities, tools, status, created_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *`,
+      [organizationId, name, description || null, type, JSON.stringify(config), systemPrompt || null, model || null, provider || null, JSON.stringify(capabilities), JSON.stringify(tools), status, req.user!.userId]
     );
-
-    res.json({
-      success: true,
-      data: result.rows,
-      pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
-    });
-  } catch (error) {
-    next(error);
-  }
+    res.status(201).json({ success: true, data: mapAgent(result.rows[0]) });
+  } catch (error) { next(error); }
 });
 
-router.post('/', validateBody(createAgentSchema), async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction) => {
+router.get('/:id', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
   try {
-    const { name, description, type, config, system_prompt, model, provider, capabilities } = req.body;
-    const orgId = req.query.organization_id as string || req.body.organization_id;
-
-    const result = await query(
-      `INSERT INTO agents (organization_id, name, description, type, config, system_prompt, model, provider, capabilities, created_by)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-       RETURNING *`,
-      [orgId, name, description || null, type, JSON.stringify(config || {}), system_prompt || null, model || null, provider || null, JSON.stringify(capabilities || []), req.user!.userId]
-    );
-
-    res.status(201).json({ success: true, data: result.rows[0] });
-  } catch (error) {
-    next(error);
-  }
+    const organizationId = orgId(req);
+    const result = await query('SELECT * FROM agents WHERE id = $1 AND organization_id = $2 AND deleted_at IS NULL', [req.params.id, organizationId]);
+    if (result.rows.length === 0) throw new NotFoundError('Agent');
+    res.json({ success: true, data: mapAgent(result.rows[0]) });
+  } catch (error) { next(error); }
 });
 
-router.get('/:id', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction) => {
+router.put('/:id', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
   try {
-    const result = await query('SELECT * FROM agents WHERE id = $1 AND deleted_at IS NULL', [req.params.id]);
-
-    if (result.rows.length === 0) {
-      throw new NotFoundError('Agent');
-    }
-
-    res.json({ success: true, data: result.rows[0] });
-  } catch (error) {
-    next(error);
-  }
-});
-
-router.put('/:id', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction) => {
-  try {
-    const { name, description, type, config, system_prompt, model, provider, capabilities, status } = req.body;
+    const organizationId = orgId(req);
+    const fields: Array<[string, unknown]> = [
+      ['name', req.body.name],
+      ['description', req.body.description],
+      ['type', req.body.type],
+      ['config', req.body.config !== undefined ? JSON.stringify(req.body.config) : undefined],
+      ['system_prompt', req.body.system_prompt ?? req.body.systemPrompt],
+      ['model', req.body.model],
+      ['provider', req.body.provider],
+      ['capabilities', req.body.capabilities !== undefined ? JSON.stringify(req.body.capabilities) : undefined],
+      ['tools', req.body.tools !== undefined ? JSON.stringify(req.body.tools) : undefined],
+      ['status', req.body.status],
+    ];
     const updates: string[] = [];
-    const values: any[] = [];
-    let paramCount = 1;
-
-    if (name) { updates.push(`name = $${paramCount++}`); values.push(name); }
-    if (description) { updates.push(`description = $${paramCount++}`); values.push(description); }
-    if (type) { updates.push(`type = $${paramCount++}`); values.push(type); }
-    if (config) { updates.push(`config = $${paramCount++}`); values.push(JSON.stringify(config)); }
-    if (system_prompt) { updates.push(`system_prompt = $${paramCount++}`); values.push(system_prompt); }
-    if (model) { updates.push(`model = $${paramCount++}`); values.push(model); }
-    if (provider) { updates.push(`provider = $${paramCount++}`); values.push(provider); }
-    if (capabilities) { updates.push(`capabilities = $${paramCount++}`); values.push(JSON.stringify(capabilities)); }
-    if (status) { updates.push(`status = $${paramCount++}`); values.push(status); }
-
-    updates.push(`updated_at = NOW()`);
-    values.push(req.params.id);
-
+    const values: unknown[] = [];
+    for (const [column, value] of fields) {
+      if (value !== undefined) { values.push(value); updates.push(`${column} = $${values.length}`); }
+    }
+    if (updates.length === 0) throw new AppError(400, 'No agent fields supplied', 'BAD_REQUEST');
+    updates.push('updated_at = NOW()');
+    values.push(req.params.id, organizationId);
     const result = await query(
-      `UPDATE agents SET ${updates.join(', ')} WHERE id = $${paramCount} AND deleted_at IS NULL RETURNING *`,
+      `UPDATE agents SET ${updates.join(', ')} WHERE id = $${values.length - 1} AND organization_id = $${values.length} AND deleted_at IS NULL RETURNING *`,
       values
     );
-
-    if (result.rows.length === 0) {
-      throw new NotFoundError('Agent');
-    }
-
-    res.json({ success: true, data: result.rows[0] });
-  } catch (error) {
-    next(error);
-  }
+    if (result.rows.length === 0) throw new NotFoundError('Agent');
+    res.json({ success: true, data: mapAgent(result.rows[0]) });
+  } catch (error) { next(error); }
 });
 
-router.delete('/:id', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction) => {
+router.delete('/:id', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
   try {
-    const result = await query(
-      'UPDATE agents SET deleted_at = NOW() WHERE id = $1 AND deleted_at IS NULL RETURNING id',
-      [req.params.id]
-    );
-
-    if (result.rows.length === 0) {
-      throw new NotFoundError('Agent');
-    }
-
+    const organizationId = orgId(req);
+    const result = await query('UPDATE agents SET deleted_at = NOW() WHERE id = $1 AND organization_id = $2 AND deleted_at IS NULL RETURNING id', [req.params.id, organizationId]);
+    if (result.rows.length === 0) throw new NotFoundError('Agent');
     res.json({ success: true, data: { message: 'Agent deleted' } });
-  } catch (error) {
-    next(error);
-  }
+  } catch (error) { next(error); }
 });
 
-router.post('/:id/execute', validateBody(executeAgentSchema), async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction) => {
+router.post('/:id/execute', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
   try {
-    const agentResult = await query('SELECT * FROM agents WHERE id = $1 AND deleted_at IS NULL', [req.params.id]);
-
-    if (agentResult.rows.length === 0) {
-      throw new NotFoundError('Agent');
-    }
-
-    const agent = agentResult.rows[0];
-
-    if (agent.status !== 'active') {
-      throw new AppError(400, 'Agent is not active', 'AGENT_INACTIVE');
-    }
-
-    const orgId = req.body.organization_id || req.query.organization_id as string;
-
+    const organizationId = orgId(req);
     const result = await agentOrchestrator.execute({
       agentId: req.params.id,
-      orgId,
+      orgId: organizationId,
       userId: req.user!.userId,
-      task: req.body.task,
+      task: req.body.task || req.body.prompt,
       input: req.body.input,
       conversationId: req.body.conversation_id,
       maxTurns: req.body.max_turns,
     });
-
-    res.status(200).json({ success: true, data: result });
-  } catch (error) {
-    next(error);
-  }
-});
-
-router.get('/conversations', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction) => {
-  try {
-    const orgId = req.query.organization_id as string;
-    const agentId = req.query.agent_id as string;
-    const limit = parseInt(req.query.limit as string) || 20;
-
-    if (!orgId) {
-      throw new AppError(400, 'Organization ID required', 'BAD_REQUEST');
-    }
-
-    const conversations = await agentOrchestrator.listConversations(orgId, agentId, limit);
-
-    res.json({ success: true, data: conversations });
-  } catch (error) {
-    next(error);
-  }
-});
-
-router.get('/conversations/:id', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction) => {
-  try {
-    const orgId = req.query.organization_id as string;
-
-    if (!orgId) {
-      throw new AppError(400, 'Organization ID required', 'BAD_REQUEST');
-    }
-
-    const conversation = await agentOrchestrator.getConversation(req.params.id, orgId);
-
-    res.json({ success: true, data: conversation });
-  } catch (error) {
-    next(error);
-  }
-});
-
-const createPlanSchema = require('zod').z.object({
-  goal: require('zod').z.string().min(1, 'Goal is required'),
-  organization_id: require('zod').z.string().uuid(),
-  context: require('zod').z.record(require('zod').z.unknown()).optional(),
-  max_tasks: require('zod').z.number().int().min(1).max(20).optional(),
-});
-
-router.post('/plan', validateBody(createPlanSchema), async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction) => {
-  try {
-    const { goal, organization_id, context, max_tasks } = req.body;
-
-    const plan = await taskPlanner.createPlan({
-      orgId: organization_id,
-      userId: req.user!.userId,
-      goal,
-      context,
-      maxTasks: max_tasks,
-    });
-
-    res.status(201).json({ success: true, data: plan });
-  } catch (error) {
-    next(error);
-  }
-});
-
-const executePlanSchema = require('zod').z.object({
-  plan: require('zod').z.object({
-    id: require('zod').z.string(),
-    goal: require('zod').z.string(),
-    tasks: require('zod').z.array(require('zod').z.object({
-      title: require('zod').z.string(),
-      description: require('zod').z.string(),
-      type: require('zod').z.string(),
-      agentSlug: require('zod').z.string(),
-      priority: require('zod').z.number(),
-      dependencies: require('zod').z.array(require('zod').z.string()),
-      estimatedDuration: require('zod').z.string(),
-    })),
-    estimatedTotalDuration: require('zod').z.string(),
-    recommendedAgent: require('zod').z.string(),
-  }),
-  organization_id: require('zod').z.string().uuid(),
-});
-
-router.post('/plan/execute', validateBody(executePlanSchema), async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction) => {
-  try {
-    const { plan, organization_id } = req.body;
-
-    const taskIds = await taskPlanner.executePlan(plan, organization_id, req.user!.userId);
-
-    res.status(201).json({
+    res.json({
       success: true,
       data: {
-        plan_id: plan.id,
-        task_ids: taskIds,
-        tasks_created: taskIds.length,
+        ...result,
+        output: result.response,
+        tokenUsage: { prompt: result.tokensUsed.in, completion: result.tokensUsed.out, total: result.tokensUsed.in + result.tokensUsed.out },
+        cost: result.costCents / 100,
       },
     });
-  } catch (error) {
-    next(error);
-  }
+  } catch (error) { next(error); }
 });
 
 export default router;
