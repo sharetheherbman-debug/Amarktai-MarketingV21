@@ -17,12 +17,16 @@ async function requirePublisherOwner(publisherId: string, userId: string): Promi
   if (result.rows.length === 0) throw new AppError(403, 'Publisher does not belong to the current user', 'FORBIDDEN');
 }
 
+async function requireOrganizationMember(orgId: string, userId: string): Promise<void> {
+  const result = await query('SELECT role FROM organization_members WHERE organization_id = $1 AND user_id = $2', [orgId, userId]);
+  if (result.rows.length === 0) throw new AppError(403, 'Not a member of this organization', 'FORBIDDEN');
+}
+
 function requirePlatformAdmin(req: AuthRequest): void {
   const role = String((req.user as unknown as Record<string, unknown>)?.role || '');
   if (!['admin', 'superadmin'].includes(role)) throw new AppError(403, 'Platform administrator access required', 'FORBIDDEN');
 }
 
-// Public catalogue.
 router.get('/items', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
   try {
     res.json({ success: true, data: await marketplaceService.listItems({ category: req.query.category as string, search: req.query.search as string, sort: req.query.sort as string }) });
@@ -160,6 +164,7 @@ router.post('/items/:id/install', async (req: AuthRequest, res: Response<ApiResp
   try {
     const orgId = req.body.organization_id;
     if (!orgId) throw new AppError(400, 'organization_id required', 'BAD_REQUEST');
+    await requireOrganizationMember(orgId, req.user!.userId);
     res.status(201).json({ success: true, data: await marketplaceRuntime.installItem(orgId, req.params.id, req.user!.userId, req.body.config || {}) });
   } catch (error) { next(error); }
 });
@@ -168,6 +173,7 @@ router.delete('/items/:id/install', async (req: AuthRequest, res: Response<ApiRe
   try {
     const orgId = req.query.organization_id as string;
     if (!orgId) throw new AppError(400, 'organization_id required', 'BAD_REQUEST');
+    await requireOrganizationMember(orgId, req.user!.userId);
     await marketplaceRuntime.uninstallItem(orgId, req.params.id);
     res.json({ success: true, data: { message: 'Item and installed assets removed' } });
   } catch (error) { next(error); }
@@ -177,6 +183,7 @@ router.get('/installations', async (req: AuthRequest, res: Response<ApiResponse>
   try {
     const orgId = req.query.organization_id as string;
     if (!orgId) throw new AppError(400, 'organization_id required', 'BAD_REQUEST');
+    await requireOrganizationMember(orgId, req.user!.userId);
     res.json({ success: true, data: await marketplaceRuntime.listInstallations(orgId) });
   } catch (error) { next(error); }
 });
@@ -185,6 +192,7 @@ router.post('/items/:id/reviews', async (req: AuthRequest, res: Response<ApiResp
   try {
     const orgId = req.body.organization_id;
     if (!orgId) throw new AppError(400, 'organization_id required', 'BAD_REQUEST');
+    await requireOrganizationMember(orgId, req.user!.userId);
     const installed = await query('SELECT 1 FROM marketplace_installations WHERE organization_id = $1 AND item_id = $2', [orgId, req.params.id]);
     if (installed.rows.length === 0) throw new AppError(403, 'Install the item before reviewing it', 'VERIFIED_INSTALL_REQUIRED');
     res.status(201).json({ success: true, data: await marketplaceService.createReview(req.params.id, req.user!.userId, req.body) });
@@ -195,6 +203,7 @@ router.post('/skill-packs/:slug/install', async (req: AuthRequest, res: Response
   try {
     const orgId = req.body.organization_id;
     if (!orgId) throw new AppError(400, 'organization_id required', 'BAD_REQUEST');
+    await requireOrganizationMember(orgId, req.user!.userId);
     await marketplaceService.installSkillPack(orgId, req.params.slug, req.user!.userId);
     res.json({ success: true, data: { message: 'Skill pack installed' } });
   } catch (error) { next(error); }
