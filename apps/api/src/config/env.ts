@@ -24,6 +24,22 @@ function getRequiredProductionValue(key: string, developmentDefault: string): st
   return value || developmentDefault;
 }
 
+function getRequiredProductionSecret(
+  key: string,
+  developmentDefault: string,
+  minimumLength: number,
+  pattern?: RegExp
+): string {
+  const value = getRequiredProductionValue(key, developmentDefault);
+  if (isProduction && value.length < minimumLength) {
+    throw new Error(`Production environment variable ${key} must be at least ${minimumLength} characters`);
+  }
+  if (isProduction && pattern && !pattern.test(value)) {
+    throw new Error(`Production environment variable ${key} has an invalid format`);
+  }
+  return value;
+}
+
 function getEnvNumber(key: string, defaultValue: number): number {
   const value = process.env[key];
   const parsed = value ? parseInt(value, 10) : defaultValue;
@@ -37,11 +53,15 @@ function getEnvBoolean(key: string, defaultValue: boolean): boolean {
   return value === 'true' || value === '1';
 }
 
+const appUrl = getEnv('APP_URL', 'http://localhost:3000');
+
 export const env = {
   NODE_ENV: getEnv('NODE_ENV', 'development'),
   PORT: getEnvNumber('PORT', 4000),
-  APP_URL: getEnv('APP_URL', 'http://localhost:3000'),
+  APP_URL: appUrl,
   API_URL: getEnv('API_URL', 'http://localhost:4000'),
+  CORS_ORIGIN: getEnv('CORS_ORIGIN', appUrl),
+  TRUST_PROXY_HOPS: getEnvNumber('TRUST_PROXY_HOPS', 1),
 
   DATABASE_URL: getRequiredProductionValue('DATABASE_URL', 'postgresql://postgres:postgres@localhost:5432/amarktai'),
   POSTGRES_USER: getEnv('POSTGRES_USER', 'postgres'),
@@ -50,12 +70,17 @@ export const env = {
 
   REDIS_URL: getRequiredProductionValue('REDIS_URL', 'redis://localhost:6379'),
 
-  JWT_SECRET: getRequiredProductionValue('JWT_SECRET', 'dev-jwt-secret-change-in-production'),
-  JWT_REFRESH_SECRET: getRequiredProductionValue('JWT_REFRESH_SECRET', 'dev-jwt-refresh-secret-change-in-production'),
+  JWT_SECRET: getRequiredProductionSecret('JWT_SECRET', 'dev-jwt-secret-change-in-production', 32),
+  JWT_REFRESH_SECRET: getRequiredProductionSecret('JWT_REFRESH_SECRET', 'dev-jwt-refresh-secret-change-in-production', 32),
   JWT_EXPIRES_IN: getEnv('JWT_EXPIRES_IN', '15m'),
   JWT_REFRESH_EXPIRES_IN: getEnv('JWT_REFRESH_EXPIRES_IN', '7d'),
 
-  ENCRYPTION_KEY: getRequiredProductionValue('ENCRYPTION_KEY', 'dev-encryption-key-32-chars-long!!'),
+  ENCRYPTION_KEY: getRequiredProductionSecret(
+    'ENCRYPTION_KEY',
+    'dev-encryption-key-32-chars-long!!',
+    64,
+    /^[a-fA-F0-9]{64}$/
+  ),
 
   GENX_API_KEY: isProduction ? getRequiredProductionValue('GENX_API_KEY', 'change-me-genx-key') : getEnv('GENX_API_KEY', ''),
   GENX_BASE_URL: getEnv('GENX_BASE_URL', 'https://query.genx.sh'),
@@ -72,10 +97,15 @@ export const env = {
   SMTP_PORT: getEnvNumber('SMTP_PORT', 587),
   SMTP_USER: getEnv('SMTP_USER', ''),
   SMTP_PASS: getEnv('SMTP_PASS', ''),
-  SMTP_FROM: getEnv('SMTP_FROM', 'noreply@amarktai.com'),
+  SMTP_FROM: getEnv('SMTP_FROM', 'noreply@amarktai.co.za'),
 
   RATE_LIMIT_WINDOW_MS: getEnvNumber('RATE_LIMIT_WINDOW_MS', 900000),
   RATE_LIMIT_MAX_REQUESTS: getEnvNumber('RATE_LIMIT_MAX_REQUESTS', 100),
+
+  HEALTHCHECK_TIMEOUT_MS: getEnvNumber('HEALTHCHECK_TIMEOUT_MS', 3000),
+  REQUIRE_WORKERS_READY: getEnvBoolean('REQUIRE_WORKERS_READY', isProduction),
+  GENERATION_WORKER_HEALTH_URL: getEnv('GENERATION_WORKER_HEALTH_URL', ''),
+  RENDER_WORKER_HEALTH_URL: getEnv('RENDER_WORKER_HEALTH_URL', ''),
 
   FIRST_RUN: getEnvBoolean('FIRST_RUN', true),
 } as const;
