@@ -61,11 +61,8 @@ app.set('trust proxy', env.TRUST_PROXY_HOPS);
 app.disable('x-powered-by');
 
 function toOrigin(value: string): string {
-  try {
-    return new URL(value).origin;
-  } catch {
-    return value.replace(/\/$/, '');
-  }
+  try { return new URL(value).origin; }
+  catch { return value.replace(/\/$/, ''); }
 }
 
 const allowedOrigins = new Set(
@@ -83,14 +80,8 @@ app.use(cors({
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   allowedHeaders: [
-    'Content-Type',
-    'Authorization',
-    'X-Requested-With',
-    'X-CSRF-Token',
-    'X-Organization-Id',
-    'X-Idempotency-Key',
-    'Idempotency-Key',
-    'Range',
+    'Content-Type', 'Authorization', 'X-Requested-With', 'X-CSRF-Token',
+    'X-Organization-Id', 'X-Idempotency-Key', 'Idempotency-Key', 'Range',
   ],
   exposedHeaders: ['Content-Range', 'Accept-Ranges', 'Content-Length'],
   maxAge: 86400,
@@ -110,12 +101,8 @@ app.use(helmet({
 }));
 
 app.use(compression());
-app.use(morgan('combined', {
-  stream: { write: (message: string) => logger.http(message.trim()) },
-}));
+app.use(morgan('combined', { stream: { write: (message: string) => logger.http(message.trim()) } }));
 
-// Stripe signature verification requires the exact raw UTF-8 request body.
-// This webhook is mounted before cookie, CSRF and JSON parsing middleware.
 app.post(
   '/api/v1/marketplace/stripe/webhook',
   express.raw({ type: 'application/json', limit: '1mb' }),
@@ -129,9 +116,7 @@ app.post(
       const event = verifyStripeEvent(req.body, signature);
       await processStripeEvent(event);
       res.json({ received: true });
-    } catch (error) {
-      next(error);
-    }
+    } catch (error) { next(error); }
   }
 );
 
@@ -142,17 +127,11 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use(generalLimiter);
 
 app.get('/', (_req: Request, res: Response) => {
-  res.json({
-    name: 'AmarktAI Marketing API',
-    version: '1.0.0',
-    status: 'running',
-    timestamp: new Date().toISOString(),
-  });
+  res.json({ name: 'AmarktAI Marketing API', version: '1.0.0', status: 'running', timestamp: new Date().toISOString() });
 });
+app.get('/health', (_req: Request, res: Response) => res.json({ status: 'ok', timestamp: new Date().toISOString() }));
 
-app.get('/health', (_req: Request, res: Response) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() });
-});
+const tenant = [requireAuth, requireOrganizationMembership] as const;
 
 app.use('/api/v1/health', healthRoutes);
 app.use('/api/v1/auth', authRoutes);
@@ -160,23 +139,23 @@ app.use('/api/v1/organizations', organizationRoutes);
 app.use('/api/v1/users', userRoutes);
 app.use('/api/v1/providers', providerRoutes);
 app.use('/api/v1/onboarding', onboardingRoutes);
-app.use('/api/v1/campaigns', campaignRoutes);
-app.use('/api/v1/content', contentRoutes);
-app.use('/api/v1/agents', requireAuth, requireOrganizationMembership, agentRoutes);
-app.use('/api/v1/prompts', promptRoutes);
-app.use('/api/v1/brand-dna', brandDnaRoutes);
-app.use('/api/v1/knowledge', requireAuth, requireOrganizationMembership, knowledgeRoutes);
-app.use('/api/v1/competitors', competitorRoutes);
-app.use('/api/v1/trends', trendRoutes);
-app.use('/api/v1/content-studio', contentStudioRoutes);
-app.use('/api/v1/templates', templateRoutes);
-app.use('/api/v1/calendar', calendarRoutes);
-app.use('/api/v1/seo', seoRoutes);
-app.use('/api/v1/campaign-ai', campaignAiRoutes);
-app.use('/api/v1/amai', requireAuth, requireOrganizationMembership, amaiRoutes);
-app.use('/api/v1/crm', requireAuth, requireOrganizationMembership, crmAiActionRoutes);
-app.use('/api/v1/crm', requireAuth, requireOrganizationMembership, crmRoutes);
-app.use('/api/v1/integrations', requireAuth, requireOrganizationMembership, integrationRoutes);
+app.use('/api/v1/campaigns', ...tenant, campaignRoutes);
+app.use('/api/v1/content', ...tenant, contentRoutes);
+app.use('/api/v1/agents', ...tenant, agentRoutes);
+app.use('/api/v1/prompts', ...tenant, promptRoutes);
+app.use('/api/v1/brand-dna', ...tenant, brandDnaRoutes);
+app.use('/api/v1/knowledge', ...tenant, knowledgeRoutes);
+app.use('/api/v1/competitors', ...tenant, competitorRoutes);
+app.use('/api/v1/trends', ...tenant, trendRoutes);
+app.use('/api/v1/content-studio', ...tenant, contentStudioRoutes);
+app.use('/api/v1/templates', ...tenant, templateRoutes);
+app.use('/api/v1/calendar', ...tenant, calendarRoutes);
+app.use('/api/v1/seo', ...tenant, seoRoutes);
+app.use('/api/v1/campaign-ai', ...tenant, campaignAiRoutes);
+app.use('/api/v1/amai', ...tenant, amaiRoutes);
+app.use('/api/v1/crm', ...tenant, crmAiActionRoutes);
+app.use('/api/v1/crm', ...tenant, crmRoutes);
+app.use('/api/v1/integrations', ...tenant, integrationRoutes);
 app.use('/api/v1/billing', billingRoutes);
 app.use('/api/v1/agency', agencyRoutes);
 app.use('/api/v1/white-label', whiteLabelRoutes);
@@ -194,12 +173,8 @@ app.use('/api/v1/longform-video', longformVideoRoutes);
 app.use('/api/v1/longform-video', longformProductionRoutes);
 
 app.use((_req: Request, res: Response) => {
-  res.status(404).json({
-    success: false,
-    error: { message: 'Route not found', code: 'NOT_FOUND' },
-  });
+  res.status(404).json({ success: false, error: { message: 'Route not found', code: 'NOT_FOUND' } });
 });
-
 app.use(errorHandler);
 
 async function startServer() {
