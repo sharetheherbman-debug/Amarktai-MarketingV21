@@ -1,7 +1,7 @@
 import { Router, Response, NextFunction } from 'express';
 import * as agencyService from '../services/agency.service';
 import { requireAuth, AuthRequest } from '../middleware/auth';
-import { requireOrganizationRole } from '../middleware/organization-access';
+import { requireOrganizationRole, requireClientOrganizationMembership } from '../middleware/organization-access';
 import { validateBody } from '../middleware/validator';
 import { ApiResponse } from '../types';
 import { z } from 'zod';
@@ -94,10 +94,10 @@ router.get('/clients', async (req: AuthRequest, res: Response<ApiResponse>, next
   } catch (error) { next(error); }
 });
 
-router.post('/clients', requireOrganizationRole('owner', 'admin'), validateBody(assignClientSchema), async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction) => {
+router.post('/clients', requireOrganizationRole('owner', 'admin'), validateBody(assignClientSchema), requireClientOrganizationMembership, async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction) => {
   try {
     const agency = await agencyService.getAgency(req.body.organization_id);
-    res.status(201).json({ success: true, data: await agencyService.assignClient(agency.id, req.body, req.user!.userId) });
+    res.status(201).json({ success: true, data: await agencyService.assignClient(agency.id, req.body) });
   } catch (error) { next(error); }
 });
 
