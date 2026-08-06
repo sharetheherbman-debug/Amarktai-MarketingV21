@@ -76,7 +76,7 @@ export class StudioClient {
     if (generation?.id && !generation.url && !['completed', 'failed', 'cancelled'].includes(generation.status)) {
       const isLongRunning = type.includes('video') || type === 'cinema' || type === 'lip_sync';
       generation = await this.waitForGeneration(generation.id, {
-        maxWaitMs: isLongRunning ? 20 * 60 * 1000 : 5 * 60 * 1000,
+        maxWaitMs: isLongRunning ? 20 * 60 * 1000 : 10 * 60 * 1000,
       });
     }
     return generation;
@@ -169,7 +169,8 @@ export class StudioClient {
       const error = await response.json().catch(() => ({ error: { message: response.statusText } }));
       throw new Error(error.error?.message || `Upload error: ${response.status}`);
     }
-    return response.json();
+    const payload = await response.json();
+    return payload.data || payload;
   }
 
   async listLongFormProjects() {
@@ -177,53 +178,179 @@ export class StudioClient {
     return result.data || [];
   }
 
+  async getLongFormProject(projectId) {
+    const result = await this.request(
+      'GET',
+      `/longform-video/projects/${encodeURIComponent(projectId)}?organization_id=${encodeURIComponent(this.organizationId)}`
+    );
+    return result.data;
+  }
+
   async createLongFormProject(data) {
     const result = await this.request('POST', '/longform-video/projects', { ...data, organization_id: this.organizationId });
     return result.data;
   }
 
+  async updateLongFormProject(projectId, data) {
+    const result = await this.request('PUT', `/longform-video/projects/${encodeURIComponent(projectId)}/production-settings`, {
+      ...data,
+      organization_id: this.organizationId,
+    });
+    return result.data;
+  }
+
+  async deleteLongFormProject(projectId) {
+    return this.request(
+      'DELETE',
+      `/longform-video/projects/${encodeURIComponent(projectId)}?organization_id=${encodeURIComponent(this.organizationId)}`
+    );
+  }
+
+  async generateStoryboard(projectId, data) {
+    const result = await this.request('POST', `/longform-video/projects/${encodeURIComponent(projectId)}/storyboard/generate`, {
+      ...data,
+      organization_id: this.organizationId,
+    });
+    return result.data;
+  }
+
   async listScenes(projectId) {
-    const result = await this.request('GET', `/longform-video/projects/${projectId}/scenes?organization_id=${encodeURIComponent(this.organizationId)}`);
+    const result = await this.request(
+      'GET',
+      `/longform-video/projects/${encodeURIComponent(projectId)}/scenes?organization_id=${encodeURIComponent(this.organizationId)}`
+    );
     return result.data || [];
   }
 
   async addScene(projectId, data) {
-    const result = await this.request('POST', `/longform-video/projects/${projectId}/scenes`, { ...data, organization_id: this.organizationId });
+    const result = await this.request('POST', `/longform-video/projects/${encodeURIComponent(projectId)}/scenes`, {
+      ...data,
+      organization_id: this.organizationId,
+    });
     return result.data;
   }
 
   async updateScene(sceneId, data) {
-    const result = await this.request('PUT', `/longform-video/scenes/${sceneId}`, { ...data, organization_id: this.organizationId });
+    const result = await this.request('PUT', `/longform-video/scenes/${encodeURIComponent(sceneId)}`, {
+      ...data,
+      organization_id: this.organizationId,
+    });
+    return result.data;
+  }
+
+  async duplicateScene(projectId, sceneId) {
+    const result = await this.request(
+      'POST',
+      `/longform-video/projects/${encodeURIComponent(projectId)}/scenes/${encodeURIComponent(sceneId)}/duplicate`,
+      { organization_id: this.organizationId }
+    );
+    return result.data;
+  }
+
+  async reorderScenes(projectId, sceneIds) {
+    const result = await this.request(
+      'PUT',
+      `/longform-video/projects/${encodeURIComponent(projectId)}/scenes/reorder`,
+      { organization_id: this.organizationId, scene_ids: sceneIds }
+    );
     return result.data;
   }
 
   async deleteScene(sceneId) {
-    return this.request('DELETE', `/longform-video/scenes/${sceneId}?organization_id=${encodeURIComponent(this.organizationId)}`);
+    return this.request(
+      'DELETE',
+      `/longform-video/scenes/${encodeURIComponent(sceneId)}?organization_id=${encodeURIComponent(this.organizationId)}`
+    );
+  }
+
+  async deriveCaptions(projectId, settings = {}) {
+    const result = await this.request('POST', `/longform-video/projects/${encodeURIComponent(projectId)}/captions/derive`, {
+      ...settings,
+      organization_id: this.organizationId,
+    });
+    return result.data;
+  }
+
+  async applyContinuity(projectId, settings = {}) {
+    const result = await this.request('POST', `/longform-video/projects/${encodeURIComponent(projectId)}/continuity/apply`, {
+      ...settings,
+      organization_id: this.organizationId,
+    });
+    return result.data;
   }
 
   async generateScene(sceneId) {
-    const result = await this.request('POST', `/longform-video/scenes/${sceneId}/generate`, { organization_id: this.organizationId });
+    const result = await this.request('POST', `/longform-video/scenes/${encodeURIComponent(sceneId)}/generate`, {
+      organization_id: this.organizationId,
+    });
     return result.data;
   }
 
   async generateProject(projectId) {
-    const result = await this.request('POST', `/longform-video/projects/${projectId}/generate`, { organization_id: this.organizationId });
+    const result = await this.request('POST', `/longform-video/projects/${encodeURIComponent(projectId)}/generate`, {
+      organization_id: this.organizationId,
+    });
+    return result.data;
+  }
+
+  async cancelProjectGeneration(projectId) {
+    const result = await this.request('POST', `/longform-video/projects/${encodeURIComponent(projectId)}/cancel`, {
+      organization_id: this.organizationId,
+    });
+    return result.data;
+  }
+
+  async retryFailedScenes(projectId) {
+    const result = await this.request('POST', `/longform-video/projects/${encodeURIComponent(projectId)}/retry-failed`, {
+      organization_id: this.organizationId,
+    });
     return result.data;
   }
 
   async getProjectProgress(projectId) {
-    const result = await this.request('GET', `/longform-video/projects/${projectId}/progress?organization_id=${encodeURIComponent(this.organizationId)}`);
+    const result = await this.request(
+      'GET',
+      `/longform-video/projects/${encodeURIComponent(projectId)}/progress?organization_id=${encodeURIComponent(this.organizationId)}`
+    );
     return result.data;
   }
 
   async createRender(projectId) {
-    const result = await this.request('POST', `/longform-video/projects/${projectId}/renders`, { organization_id: this.organizationId });
+    const result = await this.request('POST', `/longform-video/projects/${encodeURIComponent(projectId)}/renders`, {
+      organization_id: this.organizationId,
+    });
     return result.data;
   }
 
+  async listRenders(projectId) {
+    const result = await this.request(
+      'GET',
+      `/longform-video/projects/${encodeURIComponent(projectId)}/renders?organization_id=${encodeURIComponent(this.organizationId)}`
+    );
+    return result.data || [];
+  }
+
   async getRender(renderId) {
-    const result = await this.request('GET', `/longform-video/renders/${renderId}?organization_id=${encodeURIComponent(this.organizationId)}`);
+    const result = await this.request(
+      'GET',
+      `/longform-video/renders/${encodeURIComponent(renderId)}?organization_id=${encodeURIComponent(this.organizationId)}`
+    );
     return result.data;
+  }
+
+  async cancelRender(renderId) {
+    const result = await this.request('POST', `/longform-video/renders/${encodeURIComponent(renderId)}/cancel`, {
+      organization_id: this.organizationId,
+    });
+    return result.data;
+  }
+
+  async getRenderEvents(renderId) {
+    const result = await this.request(
+      'GET',
+      `/longform-video/renders/${encodeURIComponent(renderId)}/events?organization_id=${encodeURIComponent(this.organizationId)}`
+    );
+    return result.data || [];
   }
 }
 
