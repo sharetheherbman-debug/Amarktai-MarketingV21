@@ -1,7 +1,7 @@
 import { query } from '../config/database';
-import redis from '../config/redis';
 import { logger } from '../utils/logger';
 import { healthCheck as providerHealthCheck } from './provider.service';
+import { publishDuePosts } from './social-publishing.service';
 
 interface ScheduledTask {
   name: string;
@@ -22,7 +22,6 @@ class SchedulerService {
       logger.warn(`Task "${name}" already exists, cancelling before rescheduling`);
       this.cancelTask(name);
     }
-
     const task: ScheduledTask = {
       name,
       intervalMs,
@@ -32,76 +31,37 @@ class SchedulerService {
       nextRun: new Date(Date.now() + intervalMs),
       running: false,
     };
-
     this.tasks.set(name, task);
-
-    if (this.started) {
-      this.startTask(name);
-    }
-
+    if (this.started) this.startTask(name);
     logger.info(`Task "${name}" scheduled with interval ${intervalMs}ms`);
   }
 
   cancelTask(name: string): boolean {
     const task = this.tasks.get(name);
-    if (!task) {
-      logger.warn(`Task "${name}" not found`);
-      return false;
-    }
-
-    if (task.timer) {
-      clearInterval(task.timer);
-      task.timer = null;
-    }
-
+    if (!task) return false;
+    if (task.timer) clearInterval(task.timer);
     this.tasks.delete(name);
-    logger.info(`Task "${name}" cancelled`);
     return true;
   }
 
   listTasks(): Array<{ name: string; intervalMs: number; lastRun: Date | null; nextRun: Date | null; running: boolean }> {
-    return Array.from(this.tasks.values()).map((task) => ({
-      name: task.name,
-      intervalMs: task.intervalMs,
-      lastRun: task.lastRun,
-      nextRun: task.nextRun,
-      running: task.running,
-    }));
+    return Array.from(this.tasks.values()).map(({ name, intervalMs, lastRun, nextRun, running }) => ({ name, intervalMs, lastRun, nextRun, running }));
   }
 
   startScheduler(): void {
-    if (this.started) {
-      logger.warn('Scheduler already started');
-      return;
-    }
-
+    if (this.started) return;
     this.started = true;
-
     this.registerDefaultTasks();
-
-    for (const [name] of this.tasks) {
-      this.startTask(name);
-    }
-
+    for (const [name] of this.tasks) this.startTask(name);
     logger.info(`Scheduler started with ${this.tasks.size} tasks`);
   }
 
   stopScheduler(): void {
-    if (!this.started) {
-      logger.warn('Scheduler not started');
-      return;
+    for (const task of this.tasks.values()) {
+      if (task.timer) clearInterval(task.timer);
+      task.timer = null;
     }
-
-    for (const [name, task] of this.tasks) {
-      if (task.timer) {
-        clearInterval(task.timer);
-        task.timer = null;
-      }
-      logger.debug(`Stopped task "${name}"`);
-    }
-
     this.started = false;
-    logger.info('Scheduler stopped');
   }
 
   isRunning(): boolean {
@@ -111,73 +71,44 @@ class SchedulerService {
   private startTask(name: string): void {
     const task = this.tasks.get(name);
     if (!task) return;
-
     const runTask = async () => {
-      if (task.running) {
-        logger.debug(`Task "${name}" still running, skipping`);
-        return;
-      }
-
+      if (task.running) return;
       task.running = true;
       task.lastRun = new Date();
-
       try {
         await task.callback();
-        logger.debug(`Task "${name}" completed`);
       } catch (error) {
-        logger.error(`Task "${name}" failed:`, error);
+        logger.error(`Task "${name}" failed`, error);
       } finally {
         task.running = false;
         task.nextRun = new Date(Date.now() + task.intervalMs);
       }
     };
-
     task.timer = setInterval(runTask, task.intervalMs);
-    logger.debug(`Task "${name}" started`);
+    void runTask();
   }
 
   private registerDefaultTasks(): void {
+    this.scheduleTask('publish-due-social-posts', 60 * 1000, async () => {
+      const published = await publishDuePosts(25);
+      if (published > 0) logger.info(`Published ${published} scheduled social posts`);
+    });
+
     this.scheduleTask('health-check', 5 * 60 * 1000, async () => {
-      logger.info('Running provider health check...');
-      try {
-        const results = await providerHealthCheck();
-        const unhealthy = results.filter((r) => r.status !== 'healthy');
-        if (unhealthy.length > 0) {
-          logger.warn(`Unhealthy providers: ${unhealthy.map((r) => r.name).join(', ')}`);
-        } else {
-          logger.info('All providers healthy');
-        }
-      } catch (error) {
-        logger.error('Health check task failed:', error);
-      }
+      const results = await providerHealthCheck();
+      const unhealthy = results.filter((result) => result.status !== 'healthy');
+      if (unhealthy.length > 0) logger.warn(`Unhealthy providers: ${unhealthy.map((result) => result.name).join(', ')}`);
     });
 
     this.scheduleTask('cleanup-expired-tokens', 60 * 60 * 1000, async () => {
-      logger.info('Cleaning up expired refresh tokens...');
-      try {
-        const result = await query(
-          'DELETE FROM refresh_tokens WHERE expires_at < NOW() OR revoked = true'
-        );
-        logger.info(`Cleaned up ${result.rowCount} expired/revoked refresh tokens`);
-      } catch (error) {
-        logger.error('Token cleanup task failed:', error);
-      }
+      await query('DELETE FROM refresh_tokens WHERE expires_at < NOW() OR revoked = true');
     });
 
     this.scheduleTask('cleanup-expired-invitations', 60 * 60 * 1000, async () => {
-      logger.info('Cleaning up expired invitations...');
-      try {
-        const result = await query(
-          'DELETE FROM invitations WHERE expires_at < NOW() AND accepted = false'
-        );
-        logger.info(`Cleaned up ${result.rowCount} expired invitations`);
-      } catch (error) {
-        logger.error('Invitation cleanup task failed:', error);
-      }
+      await query('DELETE FROM invitations WHERE expires_at < NOW() AND accepted = false');
     });
   }
 }
 
 const scheduler = new SchedulerService();
-
 export default scheduler;
