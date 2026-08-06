@@ -5,7 +5,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/lib/vps-common.sh
 source "${SCRIPT_DIR}/lib/vps-common.sh"
 
-"${SCRIPT_DIR}/vps-preflight.sh"
+bash "${SCRIPT_DIR}/vps-preflight.sh"
 load_production_env
 
 on_error() {
@@ -42,7 +42,7 @@ done
 
 [[ "${ready}" == "1" ]] || fail "Application did not become ready within six minutes"
 
-"${SCRIPT_DIR}/vps-smoke.sh"
+bash "${SCRIPT_DIR}/vps-smoke.sh"
 compose ps
 trap - ERR
 log "Deployment completed successfully: https://${DOMAIN}"
