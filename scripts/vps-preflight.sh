@@ -68,22 +68,27 @@ fi
 compose config --quiet
 
 genx_base="${GENX_BASE_URL%/}"
-genx_curl=(curl --fail --silent --show-error --location --retry 2 --retry-delay 2 --connect-timeout 10 --max-time 45 -H "Authorization: Bearer ${GENX_API_KEY}")
+genx_request() {
+  curl --fail --silent --show-error --location \
+    --retry 2 --retry-delay 2 --connect-timeout 10 --max-time 45 \
+    -H "Authorization: Bearer ${GENX_API_KEY}" \
+    "$1"
+}
 
 log "Verifying GenX text model access"
-text_catalogue="$(${genx_curl[@]} "${genx_base}/v1/models")" || fail "GenX text catalogue request failed; verify GENX_API_KEY and GENX_BASE_URL"
+text_catalogue="$(genx_request "${genx_base}/v1/models")" || fail "GenX text catalogue request failed; verify GENX_API_KEY and GENX_BASE_URL"
 [[ -n "${text_catalogue}" ]] || fail "GenX text catalogue returned an empty response"
 grep -Fq "${DEFAULT_TEXT_MODEL}" <<<"${text_catalogue}" || fail "DEFAULT_TEXT_MODEL ${DEFAULT_TEXT_MODEL} is not present in the GenX text catalogue"
 
 log "Verifying GenX image catalogue access"
-image_catalogue="$(${genx_curl[@]} "${genx_base}/api/v1/models?category=image")" || fail "GenX image catalogue request failed"
+image_catalogue="$(genx_request "${genx_base}/api/v1/models?category=image")" || fail "GenX image catalogue request failed"
 grep -Eq '"(id|model_id|models|data)"' <<<"${image_catalogue}" || fail "GenX image catalogue returned no recognizable model data"
 
 log "Verifying GenX video catalogue access"
-video_catalogue="$(${genx_curl[@]} "${genx_base}/api/v1/models?category=video")" || fail "GenX video catalogue request failed"
+video_catalogue="$(genx_request "${genx_base}/api/v1/models?category=video")" || fail "GenX video catalogue request failed"
 grep -Eq '"(id|model_id|models|data)"' <<<"${video_catalogue}" || fail "GenX video catalogue returned no recognizable model data"
 
-if ! ${genx_curl[@]} "${genx_base}/api/v1/account/credits" >/dev/null; then
+if ! genx_request "${genx_base}/api/v1/account/credits" >/dev/null; then
   log "WARNING: GenX credit-balance endpoint was unavailable. Catalogue access passed, but confirm sufficient account credit before acceptance generation."
 else
   log "GenX account access passed"
