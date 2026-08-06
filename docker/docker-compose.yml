@@ -147,7 +147,8 @@ services:
       test:
         - CMD-SHELL
         - >-
-          grep -aq 'generation-worker.js' /proc/1/cmdline &&
+          found=0; for cmd in /proc/[0-9]*/cmdline; do grep -aq 'generation-worker.js' "$$cmd" && found=1 && break; done;
+          [ "$$found" -eq 1 ] &&
           node -e "const Redis=require('ioredis');const r=new Redis(process.env.REDIS_URL,{connectTimeout:2000,maxRetriesPerRequest:1});r.ping().then(v=>{r.disconnect();process.exit(v==='PONG'?0:1)}).catch(()=>process.exit(1))"
       interval: 20s
       timeout: 8s
@@ -175,7 +176,8 @@ services:
       test:
         - CMD-SHELL
         - >-
-          grep -aq 'render-worker.js' /proc/1/cmdline &&
+          found=0; for cmd in /proc/[0-9]*/cmdline; do grep -aq 'render-worker.js' "$$cmd" && found=1 && break; done;
+          [ "$$found" -eq 1 ] &&
           node -e "const Redis=require('ioredis');const r=new Redis(process.env.REDIS_URL,{connectTimeout:2000,maxRetriesPerRequest:1});r.ping().then(v=>{r.disconnect();process.exit(v==='PONG'?0:1)}).catch(()=>process.exit(1))"
       interval: 20s
       timeout: 8s
