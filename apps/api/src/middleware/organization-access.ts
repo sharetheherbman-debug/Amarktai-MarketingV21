@@ -14,6 +14,14 @@ export function getRequestedOrganizationId(req: AuthRequest): string {
   ).trim();
 }
 
+async function hasMembership(organizationId: string, userId: string): Promise<boolean> {
+  const result = await query(
+    'SELECT 1 FROM organization_members WHERE organization_id=$1 AND user_id=$2',
+    [organizationId, userId]
+  );
+  return result.rows.length > 0;
+}
+
 export async function requireOrganizationMembership(
   req: AuthRequest,
   res: Response<ApiResponse>,
@@ -22,30 +30,16 @@ export async function requireOrganizationMembership(
   try {
     const orgId = getRequestedOrganizationId(req);
     if (!orgId) {
-      res.status(400).json({
-        success: false,
-        error: { message: 'organization_id required', code: 'BAD_REQUEST' },
-      });
+      res.status(400).json({ success: false, error: { message: 'organization_id required', code: 'BAD_REQUEST' } });
       return;
     }
-
-    const result = await query(
-      `SELECT 1 FROM organization_members
-       WHERE organization_id = $1 AND user_id = $2`,
-      [orgId, req.user!.userId]
-    );
-    if (result.rows.length === 0) {
-      res.status(403).json({
-        success: false,
-        error: { message: 'Not a member of this organization', code: 'FORBIDDEN' },
-      });
+    if (!await hasMembership(orgId, req.user!.userId)) {
+      res.status(403).json({ success: false, error: { message: 'Not a member of this organization', code: 'FORBIDDEN' } });
       return;
     }
-
+    req.organizationId = orgId;
     next();
-  } catch (error) {
-    next(error);
-  }
+  } catch (error) { next(error); }
 }
 
 export function requireOrganizationRole(...roles: string[]) {
@@ -53,28 +47,41 @@ export function requireOrganizationRole(...roles: string[]) {
     try {
       const orgId = getRequestedOrganizationId(req);
       if (!orgId) {
-        res.status(400).json({
-          success: false,
-          error: { message: 'organization_id required', code: 'BAD_REQUEST' },
-        });
+        res.status(400).json({ success: false, error: { message: 'organization_id required', code: 'BAD_REQUEST' } });
         return;
       }
-
       const result = await query(
-        `SELECT role FROM organization_members
-         WHERE organization_id = $1 AND user_id = $2`,
+        'SELECT role FROM organization_members WHERE organization_id=$1 AND user_id=$2',
         [orgId, req.user!.userId]
       );
       if (result.rows.length === 0 || !roles.includes(String(result.rows[0].role))) {
-        res.status(403).json({
-          success: false,
-          error: { message: 'Insufficient organization permissions', code: 'FORBIDDEN' },
-        });
+        res.status(403).json({ success: false, error: { message: 'Insufficient organization permissions', code: 'FORBIDDEN' } });
         return;
       }
+      req.organizationId = orgId;
       next();
-    } catch (error) {
-      next(error);
-    }
+    } catch (error) { next(error); }
   };
+}
+
+export async function requireClientOrganizationMembership(
+  req: AuthRequest,
+  res: Response<ApiResponse>,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const clientOrganizationId = String(req.body?.client_organization_id || '').trim();
+    if (!clientOrganizationId) {
+      res.status(400).json({ success: false, error: { message: 'client_organization_id required', code: 'BAD_REQUEST' } });
+      return;
+    }
+    if (!await hasMembership(clientOrganizationId, req.user!.userId)) {
+      res.status(403).json({
+        success: false,
+        error: { message: 'You must be a member of the client organization before assigning it to an agency', code: 'CLIENT_CONSENT_REQUIRED' },
+      });
+      return;
+    }
+    next();
+  } catch (error) { next(error); }
 }
