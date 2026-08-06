@@ -2,12 +2,20 @@ import { Request, Response, NextFunction } from 'express';
 import { env } from '../config/env';
 import { logger } from '../utils/logger';
 
-const allowedOrigins = [env.APP_URL, env.API_URL]
-  .filter(Boolean)
-  .map((value) => {
-    try { return new URL(value).origin; }
-    catch { return value; }
-  });
+function toOrigin(value: string): string {
+  try {
+    return new URL(value).origin;
+  } catch {
+    return value.replace(/\/$/, '');
+  }
+}
+
+const allowedOrigins = new Set(
+  [env.APP_URL, env.API_URL, ...env.CORS_ORIGIN.split(',')]
+    .map((value) => value.trim())
+    .filter(Boolean)
+    .map(toOrigin)
+);
 
 export function csrfProtection(req: Request, res: Response, next: NextFunction): void {
   if (['GET', 'HEAD', 'OPTIONS'].includes(req.method)) return next();
@@ -39,12 +47,7 @@ export function csrfProtection(req: Request, res: Response, next: NextFunction):
     return;
   }
 
-  try {
-    const originBase = new URL(origin).origin;
-    if (allowedOrigins.includes(originBase)) return next();
-  } catch {
-    // Invalid URL is rejected below.
-  }
+  if (allowedOrigins.has(toOrigin(origin))) return next();
 
   logger.warn('CSRF: Invalid origin', {
     origin,
