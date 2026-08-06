@@ -104,24 +104,38 @@ function srtTimestamp(seconds: number): string {
   return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')},${String(milliseconds).padStart(3, '0')}`;
 }
 
-async function writeSceneCaptions(scenes: Array<Record<string, any>>, destination: string): Promise<string | undefined> {
-  const lines: string[] = [];
+function vttTimestamp(seconds: number): string {
+  return srtTimestamp(seconds).replace(',', '.');
+}
+
+async function writeCaptionTracks(
+  scenes: Array<Record<string, any>>,
+  srtDestination: string,
+  vttDestination: string
+): Promise<{ srt?: string; vtt?: string }> {
+  const srt: string[] = [];
+  const vtt: string[] = ['WEBVTT', ''];
   let cursor = 0;
   let cue = 1;
   for (const scene of scenes) {
     const duration = Math.max(0.1, Number(scene.duration_seconds || 0));
     const text = String(scene.caption_text || scene.narration || scene.dialogue || '').trim();
     if (text) {
-      lines.push(String(cue++));
-      lines.push(`${srtTimestamp(cursor)} --> ${srtTimestamp(cursor + duration)}`);
-      lines.push(text.replace(/\r?\n+/g, ' ').replace(/-->/g, '→'));
-      lines.push('');
+      const safeText = text.replace(/\r?\n+/g, ' ').replace(/-->/g, '→');
+      srt.push(String(cue));
+      srt.push(`${srtTimestamp(cursor)} --> ${srtTimestamp(cursor + duration)}`);
+      srt.push(safeText, '');
+      vtt.push(String(cue));
+      vtt.push(`${vttTimestamp(cursor)} --> ${vttTimestamp(cursor + duration)}`);
+      vtt.push(safeText, '');
+      cue += 1;
     }
     cursor += duration;
   }
-  if (lines.length === 0) return undefined;
-  await fs.writeFile(destination, lines.join('\n'), 'utf8');
-  return destination;
+  if (cue === 1) return {};
+  await fs.writeFile(srtDestination, srt.join('\n'), 'utf8');
+  await fs.writeFile(vttDestination, vtt.join('\n'), 'utf8');
+  return { srt: srtDestination, vtt: vttDestination };
 }
 
 async function processRender(job: Job): Promise<void> {
@@ -153,6 +167,7 @@ async function processRender(job: Job): Promise<void> {
     const voiceSettings = asObject(project.voice_settings);
     const musicSettings = asObject(project.music_settings);
     const captionSettings = asObject(project.caption_settings);
+    const projectMetadata = asObject(project.metadata);
 
     const scenesResult = await query(
       `SELECT * FROM video_scenes
@@ -180,27 +195,34 @@ async function processRender(job: Job): Promise<void> {
     }
     await logEvent(renderId, 'clips_ready', `${clips.length} scene clips downloaded`);
 
+    const transitions = scenes.map((scene, index) => {
+      const metadata = asObject(scene.metadata);
+      return String(metadata.transition || (index === 0 ? 'cut' : 'crossfade'));
+    });
     await assertNotCancelled(renderId);
     const assembledPath = path.join(tempDir, 'assembled.mp4');
     const assembly = await ffmpegService.concatenateVideos(clips, assembledPath, {
       resolution: project.resolution || '1920x1080',
       frameRate: Number(project.frame_rate || 24),
+      transitions,
+      transitionDuration: Number(projectMetadata.transition_duration_seconds || 0.5),
     });
     if (!assembly.success) throw new Error(assembly.error || 'FFmpeg scene assembly failed');
     await query(
       `UPDATE video_renders SET progress = 55, heartbeat_at = NOW(), updated_at = NOW() WHERE id = $1`,
       [renderId]
     );
-    await logEvent(renderId, 'scenes_assembled', 'Scene clips normalized and concatenated', {
+    await logEvent(renderId, 'scenes_assembled', 'Scene clips normalized and combined with selected transitions', {
       duration: assembly.duration,
       resolution: assembly.resolution,
+      transitions,
     });
 
     let narrationPath: string | undefined;
     if (voiceSettings.enabled && (voiceSettings.asset_url || voiceSettings.asset_id)) {
       narrationPath = await materializeMedia(
         voiceSettings.asset_url,
-        path.join(tempDir, 'narration.audio'),
+        path.join(tempDir, 'narration.mp3'),
         organizationId,
         voiceSettings.asset_id
       );
@@ -211,7 +233,7 @@ async function processRender(job: Job): Promise<void> {
     if (musicSettings.enabled && (musicSettings.asset_url || musicSettings.asset_id)) {
       soundtrackPath = await materializeMedia(
         musicSettings.asset_url,
-        path.join(tempDir, 'soundtrack.audio'),
+        path.join(tempDir, 'soundtrack.mp3'),
         organizationId,
         musicSettings.asset_id
       );
@@ -219,9 +241,16 @@ async function processRender(job: Job): Promise<void> {
     }
 
     let subtitlePath: string | undefined;
-    if (captionSettings.enabled && captionSettings.burn_in !== false) {
-      subtitlePath = await writeSceneCaptions(scenes, path.join(tempDir, 'captions.srt'));
-      if (subtitlePath) await logEvent(renderId, 'captions_ready', 'Scene captions prepared for burn-in');
+    let vttPath: string | undefined;
+    if (captionSettings.enabled) {
+      const tracks = await writeCaptionTracks(
+        scenes,
+        path.join(outputDir, 'captions.srt'),
+        path.join(outputDir, 'captions.vtt')
+      );
+      subtitlePath = captionSettings.burn_in === false ? undefined : tracks.srt;
+      vttPath = tracks.vtt;
+      if (tracks.srt) await logEvent(renderId, 'captions_ready', 'SRT and VTT caption tracks prepared');
     }
 
     await assertNotCancelled(renderId);
@@ -262,6 +291,39 @@ async function processRender(job: Job): Promise<void> {
     const thumbnailAsset = await createAsset(
       organizationId, project.owner_id, `amarktai-${renderId}.jpg`, 'image/jpeg', thumbnailPath
     );
+    const srtAsset = subtitlePath || vttPath
+      ? await createAsset(
+          organizationId,
+          project.owner_id,
+          `amarktai-${renderId}.srt`,
+          'application/x-subrip',
+          path.join(outputDir, 'captions.srt')
+        )
+      : null;
+    const vttAsset = vttPath
+      ? await createAsset(
+          organizationId,
+          project.owner_id,
+          `amarktai-${renderId}.vtt`,
+          'text/vtt',
+          vttPath
+        )
+      : null;
+
+    const renderEvidence = {
+      video_codec: renderResult.videoCodec,
+      audio_codec: renderResult.audioCodec,
+      pixel_format: renderResult.pixelFormat,
+      resolution: renderResult.resolution,
+      narration: Boolean(narrationPath),
+      soundtrack: Boolean(soundtrackPath),
+      captions: Boolean(srtAsset),
+      transitions,
+      srt_asset_id: srtAsset?.id || null,
+      srt_url: srtAsset?.url || null,
+      vtt_asset_id: vttAsset?.id || null,
+      vtt_url: vttAsset?.url || null,
+    };
 
     await query(
       `UPDATE video_renders
@@ -278,15 +340,7 @@ async function processRender(job: Job): Promise<void> {
         thumbnailAsset.id,
         Math.round(renderResult.duration),
         outputAsset.size,
-        JSON.stringify({
-          video_codec: renderResult.videoCodec,
-          audio_codec: renderResult.audioCodec,
-          pixel_format: renderResult.pixelFormat,
-          resolution: renderResult.resolution,
-          narration: Boolean(narrationPath),
-          soundtrack: Boolean(soundtrackPath),
-          captions: Boolean(subtitlePath),
-        }),
+        JSON.stringify(renderEvidence),
         renderId,
       ]
     );
@@ -303,6 +357,12 @@ async function processRender(job: Job): Promise<void> {
           last_render_id: renderId,
           final_duration_seconds: renderResult.duration,
           final_asset_id: outputAsset.id,
+          caption_assets: {
+            srt_asset_id: srtAsset?.id || null,
+            srt_url: srtAsset?.url || null,
+            vtt_asset_id: vttAsset?.id || null,
+            vtt_url: vttAsset?.url || null,
+          },
         }),
         projectId,
         organizationId,
@@ -317,6 +377,8 @@ async function processRender(job: Job): Promise<void> {
       resolution: renderResult.resolution,
       outputAssetId: outputAsset.id,
       thumbnailAssetId: thumbnailAsset.id,
+      srtAssetId: srtAsset?.id || null,
+      vttAssetId: vttAsset?.id || null,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
