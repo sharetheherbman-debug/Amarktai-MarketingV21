@@ -5,12 +5,8 @@ dotenv.config({ path: path.resolve(__dirname, '../../.env') });
 
 const isProduction = process.env.NODE_ENV === 'production';
 
-function getEnv(key: string, defaultValue?: string): string {
-  const value = process.env[key] || defaultValue;
-  if (!value && isProduction) {
-    throw new Error(`Missing required environment variable: ${key}`);
-  }
-  return value || '';
+function getEnv(key: string, defaultValue = ''): string {
+  return process.env[key] ?? defaultValue;
 }
 
 function getRequiredProductionValue(key: string, developmentDefault: string): string {
@@ -82,30 +78,27 @@ export const env = {
     /^[a-fA-F0-9]{64}$/
   ),
 
-  GENX_API_KEY: isProduction ? getRequiredProductionValue('GENX_API_KEY', 'change-me-genx-key') : getEnv('GENX_API_KEY', ''),
+  GENX_API_KEY: isProduction ? getRequiredProductionValue('GENX_API_KEY', 'change-me-genx-key') : getEnv('GENX_API_KEY'),
   GENX_BASE_URL: getEnv('GENX_BASE_URL', 'https://query.genx.sh'),
-  GENX_WEBHOOK_SECRET: getEnv('GENX_WEBHOOK_SECRET', ''),
-  GENX_WEBHOOK_URL: getEnv('GENX_WEBHOOK_URL', ''),
+  GENX_WEBHOOK_SECRET: getEnv('GENX_WEBHOOK_SECRET'),
+  GENX_WEBHOOK_URL: getEnv('GENX_WEBHOOK_URL'),
 
-  TOGETHER_API_KEY: getEnv('TOGETHER_API_KEY', ''),
+  TOGETHER_API_KEY: getEnv('TOGETHER_API_KEY'),
   TOGETHER_BASE_URL: getEnv('TOGETHER_BASE_URL', 'https://api.together.xyz/v1'),
 
-  DEEPINFRA_API_KEY: getEnv('DEEPINFRA_API_KEY', ''),
+  DEEPINFRA_API_KEY: getEnv('DEEPINFRA_API_KEY'),
   DEEPINFRA_BASE_URL: getEnv('DEEPINFRA_BASE_URL', 'https://api.deepinfra.com/v1'),
 
   SMTP_HOST: getEnv('SMTP_HOST', 'smtp.gmail.com'),
   SMTP_PORT: getEnvNumber('SMTP_PORT', 587),
-  SMTP_USER: getEnv('SMTP_USER', ''),
-  SMTP_PASS: getEnv('SMTP_PASS', ''),
+  SMTP_USER: getEnv('SMTP_USER'),
+  SMTP_PASS: getEnv('SMTP_PASS'),
   SMTP_FROM: getEnv('SMTP_FROM', 'noreply@amarktai.co.za'),
 
   RATE_LIMIT_WINDOW_MS: getEnvNumber('RATE_LIMIT_WINDOW_MS', 900000),
   RATE_LIMIT_MAX_REQUESTS: getEnvNumber('RATE_LIMIT_MAX_REQUESTS', 100),
 
   HEALTHCHECK_TIMEOUT_MS: getEnvNumber('HEALTHCHECK_TIMEOUT_MS', 3000),
-  REQUIRE_WORKERS_READY: getEnvBoolean('REQUIRE_WORKERS_READY', isProduction),
-  GENERATION_WORKER_HEALTH_URL: getEnv('GENERATION_WORKER_HEALTH_URL', ''),
-  RENDER_WORKER_HEALTH_URL: getEnv('RENDER_WORKER_HEALTH_URL', ''),
 
   FIRST_RUN: getEnvBoolean('FIRST_RUN', true),
 } as const;
