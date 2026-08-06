@@ -35,6 +35,7 @@ import calendarRoutes from './routes/calendar';
 import seoRoutes from './routes/seo';
 import campaignAiRoutes from './routes/campaign-ai';
 import amaiRoutes from './routes/amai';
+import crmAiActionRoutes from './routes/crm-ai-actions';
 import crmRoutes from './routes/crm';
 import integrationRoutes from './routes/integrations';
 import billingRoutes from './routes/billing';
@@ -140,7 +141,7 @@ app.use('/api/v1/content', contentRoutes);
 app.use('/api/v1/agents', requireAuth, requireOrganizationMembership, agentRoutes);
 app.use('/api/v1/prompts', promptRoutes);
 app.use('/api/v1/brand-dna', brandDnaRoutes);
-app.use('/api/v1/knowledge', knowledgeRoutes);
+app.use('/api/v1/knowledge', requireAuth, requireOrganizationMembership, knowledgeRoutes);
 app.use('/api/v1/competitors', competitorRoutes);
 app.use('/api/v1/trends', trendRoutes);
 app.use('/api/v1/content-studio', contentStudioRoutes);
@@ -148,9 +149,10 @@ app.use('/api/v1/templates', templateRoutes);
 app.use('/api/v1/calendar', calendarRoutes);
 app.use('/api/v1/seo', seoRoutes);
 app.use('/api/v1/campaign-ai', campaignAiRoutes);
-app.use('/api/v1/amai', amaiRoutes);
+app.use('/api/v1/amai', requireAuth, requireOrganizationMembership, amaiRoutes);
+app.use('/api/v1/crm', requireAuth, requireOrganizationMembership, crmAiActionRoutes);
 app.use('/api/v1/crm', requireAuth, requireOrganizationMembership, crmRoutes);
-app.use('/api/v1/integrations', integrationRoutes);
+app.use('/api/v1/integrations', requireAuth, requireOrganizationMembership, integrationRoutes);
 app.use('/api/v1/billing', billingRoutes);
 app.use('/api/v1/agency', agencyRoutes);
 app.use('/api/v1/white-label', whiteLabelRoutes);
@@ -181,7 +183,6 @@ async function startServer() {
       logger.error('Failed to connect to database');
       process.exit(1);
     }
-
     if (!await testRedisConnection()) {
       logger.error('Redis connection failed; queue-backed features cannot start');
       process.exit(1);
@@ -202,21 +203,14 @@ async function startServer() {
       if (shuttingDown) return;
       shuttingDown = true;
       logger.info(`${signal} received. Starting graceful shutdown...`);
-
-      const forceExit = setTimeout(() => {
-        logger.error('Graceful shutdown timed out, forcing exit');
-        process.exit(1);
-      }, 30000);
+      const forceExit = setTimeout(() => process.exit(1), 30000);
       forceExit.unref();
-
       server.close(async () => {
-        logger.info('HTTP server closed');
         scheduler.stopScheduler();
         try {
           await closePool();
           await closeRedis();
           clearTimeout(forceExit);
-          logger.info('All connections closed');
           process.exit(exitCode);
         } catch (error) {
           logger.error('Error during shutdown', error);
@@ -242,5 +236,4 @@ async function startServer() {
 }
 
 void startServer();
-
 export default app;
