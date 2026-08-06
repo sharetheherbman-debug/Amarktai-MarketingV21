@@ -10,11 +10,12 @@ dist/
 build/
 .turbo/
 
-# Environment
+# Environment and secrets
 .env
 .env.local
 .env.development.local
 .env.test.local
+.env.production
 .env.production.local
 
 # Database
@@ -43,8 +44,11 @@ yarn-error.log*
 coverage/
 .nyc_output/
 
-# Docker
+# Docker and operational data
 docker/data/
+backups/
+*.tar.gz.enc
+*.tar.gz.enc.sha256
 
 # Misc
 *.tsbuildinfo
