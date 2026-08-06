@@ -1,47 +1,109 @@
 import { query } from '../config/database';
-import { decrypt } from '../utils/encryption';
+import { decrypt, encrypt } from '../utils/encryption';
 import { GenXProvider } from './genx.provider';
 import { TogetherProvider } from './together.provider';
 import { DeepInfraProvider } from './deepinfra.provider';
-import { AIProvider, ChatMessage, ChatOptions, ChatResult, EmbeddingResult, ProviderInterface, ProviderHealth, HealthStatus } from '../types';
+import { ChatMessage, ChatOptions, ChatResult, EmbeddingResult, ProviderInterface, ProviderHealth, HealthStatus } from '../types';
 import { logger } from '../utils/logger';
+import { env } from '../config/env';
 import * as usageService from '../services/usage.service';
+
+type ProviderType = 'genx' | 'together' | 'deepinfra';
 
 interface ProviderInstance {
   id: string;
   name: string;
+  type: ProviderType;
   provider: ProviderInterface;
   priority: number;
   enabled: boolean;
   healthStatus: HealthStatus;
 }
 
+const LEGACY_GENX_MODELS = new Set([
+  '',
+  'default',
+  'gpt-4',
+  'gpt-4-turbo',
+  'gpt-4o',
+  'gpt-4o-mini',
+  'gpt-3.5-turbo',
+]);
+
 export class ProviderRouter {
   private providers: Map<string, ProviderInstance> = new Map();
 
+  private async upsertEnvironmentProvider(
+    name: ProviderType,
+    apiKey: string,
+    baseUrl: string,
+    priority: number
+  ): Promise<void> {
+    if (!apiKey) return;
+    const encryptedKey = JSON.stringify(encrypt(apiKey));
+    await query(
+      `INSERT INTO ai_providers
+         (name, type, api_key_encrypted, base_url, models, enabled, priority, health_status)
+       VALUES ($1,$1,$2,$3,'[]'::jsonb,TRUE,$4,'unknown')
+       ON CONFLICT (name) DO UPDATE SET
+         type = EXCLUDED.type,
+         api_key_encrypted = EXCLUDED.api_key_encrypted,
+         base_url = EXCLUDED.base_url,
+         enabled = TRUE,
+         priority = EXCLUDED.priority,
+         updated_at = NOW()`,
+      [name, encryptedKey, baseUrl.replace(/\/$/, ''), priority]
+    );
+  }
+
+  private async syncEnvironmentProviders(): Promise<void> {
+    await this.upsertEnvironmentProvider('genx', env.GENX_API_KEY, env.GENX_BASE_URL, 100);
+    await this.upsertEnvironmentProvider('together', env.TOGETHER_API_KEY, env.TOGETHER_BASE_URL, 50);
+    await this.upsertEnvironmentProvider('deepinfra', env.DEEPINFRA_API_KEY, env.DEEPINFRA_BASE_URL, 40);
+  }
+
   async loadProviders(): Promise<void> {
-    const result = await query('SELECT * FROM ai_providers WHERE enabled = true ORDER BY priority DESC');
+    await this.syncEnvironmentProviders();
+    this.providers.clear();
+
+    const result = await query('SELECT * FROM ai_providers WHERE enabled = true ORDER BY priority DESC, created_at ASC');
+    const loadedTypes = new Set<ProviderType>();
 
     for (const row of result.rows) {
       try {
-        const apiKey = decrypt(JSON.parse(row.api_key_encrypted));
-        const provider = this.createProviderInstance(row.type, { apiKey, baseUrl: row.base_url });
+        const type = String(row.type || row.name).toLowerCase() as ProviderType;
+        if (!['genx', 'together', 'deepinfra'].includes(type)) {
+          logger.warn(`Skipping unsupported provider type: ${row.type}`);
+          continue;
+        }
+        if (loadedTypes.has(type)) {
+          logger.warn(`Skipping duplicate enabled ${type} provider ${row.name}; highest-priority provider is already loaded`);
+          continue;
+        }
 
-        this.providers.set(row.id, {
-          id: row.id,
-          name: row.name,
+        const apiKey = decrypt(JSON.parse(row.api_key_encrypted));
+        const provider = this.createProviderInstance(type, { apiKey, baseUrl: String(row.base_url).replace(/\/$/, '') });
+        this.providers.set(String(row.id), {
+          id: String(row.id),
+          name: String(row.name),
+          type,
           provider,
-          priority: row.priority,
-          enabled: row.enabled,
-          healthStatus: row.health_status || 'unknown',
+          priority: Number(row.priority || 0),
+          enabled: row.enabled !== false,
+          healthStatus: (row.health_status || 'unknown') as HealthStatus,
         });
+        loadedTypes.add(type);
       } catch (error) {
         logger.error(`Failed to load provider ${row.name}: ${error}`);
       }
     }
+
+    if (![...this.providers.values()].some((provider) => provider.type === 'genx')) {
+      throw new Error('GenX provider could not be loaded from GENX_API_KEY');
+    }
   }
 
-  private createProviderInstance(type: string, config: { apiKey: string; baseUrl: string }): ProviderInterface {
+  private createProviderInstance(type: ProviderType, config: { apiKey: string; baseUrl: string }): ProviderInterface {
     switch (type) {
       case 'genx':
         return new GenXProvider(config);
@@ -49,9 +111,20 @@ export class ProviderRouter {
         return new TogetherProvider(config);
       case 'deepinfra':
         return new DeepInfraProvider(config);
-      default:
-        throw new Error(`Unknown provider type: ${type}`);
     }
+  }
+
+  private resolveChatModel(instance: ProviderInstance, requestedModel?: string): string {
+    const requested = String(requestedModel || '').trim();
+    if (instance.type === 'genx') {
+      return LEGACY_GENX_MODELS.has(requested.toLowerCase()) ? env.DEFAULT_TEXT_MODEL : requested;
+    }
+
+    const supported = instance.provider.getModels();
+    if (requested && supported.includes(requested)) return requested;
+    return instance.type === 'together'
+      ? env.TOGETHER_DEFAULT_TEXT_MODEL
+      : env.DEEPINFRA_DEFAULT_TEXT_MODEL;
   }
 
   async routeRequest(
@@ -61,90 +134,80 @@ export class ProviderRouter {
     context?: { organizationId?: string; userId?: string }
   ): Promise<ChatResult> {
     const provider = await this.selectProvider(model);
-    if (!provider) {
-      throw new Error('No available provider for the requested model');
-    }
+    if (!provider) throw new Error('No available AI provider');
 
+    const resolvedModel = this.resolveChatModel(provider, model);
     try {
-      const result = await provider.provider.chat(messages, model, options);
-      const costCents = usageService.estimateCost(provider.name, model, result.tokensIn, result.tokensOut);
-
-      if (context?.organizationId) {
-        await this.trackUsage({
-          organizationId: context.organizationId,
-          userId: context.userId,
-          providerId: provider.id,
-          model,
-          action: 'chat',
-          tokensIn: result.tokensIn,
-          tokensOut: result.tokensOut,
-          costCents,
-        });
-      }
-
+      const result = await provider.provider.chat(messages, resolvedModel, options);
+      await this.recordUsage(provider, resolvedModel, result, context);
       return result;
     } catch (error) {
-      logger.error(`Provider ${provider.name} failed: ${error}`);
+      logger.error(`Provider ${provider.name} failed for ${resolvedModel}: ${error}`);
       return this.failover(provider.id, messages, model, options, context);
     }
   }
 
   async selectProvider(model?: string): Promise<ProviderInstance | null> {
     const available = Array.from(this.providers.values())
-      .filter((p) => p.enabled && p.healthStatus !== 'unhealthy')
-      .sort((a, b) => b.priority - a.priority);
+      .filter((provider) => provider.enabled && provider.healthStatus !== 'unhealthy')
+      .sort((left, right) => right.priority - left.priority);
+    if (available.length === 0) return null;
 
-    if (available.length === 0) {
-      return null;
+    const requested = String(model || '').trim();
+    if (requested) {
+      const exact = available.find((provider) => provider.provider.getModels().includes(requested));
+      if (exact) return exact;
     }
 
-    if (model) {
-      const withModel = available.filter((p) => p.provider.getModels().includes(model));
-      if (withModel.length > 0) {
-        return withModel[0];
-      }
-    }
-
-    return available[0];
+    return available.find((provider) => provider.type === 'genx') || available[0];
   }
 
   async failover(
     failedProviderId: string,
     messages: ChatMessage[],
-    model: string,
+    requestedModel: string,
     options?: ChatOptions,
     context?: { organizationId?: string; userId?: string }
   ): Promise<ChatResult> {
     const available = Array.from(this.providers.values())
-      .filter((p) => p.id !== failedProviderId && p.enabled && p.healthStatus !== 'unhealthy')
-      .sort((a, b) => b.priority - a.priority);
+      .filter((provider) => provider.id !== failedProviderId && provider.enabled && provider.healthStatus !== 'unhealthy')
+      .sort((left, right) => right.priority - left.priority);
 
+    const failures: string[] = [];
     for (const provider of available) {
+      const resolvedModel = this.resolveChatModel(provider, requestedModel);
       try {
-        const result = await provider.provider.chat(messages, model, options);
-        const costCents = usageService.estimateCost(provider.name, model, result.tokensIn, result.tokensOut);
-
-        if (context?.organizationId) {
-          await this.trackUsage({
-            organizationId: context.organizationId,
-            userId: context.userId,
-            providerId: provider.id,
-            model,
-            action: 'chat',
-            tokensIn: result.tokensIn,
-            tokensOut: result.tokensOut,
-            costCents,
-          });
-        }
-
+        const result = await provider.provider.chat(messages, resolvedModel, options);
+        await this.recordUsage(provider, resolvedModel, result, context);
         return result;
       } catch (error) {
-        logger.error(`Failover provider ${provider.name} failed: ${error}`);
-        continue;
+        const message = error instanceof Error ? error.message : String(error);
+        failures.push(`${provider.name}: ${message}`);
+        logger.error(`Failover provider ${provider.name} failed for ${resolvedModel}: ${message}`);
       }
     }
 
-    throw new Error('All providers failed');
+    throw new Error(`All AI providers failed${failures.length ? ` (${failures.join('; ')})` : ''}`);
+  }
+
+  private async recordUsage(
+    provider: ProviderInstance,
+    model: string,
+    result: ChatResult,
+    context?: { organizationId?: string; userId?: string }
+  ): Promise<void> {
+    if (!context?.organizationId) return;
+    const costCents = usageService.estimateCost(provider.name, model, result.tokensIn, result.tokensOut);
+    await this.trackUsage({
+      organizationId: context.organizationId,
+      userId: context.userId,
+      providerId: provider.id,
+      model,
+      action: 'chat',
+      tokensIn: result.tokensIn,
+      tokensOut: result.tokensOut,
+      costCents,
+    });
   }
 
   async trackUsage(data: {
@@ -158,17 +221,7 @@ export class ProviderRouter {
     costCents: number;
   }): Promise<void> {
     try {
-      await usageService.track({
-        organizationId: data.organizationId,
-        userId: data.userId,
-        providerId: data.providerId,
-        model: data.model,
-        action: data.action,
-        tokensIn: data.tokensIn,
-        tokensOut: data.tokensOut,
-        costCents: data.costCents,
-      });
-
+      await usageService.track(data);
       await query(
         `UPDATE ai_providers
          SET usage_stats = jsonb_set(
@@ -186,36 +239,19 @@ export class ProviderRouter {
 
   async getHealthStatus(): Promise<ProviderHealth[]> {
     const results: ProviderHealth[] = [];
-
     for (const [id, instance] of this.providers) {
       const start = Date.now();
       try {
         const healthy = await instance.provider.healthCheck();
         const latency = Date.now() - start;
-
         const status: HealthStatus = healthy ? 'healthy' : 'degraded';
-        await query(
-          'UPDATE ai_providers SET health_status = $1, last_health_check = NOW() WHERE id = $2',
-          [status, id]
-        );
-
+        await query('UPDATE ai_providers SET health_status = $1, last_health_check = NOW() WHERE id = $2', [status, id]);
         instance.healthStatus = status;
-
-        results.push({
-          name: instance.name,
-          status,
-          latency,
-          lastCheck: new Date(),
-        });
+        results.push({ name: instance.name, status, latency, lastCheck: new Date() });
       } catch (error) {
         const latency = Date.now() - start;
-        await query(
-          'UPDATE ai_providers SET health_status = $1, last_health_check = NOW() WHERE id = $2',
-          ['unhealthy', id]
-        );
-
+        await query("UPDATE ai_providers SET health_status = 'unhealthy', last_health_check = NOW() WHERE id = $1", [id]);
         instance.healthStatus = 'unhealthy';
-
         results.push({
           name: instance.name,
           status: 'unhealthy',
@@ -225,16 +261,29 @@ export class ProviderRouter {
         });
       }
     }
-
     return results;
   }
 
-  async embeddings(input: string | string[], model: string): Promise<EmbeddingResult[]> {
-    const provider = await this.selectProvider(model);
-    if (!provider) {
-      throw new Error('No available provider for embeddings');
+  async embeddings(input: string | string[], requestedModel?: string): Promise<EmbeddingResult[]> {
+    const available = Array.from(this.providers.values())
+      .filter((provider) => provider.enabled && provider.healthStatus !== 'unhealthy' && provider.type !== 'genx')
+      .sort((left, right) => right.priority - left.priority);
+    const failures: string[] = [];
+
+    for (const provider of available) {
+      const configuredModel = provider.type === 'together'
+        ? env.TOGETHER_EMBEDDING_MODEL
+        : env.DEEPINFRA_EMBEDDING_MODEL;
+      const model = String(requestedModel || configuredModel || '').trim();
+      if (!model) continue;
+      try {
+        return await provider.provider.embeddings(input, model);
+      } catch (error) {
+        failures.push(`${provider.name}: ${error instanceof Error ? error.message : String(error)}`);
+      }
     }
-    return provider.provider.embeddings(input, model);
+
+    throw new Error(`No working external embedding provider is configured${failures.length ? ` (${failures.join('; ')})` : ''}`);
   }
 }
 
