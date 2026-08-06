@@ -1,7 +1,8 @@
 import { query } from '../config/database';
 import { logger } from '../utils/logger';
 import { NotFoundError, AppError } from '../middleware/errorHandler';
-import { openSecrets, publishSocialPost, sealSecrets } from './external-platform.service';
+import { openSecrets, sealSecrets } from './external-platform.service';
+import { deliverSocialPost } from './strict-social-delivery.service';
 
 export interface SocialConnection {
   id: string;
@@ -224,7 +225,7 @@ export async function publishPost(postId: string, orgId: string): Promise<Social
       : (row.connection_config as Record<string, unknown>) || {};
     const credentials = openSecrets(connectionConfig.credentials);
     const { credentials: _credentials, ...platformConfig } = connectionConfig;
-    const result = await publishSocialPost(String(row.platform), credentials, platformConfig, {
+    const result = await deliverSocialPost(String(row.platform), credentials, platformConfig, {
       body: String(row.body || ''),
       mediaUrls: typeof row.media_urls === 'string' ? JSON.parse(row.media_urls) : (row.media_urls as string[]) || [],
       hashtags: typeof row.hashtags === 'string' ? JSON.parse(row.hashtags) : (row.hashtags as string[]) || [],
