@@ -2,6 +2,8 @@ import { query } from '../config/database';
 import { logger } from '../utils/logger';
 import { healthCheck as providerHealthCheck } from './provider.service';
 import { publishDuePosts } from './social-publishing.service';
+import { checkCompetitor } from './competitor.service';
+import { checkMonitor } from './trend.service';
 
 interface ScheduledTask {
   name: string;
@@ -14,26 +16,18 @@ interface ScheduledTask {
 }
 
 class SchedulerService {
-  private tasks: Map<string, ScheduledTask> = new Map();
+  private tasks = new Map<string, ScheduledTask>();
   private started = false;
 
   scheduleTask(name: string, intervalMs: number, callback: () => Promise<void>): void {
-    if (this.tasks.has(name)) {
-      logger.warn(`Task "${name}" already exists, cancelling before rescheduling`);
-      this.cancelTask(name);
-    }
+    if (this.tasks.has(name)) this.cancelTask(name);
     const task: ScheduledTask = {
-      name,
-      intervalMs,
-      callback,
-      timer: null,
-      lastRun: null,
-      nextRun: new Date(Date.now() + intervalMs),
-      running: false,
+      name, intervalMs, callback, timer: null, lastRun: null,
+      nextRun: new Date(Date.now() + intervalMs), running: false,
     };
     this.tasks.set(name, task);
     if (this.started) this.startTask(name);
-    logger.info(`Task "${name}" scheduled with interval ${intervalMs}ms`);
+    logger.info(`Task "${name}" scheduled every ${intervalMs}ms`);
   }
 
   cancelTask(name: string): boolean {
@@ -45,7 +39,7 @@ class SchedulerService {
   }
 
   listTasks(): Array<{ name: string; intervalMs: number; lastRun: Date | null; nextRun: Date | null; running: boolean }> {
-    return Array.from(this.tasks.values()).map(({ name, intervalMs, lastRun, nextRun, running }) => ({ name, intervalMs, lastRun, nextRun, running }));
+    return [...this.tasks.values()].map(({ name, intervalMs, lastRun, nextRun, running }) => ({ name, intervalMs, lastRun, nextRun, running }));
   }
 
   startScheduler(): void {
@@ -64,9 +58,7 @@ class SchedulerService {
     this.started = false;
   }
 
-  isRunning(): boolean {
-    return this.started;
-  }
+  isRunning(): boolean { return this.started; }
 
   private startTask(name: string): void {
     const task = this.tasks.get(name);
@@ -75,16 +67,15 @@ class SchedulerService {
       if (task.running) return;
       task.running = true;
       task.lastRun = new Date();
-      try {
-        await task.callback();
-      } catch (error) {
-        logger.error(`Task "${name}" failed`, error);
-      } finally {
+      try { await task.callback(); }
+      catch (error) { logger.error(`Task "${name}" failed`, error); }
+      finally {
         task.running = false;
         task.nextRun = new Date(Date.now() + task.intervalMs);
       }
     };
     task.timer = setInterval(runTask, task.intervalMs);
+    task.timer.unref?.();
     void runTask();
   }
 
@@ -94,6 +85,31 @@ class SchedulerService {
       if (published > 0) logger.info(`Published ${published} scheduled social posts`);
     });
 
+    this.scheduleTask('check-trend-monitors', 15 * 60 * 1000, async () => {
+      const result = await query(
+        `SELECT id,organization_id FROM trend_monitors
+         WHERE is_active=TRUE AND (last_checked_at IS NULL OR last_checked_at < NOW() - INTERVAL '30 minutes')
+         ORDER BY last_checked_at NULLS FIRST LIMIT 20`
+      );
+      for (const row of result.rows) {
+        try { await checkMonitor(String(row.id), String(row.organization_id)); }
+        catch (error) { logger.warn(`Scheduled trend check failed for ${row.id}: ${error}`); }
+      }
+    });
+
+    this.scheduleTask('check-competitors', 60 * 60 * 1000, async () => {
+      const result = await query(
+        `SELECT id,organization_id FROM competitors
+         WHERE status='active' AND deleted_at IS NULL
+           AND (last_checked_at IS NULL OR last_checked_at < NOW() - INTERVAL '6 hours')
+         ORDER BY last_checked_at NULLS FIRST LIMIT 20`
+      );
+      for (const row of result.rows) {
+        try { await checkCompetitor(String(row.id), String(row.organization_id)); }
+        catch (error) { logger.warn(`Scheduled competitor check failed for ${row.id}: ${error}`); }
+      }
+    });
+
     this.scheduleTask('health-check', 5 * 60 * 1000, async () => {
       const results = await providerHealthCheck();
       const unhealthy = results.filter((result) => result.status !== 'healthy');
@@ -101,11 +117,11 @@ class SchedulerService {
     });
 
     this.scheduleTask('cleanup-expired-tokens', 60 * 60 * 1000, async () => {
-      await query('DELETE FROM refresh_tokens WHERE expires_at < NOW() OR revoked = true');
+      await query('DELETE FROM refresh_tokens WHERE expires_at < NOW() OR revoked=TRUE');
     });
 
     this.scheduleTask('cleanup-expired-invitations', 60 * 60 * 1000, async () => {
-      await query('DELETE FROM invitations WHERE expires_at < NOW() AND accepted = false');
+      await query('DELETE FROM invitations WHERE expires_at < NOW() AND accepted=FALSE');
     });
   }
 }
