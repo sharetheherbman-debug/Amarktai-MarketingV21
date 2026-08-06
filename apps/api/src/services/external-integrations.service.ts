@@ -35,6 +35,15 @@ function objectValue(value: unknown): Record<string, unknown> {
   return typeof value === 'object' ? value as Record<string, unknown> : {};
 }
 
+function normalizedConfig(providerSlug: string, value: unknown): Record<string, unknown> {
+  const config = { ...objectValue(value) };
+  if (providerSlug === 'google-ads' && !config.api_version) config.api_version = 'v25';
+  if (providerSlug === 'meta-ads' && !config.api_version) {
+    throw new AppError(400, 'Meta Ads api_version is required because Meta versions are time-limited', 'INTEGRATION_CONFIG_ERROR');
+  }
+  return config;
+}
+
 function mapConnection(row: ConnectionRow): Record<string, unknown> {
   return {
     id: row.id,
@@ -109,6 +118,7 @@ export async function createConnection(
   if (Object.keys(credentials).length === 0) {
     throw new AppError(400, 'Provider credentials are required', 'INTEGRATION_CREDENTIALS_REQUIRED');
   }
+  const config = normalizedConfig(data.provider_slug, data.config || {});
   const result = await query(
     `INSERT INTO integration_connections
        (organization_id, provider_id, name, auth_data, config, permissions, health_status, status, created_by)
@@ -119,7 +129,7 @@ export async function createConnection(
       provider.id,
       data.name,
       JSON.stringify(sealSecrets(credentials)),
-      JSON.stringify(data.config || {}),
+      JSON.stringify(config),
       JSON.stringify(data.permissions || []),
       userId,
     ]
@@ -134,6 +144,7 @@ export async function updateConnection(
 ): Promise<Record<string, unknown>> {
   const existing = await getConnectionRow(id, orgId);
   const currentConfig = objectValue(existing.config);
+  const nextConfig = normalizedConfig(existing.provider_slug, { ...currentConfig, ...(data.config || {}) });
   const currentSecrets = openSecrets(objectValue(existing.auth_data));
   const nextSecrets = data.credentials && Object.keys(data.credentials).length > 0
     ? { ...currentSecrets, ...data.credentials }
@@ -146,7 +157,7 @@ export async function updateConnection(
     [
       data.name || null,
       JSON.stringify(sealSecrets(nextSecrets)),
-      JSON.stringify({ ...currentConfig, ...(data.config || {}) }),
+      JSON.stringify(nextConfig),
       data.status || null,
       id,
       orgId,
@@ -163,7 +174,7 @@ export async function deleteConnection(id: string, orgId: string): Promise<void>
 export async function testConnection(id: string, orgId: string): Promise<{ healthy: boolean; latency_ms: number; response: Record<string, unknown> }> {
   const connection = await getConnectionRow(id, orgId);
   const credentials = openSecrets(objectValue(connection.auth_data));
-  const config = objectValue(connection.config);
+  const config = normalizedConfig(connection.provider_slug, connection.config);
   const started = Date.now();
   try {
     const response = await testExternalConnection(connection.provider_slug, credentials, config);
@@ -200,7 +211,7 @@ export async function syncAnalyticsConnection(
   const sync = await syncExternalAnalytics(
     connection.provider_slug,
     openSecrets(objectValue(connection.auth_data)),
-    objectValue(connection.config),
+    normalizedConfig(connection.provider_slug, connection.config),
     startDate,
     endDate
   );
@@ -250,7 +261,7 @@ export async function syncAdvertisingConnection(
   const sync = await syncAdvertising(
     connection.provider_slug,
     openSecrets(objectValue(connection.auth_data)),
-    objectValue(connection.config),
+    normalizedConfig(connection.provider_slug, connection.config),
     startDate,
     endDate
   );
