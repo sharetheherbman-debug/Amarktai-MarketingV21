@@ -29,7 +29,7 @@ async function publishLinkedIn(
     headers: {
       Authorization: `Bearer ${token}`,
       'Content-Type': 'application/json',
-      'LinkedIn-Version': requiredString(config.linkedin_version || '202501', 'linkedin_version'),
+      'LinkedIn-Version': requiredString(config.linkedin_version || '202607', 'linkedin_version'),
       'X-Restli-Protocol-Version': '2.0.0',
     },
     body: JSON.stringify({
