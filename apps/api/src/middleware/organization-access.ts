@@ -9,8 +9,9 @@ export function getRequestedOrganizationId(req: AuthRequest): string {
     req.query.organization_id ||
     req.params.organizationId ||
     req.params.orgId ||
+    req.header('x-organization-id') ||
     ''
-  );
+  ).trim();
 }
 
 export async function requireOrganizationMembership(
@@ -64,7 +65,7 @@ export function requireOrganizationRole(...roles: string[]) {
          WHERE organization_id = $1 AND user_id = $2`,
         [orgId, req.user!.userId]
       );
-      if (result.rows.length === 0 || !roles.includes(result.rows[0].role as string)) {
+      if (result.rows.length === 0 || !roles.includes(String(result.rows[0].role))) {
         res.status(403).json({
           success: false,
           error: { message: 'Insufficient organization permissions', code: 'FORBIDDEN' },
