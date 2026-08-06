@@ -2,6 +2,7 @@ import { query, transaction } from '../config/database';
 import { AppError } from '../middleware/errorHandler';
 import { logger } from '../utils/logger';
 import * as vectorService from './vector.service';
+import { safeFetch } from '../utils/safe-fetch';
 
 interface SourceRow extends Record<string, unknown> {
   id: string;
@@ -27,27 +28,27 @@ function objectValue(value: unknown): Record<string, unknown> {
   return typeof value === 'object' ? value as Record<string, unknown> : {};
 }
 
+function stringHeaders(value: unknown): Record<string, string> {
+  const object = objectValue(value);
+  const headers: Record<string, string> = {};
+  for (const [key, headerValue] of Object.entries(object)) {
+    if (typeof headerValue === 'string') headers[key] = headerValue;
+  }
+  return headers;
+}
+
 function decodeHtml(value: string): string {
   return value
-    .replace(/&nbsp;/gi, ' ')
-    .replace(/&amp;/gi, '&')
-    .replace(/&lt;/gi, '<')
-    .replace(/&gt;/gi, '>')
-    .replace(/&quot;/gi, '"')
-    .replace(/&#39;/gi, "'")
+    .replace(/&nbsp;/gi, ' ').replace(/&amp;/gi, '&').replace(/&lt;/gi, '<').replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"').replace(/&#39;/gi, "'")
     .replace(/&#(\d+);/g, (_match, code) => String.fromCharCode(Number(code)));
 }
 
 function htmlToText(html: string): string {
   return decodeHtml(
-    html
-      .replace(/<(script|style|noscript|svg)[\s\S]*?<\/\1>/gi, ' ')
-      .replace(/<br\s*\/?>/gi, '\n')
-      .replace(/<\/(p|div|article|section|li|h[1-6])>/gi, '\n')
-      .replace(/<[^>]+>/g, ' ')
-      .replace(/[ \t]+/g, ' ')
-      .replace(/\n\s*\n+/g, '\n\n')
-      .trim()
+    html.replace(/<(script|style|noscript|svg)[\s\S]*?<\/\1>/gi, ' ')
+      .replace(/<br\s*\/?>/gi, '\n').replace(/<\/(p|div|article|section|li|h[1-6])>/gi, '\n')
+      .replace(/<[^>]+>/g, ' ').replace(/[ \t]+/g, ' ').replace(/\n\s*\n+/g, '\n\n').trim()
   );
 }
 
@@ -91,20 +92,19 @@ function chunkText(text: string, maxChars = 6000, overlap = 500): string[] {
   return chunks;
 }
 
-async function fetchText(url: string, headers: Record<string, string> = {}): Promise<{ contentType: string; text: string }> {
-  const response = await fetch(url, {
+async function fetchText(url: string, headers: Record<string, string> = {}): Promise<{ finalUrl: string; contentType: string; text: string }> {
+  const response = await safeFetch(url, {
     headers: {
       'User-Agent': 'AmarktAI-KnowledgeBot/1.0',
       Accept: 'text/html,application/json,text/plain,application/xml;q=0.9,*/*;q=0.8',
       ...headers,
     },
-    redirect: 'follow',
-    signal: AbortSignal.timeout(30000),
+    timeoutMs: 30000,
+    maxResponseBytes: 10 * 1024 * 1024,
   });
-  if (!response.ok) throw new AppError(response.status, `Knowledge source returned HTTP ${response.status}`, 'KNOWLEDGE_FETCH_FAILED');
-  const length = Number(response.headers.get('content-length') || 0);
-  if (length > 10 * 1024 * 1024) throw new AppError(400, 'Knowledge source exceeds 10 MB', 'KNOWLEDGE_SOURCE_TOO_LARGE');
-  return { contentType: response.headers.get('content-type') || '', text: await response.text() };
+  const text = await response.text();
+  if (!response.ok) throw new AppError(502, `Knowledge source returned HTTP ${response.status}: ${text.slice(0, 300)}`, 'KNOWLEDGE_FETCH_FAILED');
+  return { finalUrl: response.url, contentType: response.headers.get('content-type') || '', text };
 }
 
 function parseRss(xml: string, sourceUrl: string): DocumentInput[] {
@@ -118,12 +118,9 @@ function parseRss(xml: string, sourceUrl: string): DocumentInput[] {
     const content = tag('content') || tag('description') || tag('summary');
     const link = item.match(/<link[^>]*href=["']([^"']+)["']/i) || item.match(/<link[^>]*>([^<]+)<\/link>/i);
     if (content) {
-      documents.push({
-        title,
-        content,
-        url: link?.[1] ? new URL(link[1], sourceUrl).toString() : sourceUrl,
-        metadata: { source_type: 'rss' },
-      });
+      let itemUrl = sourceUrl;
+      try { if (link?.[1]) itemUrl = new URL(link[1], sourceUrl).toString(); } catch { /* retain source URL */ }
+      documents.push({ title, content, url: itemUrl, metadata: { source_type: 'rss' } });
     }
   }
   return documents;
@@ -140,18 +137,20 @@ async function collectDocuments(source: SourceRow): Promise<DocumentInput[]> {
 
   if (source.type === 'api') {
     if (!source.url) throw new AppError(400, 'API sources require a URL', 'KNOWLEDGE_URL_REQUIRED');
-    const response = await fetchText(source.url, objectValue(config.headers) as Record<string, string>);
+    const response = await fetchText(source.url, stringHeaders(config.headers));
     let content = response.text;
     if (response.contentType.includes('json')) {
-      try { content = JSON.stringify(JSON.parse(content), null, 2); } catch { /* Keep provider text. */ }
+      try { content = JSON.stringify(JSON.parse(content), null, 2); } catch { /* retain source text */ }
     }
-    return [{ title: source.name, content, url: source.url, metadata: { source_type: 'api', content_type: response.contentType } }];
+    return [{ title: source.name, content, url: response.finalUrl, metadata: { source_type: 'api', content_type: response.contentType } }];
   }
 
   if (source.type === 'rss') {
     if (!source.url) throw new AppError(400, 'RSS sources require a URL', 'KNOWLEDGE_URL_REQUIRED');
     const response = await fetchText(source.url);
-    return parseRss(response.text, source.url);
+    const documents = parseRss(response.text, response.finalUrl);
+    if (documents.length === 0) throw new AppError(400, 'RSS source contained no usable items', 'KNOWLEDGE_EMPTY_SOURCE');
+    return documents;
   }
 
   if (source.type === 'website') {
@@ -167,18 +166,18 @@ async function collectDocuments(source: SourceRow): Promise<DocumentInput[]> {
       const current = queue.shift()!;
       if (visited.has(current)) continue;
       visited.add(current);
-      const currentUrl = new URL(current);
       const response = await fetchText(current);
-      if (response.contentType.includes('html')) {
+      const currentUrl = new URL(response.finalUrl);
+      if (response.contentType.includes('html') || /<html\b/i.test(response.text)) {
         const content = htmlToText(response.text);
-        if (content.length >= 80) documents.push({ title: htmlTitle(response.text, currentUrl.pathname || source.name), content, url: current, metadata: { source_type: 'website' } });
+        if (content.length >= 80) documents.push({ title: htmlTitle(response.text, currentUrl.pathname || source.name), content, url: response.finalUrl, metadata: { source_type: 'website' } });
         for (const link of linksFromHtml(response.text, currentUrl)) {
           const next = new URL(link);
           const sameHost = next.hostname === root.hostname || (includeSubdomains && next.hostname.endsWith(`.${root.hostname}`));
           if (sameHost && !visited.has(next.toString()) && !queue.includes(next.toString())) queue.push(next.toString());
         }
       } else {
-        documents.push({ title: currentUrl.pathname.split('/').filter(Boolean).pop() || source.name, content: response.text, url: current, metadata: { source_type: 'website', content_type: response.contentType } });
+        documents.push({ title: currentUrl.pathname.split('/').filter(Boolean).pop() || source.name, content: response.text, url: response.finalUrl, metadata: { source_type: 'website', content_type: response.contentType } });
       }
     }
     if (documents.length === 0) throw new AppError(400, 'Website crawl produced no indexable content', 'KNOWLEDGE_EMPTY_SOURCE');
@@ -189,40 +188,36 @@ async function collectDocuments(source: SourceRow): Promise<DocumentInput[]> {
 }
 
 export async function ingestSource(sourceId: string, orgId: string): Promise<{ documents: number; items: number; tokens: number; embeddings: number }> {
-  const sourceResult = await query('SELECT * FROM knowledge_sources WHERE id = $1 AND organization_id = $2', [sourceId, orgId]);
+  const sourceResult = await query('SELECT * FROM knowledge_sources WHERE id=$1 AND organization_id=$2', [sourceId, orgId]);
   if (sourceResult.rows.length === 0) throw new AppError(404, 'Knowledge source not found', 'NOT_FOUND');
   const source = sourceResult.rows[0] as SourceRow;
-  await query("UPDATE knowledge_sources SET status = 'syncing', error_message = NULL, updated_at = NOW() WHERE id = $1 AND organization_id = $2", [sourceId, orgId]);
+  await query("UPDATE knowledge_sources SET status='syncing',error_message=NULL,updated_at=NOW() WHERE id=$1 AND organization_id=$2", [sourceId, orgId]);
 
   try {
     const documents = await collectDocuments(source);
     const prepared = documents.flatMap((document) => chunkText(document.content).map((content, index) => ({
-      title: document.title,
-      content,
-      url: document.url || null,
+      title: document.title, content, url: document.url || null,
       metadata: { ...(document.metadata || {}), document_title: document.title, chunk_index: index },
-      tokens: Math.ceil(content.length / 4),
-      chunkIndex: index,
+      tokens: Math.ceil(content.length / 4), chunkIndex: index,
     })));
     if (prepared.length === 0) throw new AppError(400, 'Knowledge source produced no chunks', 'KNOWLEDGE_EMPTY_SOURCE');
 
     const totalTokens = prepared.reduce((sum, item) => sum + item.tokens, 0);
     const itemIds = await transaction(async (client) => {
-      await client.query('DELETE FROM knowledge_items WHERE source_id = $1 AND organization_id = $2', [sourceId, orgId]);
+      await client.query('DELETE FROM knowledge_items WHERE source_id=$1 AND organization_id=$2', [sourceId, orgId]);
       const ids: string[] = [];
       for (const item of prepared) {
         const inserted = await client.query(
           `INSERT INTO knowledge_items
-             (organization_id, source_id, title, content, content_type, url, metadata, tokens, chunk_index)
+             (organization_id,source_id,title,content,content_type,url,metadata,tokens,chunk_index)
            VALUES ($1,$2,$3,$4,'text',$5,$6,$7,$8) RETURNING id`,
           [orgId, sourceId, item.title, item.content, item.url, JSON.stringify(item.metadata), item.tokens, item.chunkIndex]
         );
         ids.push(String(inserted.rows[0].id));
       }
       await client.query(
-        `UPDATE knowledge_sources
-         SET status = 'active', item_count = $1, total_tokens = $2, last_synced_at = NOW(), error_message = NULL, updated_at = NOW()
-         WHERE id = $3 AND organization_id = $4`,
+        `UPDATE knowledge_sources SET status='active',item_count=$1,total_tokens=$2,last_synced_at=NOW(),error_message=NULL,updated_at=NOW()
+         WHERE id=$3 AND organization_id=$4`,
         [prepared.length, totalTokens, sourceId, orgId]
       );
       return ids;
@@ -245,7 +240,7 @@ export async function ingestSource(sourceId: string, orgId: string): Promise<{ d
     return { documents: documents.length, items: prepared.length, tokens: totalTokens, embeddings: embeddingCount };
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Knowledge ingestion failed';
-    await query("UPDATE knowledge_sources SET status = 'error', error_message = $1, updated_at = NOW() WHERE id = $2 AND organization_id = $3", [message, sourceId, orgId]);
+    await query("UPDATE knowledge_sources SET status='error',error_message=$1,updated_at=NOW() WHERE id=$2 AND organization_id=$3", [message, sourceId, orgId]);
     throw error;
   }
 }
@@ -253,13 +248,12 @@ export async function ingestSource(sourceId: string, orgId: string): Promise<{ d
 export async function hybridSearch(orgId: string, searchText: string, limit = 10): Promise<Array<Record<string, unknown>>> {
   const maxResults = Math.max(1, Math.min(limit, 50));
   const lexical = await query(
-    `SELECT ki.id, ki.source_id, ki.title, ki.content, ki.url, ki.metadata,
-       ts_rank(to_tsvector('simple', COALESCE(ki.title, '') || ' ' || COALESCE(ki.content, '')), plainto_tsquery('simple', $2)) AS lexical_score
+    `SELECT ki.id,ki.source_id,ki.title,ki.content,ki.url,ki.metadata,
+       ts_rank(to_tsvector('simple',COALESCE(ki.title,'') || ' ' || COALESCE(ki.content,'')),plainto_tsquery('simple',$2)) AS lexical_score
      FROM knowledge_items ki
-     WHERE ki.organization_id = $1
-       AND to_tsvector('simple', COALESCE(ki.title, '') || ' ' || COALESCE(ki.content, '')) @@ plainto_tsquery('simple', $2)
-     ORDER BY lexical_score DESC, ki.updated_at DESC
-     LIMIT $3`,
+     WHERE ki.organization_id=$1
+       AND to_tsvector('simple',COALESCE(ki.title,'') || ' ' || COALESCE(ki.content,'')) @@ plainto_tsquery('simple',$2)
+     ORDER BY lexical_score DESC,ki.updated_at DESC LIMIT $3`,
     [orgId, searchText, maxResults]
   );
 
@@ -271,8 +265,7 @@ export async function hybridSearch(orgId: string, searchText: string, limit = 10
     for (const row of await vectorService.similaritySearch(orgId, embedding, maxResults, 0)) {
       const existing = combined.get(row.id);
       combined.set(row.id, {
-        ...(existing || row),
-        ...row,
+        ...(existing || row), ...row,
         score: Math.max(Number(existing?.score || 0), row.similarity),
         match_type: existing ? 'hybrid' : 'semantic',
       });
@@ -283,16 +276,13 @@ export async function hybridSearch(orgId: string, searchText: string, limit = 10
 
   if (combined.size === 0) {
     const fallback = await query(
-      `SELECT id, source_id, title, content, url, metadata, 0.01 AS score, 'substring' AS match_type
-       FROM knowledge_items
-       WHERE organization_id = $1 AND (title ILIKE $2 OR content ILIKE $2)
+      `SELECT id,source_id,title,content,url,metadata,0.01 AS score,'substring' AS match_type
+       FROM knowledge_items WHERE organization_id=$1 AND (title ILIKE $2 OR content ILIKE $2)
        ORDER BY updated_at DESC LIMIT $3`,
       [orgId, `%${searchText}%`, maxResults]
     );
     return fallback.rows;
   }
 
-  return [...combined.values()]
-    .sort((left, right) => Number(right.score || 0) - Number(left.score || 0))
-    .slice(0, maxResults);
+  return [...combined.values()].sort((left, right) => Number(right.score || 0) - Number(left.score || 0)).slice(0, maxResults);
 }
