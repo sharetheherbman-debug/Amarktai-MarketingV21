@@ -40,6 +40,7 @@ import crmRoutes from './routes/crm';
 import integrationRoutes from './routes/integrations';
 import billingRoutes from './routes/billing';
 import agencyRoutes from './routes/agency';
+import whiteLabelPublicRoutes from './routes/white-label-public';
 import whiteLabelRoutes from './routes/white-label';
 import templateLibraryRoutes from './routes/template-library';
 import clientReportsRoutes from './routes/client-reports';
@@ -67,9 +68,7 @@ function toOrigin(value: string): string {
 
 const allowedOrigins = new Set(
   [env.APP_URL, env.API_URL, ...env.CORS_ORIGIN.split(',')]
-    .map((value) => value.trim())
-    .filter(Boolean)
-    .map(toOrigin)
+    .map((value) => value.trim()).filter(Boolean).map(toOrigin)
 );
 
 app.use(cors({
@@ -79,46 +78,31 @@ app.use(cors({
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowedHeaders: [
-    'Content-Type', 'Authorization', 'X-Requested-With', 'X-CSRF-Token',
-    'X-Organization-Id', 'X-Idempotency-Key', 'Idempotency-Key', 'Range',
-  ],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'X-CSRF-Token', 'X-Organization-Id', 'X-Idempotency-Key', 'Idempotency-Key', 'Range'],
   exposedHeaders: ['Content-Range', 'Accept-Ranges', 'Content-Length'],
   maxAge: 86400,
 }));
 
 app.use(helmet({
-  contentSecurityPolicy: {
-    directives: {
-      defaultSrc: ["'none'"],
-      frameAncestors: ["'none'"],
-      baseUri: ["'none'"],
-      formAction: ["'none'"],
-    },
-  },
+  contentSecurityPolicy: { directives: { defaultSrc: ["'none'"], frameAncestors: ["'none'"], baseUri: ["'none'"], formAction: ["'none'"] } },
   crossOriginEmbedderPolicy: false,
   crossOriginResourcePolicy: { policy: 'same-site' },
 }));
-
 app.use(compression());
 app.use(morgan('combined', { stream: { write: (message: string) => logger.http(message.trim()) } }));
 
-app.post(
-  '/api/v1/marketplace/stripe/webhook',
-  express.raw({ type: 'application/json', limit: '1mb' }),
-  async (req: Request, res: Response, next: NextFunction): Promise<void> => {
-    try {
-      const signature = req.header('stripe-signature');
-      if (!signature || !Buffer.isBuffer(req.body)) {
-        res.status(400).json({ success: false, error: { message: 'Stripe signature and raw body required', code: 'STRIPE_SIGNATURE_REQUIRED' } });
-        return;
-      }
-      const event = verifyStripeEvent(req.body, signature);
-      await processStripeEvent(event);
-      res.json({ received: true });
-    } catch (error) { next(error); }
-  }
-);
+app.post('/api/v1/marketplace/stripe/webhook', express.raw({ type: 'application/json', limit: '1mb' }), async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const signature = req.header('stripe-signature');
+    if (!signature || !Buffer.isBuffer(req.body)) {
+      res.status(400).json({ success: false, error: { message: 'Stripe signature and raw body required', code: 'STRIPE_SIGNATURE_REQUIRED' } });
+      return;
+    }
+    const event = verifyStripeEvent(req.body, signature);
+    await processStripeEvent(event);
+    res.json({ received: true });
+  } catch (error) { next(error); }
+});
 
 app.use(cookieParser());
 app.use(csrfProtection);
@@ -126,9 +110,7 @@ app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use(generalLimiter);
 
-app.get('/', (_req: Request, res: Response) => {
-  res.json({ name: 'AmarktAI Marketing API', version: '1.0.0', status: 'running', timestamp: new Date().toISOString() });
-});
+app.get('/', (_req: Request, res: Response) => res.json({ name: 'AmarktAI Marketing API', version: '1.0.0', status: 'running', timestamp: new Date().toISOString() }));
 app.get('/health', (_req: Request, res: Response) => res.json({ status: 'ok', timestamp: new Date().toISOString() }));
 
 const tenant = [requireAuth, requireOrganizationMembership] as const;
@@ -157,9 +139,10 @@ app.use('/api/v1/crm', ...tenant, crmAiActionRoutes);
 app.use('/api/v1/crm', ...tenant, crmRoutes);
 app.use('/api/v1/integrations', ...tenant, integrationRoutes);
 app.use('/api/v1/billing', billingRoutes);
-app.use('/api/v1/agency', agencyRoutes);
+app.use('/api/v1/agency', ...tenant, agencyRoutes);
+app.use('/api/v1/white-label', whiteLabelPublicRoutes);
 app.use('/api/v1/white-label', whiteLabelRoutes);
-app.use('/api/v1/template-library', templateLibraryRoutes);
+app.use('/api/v1/template-library', ...tenant, templateLibraryRoutes);
 app.use('/api/v1/client-reports', clientReportsRoutes);
 app.use('/api/v1/admin', adminRoutes);
 app.use('/api/v1/marketplace', marketplaceCommerceRoutes);
@@ -172,22 +155,13 @@ app.use('/api/v1/longform-video', longformSceneProductionRoutes);
 app.use('/api/v1/longform-video', longformVideoRoutes);
 app.use('/api/v1/longform-video', longformProductionRoutes);
 
-app.use((_req: Request, res: Response) => {
-  res.status(404).json({ success: false, error: { message: 'Route not found', code: 'NOT_FOUND' } });
-});
+app.use((_req: Request, res: Response) => res.status(404).json({ success: false, error: { message: 'Route not found', code: 'NOT_FOUND' } }));
 app.use(errorHandler);
 
 async function startServer() {
   try {
-    if (!await testConnection()) {
-      logger.error('Failed to connect to database');
-      process.exit(1);
-    }
-    if (!await testRedisConnection()) {
-      logger.error('Redis connection failed; queue-backed features cannot start');
-      process.exit(1);
-    }
-
+    if (!await testConnection()) { logger.error('Failed to connect to database'); process.exit(1); }
+    if (!await testRedisConnection()) { logger.error('Redis connection failed; queue-backed features cannot start'); process.exit(1); }
     await providerRouter.loadProviders();
 
     const server = app.listen(env.PORT, () => {
@@ -221,14 +195,8 @@ async function startServer() {
 
     process.on('SIGTERM', () => void gracefulShutdown('SIGTERM'));
     process.on('SIGINT', () => void gracefulShutdown('SIGINT'));
-    process.on('unhandledRejection', (reason, promise) => {
-      logger.error('Unhandled Rejection at:', promise, 'reason:', reason);
-      void gracefulShutdown('unhandledRejection', 1);
-    });
-    process.on('uncaughtException', (error) => {
-      logger.error('Uncaught Exception:', error);
-      void gracefulShutdown('uncaughtException', 1);
-    });
+    process.on('unhandledRejection', (reason, promise) => { logger.error('Unhandled Rejection at:', promise, 'reason:', reason); void gracefulShutdown('unhandledRejection', 1); });
+    process.on('uncaughtException', (error) => { logger.error('Uncaught Exception:', error); void gracefulShutdown('uncaughtException', 1); });
   } catch (error) {
     logger.error('Failed to start server', error);
     process.exit(1);
