@@ -3,9 +3,11 @@ import { requireAuth, AuthRequest } from '../middleware/auth';
 import { ApiResponse } from '../types';
 import * as genxRegistry from '../services/genx-model-registry.service';
 import { query } from '../config/database';
+import runtimeTestRoutes from './genx-runtime-tests';
 
 const router = Router();
 router.use(requireAuth);
+router.use(runtimeTestRoutes);
 
 async function verifyAdmin(userId: string): Promise<boolean> {
   const result = await query('SELECT role FROM users WHERE id = $1', [userId]);
