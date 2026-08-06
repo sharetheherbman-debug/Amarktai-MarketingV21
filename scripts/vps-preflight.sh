@@ -17,7 +17,7 @@ load_production_env
 required_variables=(
   DOMAIN TLS_EMAIL APP_URL API_URL CORS_ORIGIN
   POSTGRES_PASSWORD REDIS_PASSWORD JWT_SECRET JWT_REFRESH_SECRET
-  ENCRYPTION_KEY GENX_API_KEY GENX_WEBHOOK_SECRET GENX_WEBHOOK_URL
+  ENCRYPTION_KEY GENX_API_KEY GENX_BASE_URL DEFAULT_TEXT_MODEL GENX_WEBHOOK_SECRET GENX_WEBHOOK_URL
 )
 
 for key in "${required_variables[@]}"; do
@@ -39,6 +39,10 @@ done
 [[ "${API_URL}" == "https://${DOMAIN}/api" ]] || fail "API_URL must be https://${DOMAIN}/api"
 [[ ",${CORS_ORIGIN}," == *",https://${DOMAIN},"* ]] || fail "CORS_ORIGIN must include https://${DOMAIN}"
 [[ "${GENX_WEBHOOK_URL}" == "https://${DOMAIN}/api/v1/webhooks/genx" ]] || fail "GENX_WEBHOOK_URL must use the public signed webhook route"
+
+if [[ "${GENX_API_KEY}" != gnxk_* ]]; then
+  log "WARNING: GENX_API_KEY does not use the current gnxk_ prefix; the live API checks below will determine whether it is valid."
+fi
 
 if [[ -n "${STRIPE_SECRET_KEY:-}" || -n "${STRIPE_WEBHOOK_SECRET:-}" ]]; then
   [[ "${STRIPE_SECRET_KEY:-}" == sk_* ]] || fail "STRIPE_SECRET_KEY must be a Stripe secret key when paid Marketplace checkout is enabled"
@@ -63,6 +67,28 @@ fi
 
 compose config --quiet
 
+genx_base="${GENX_BASE_URL%/}"
+genx_curl=(curl --fail --silent --show-error --location --retry 2 --retry-delay 2 --connect-timeout 10 --max-time 45 -H "Authorization: Bearer ${GENX_API_KEY}")
+
+log "Verifying GenX text model access"
+text_catalogue="$(${genx_curl[@]} "${genx_base}/v1/models")" || fail "GenX text catalogue request failed; verify GENX_API_KEY and GENX_BASE_URL"
+[[ -n "${text_catalogue}" ]] || fail "GenX text catalogue returned an empty response"
+grep -Fq "${DEFAULT_TEXT_MODEL}" <<<"${text_catalogue}" || fail "DEFAULT_TEXT_MODEL ${DEFAULT_TEXT_MODEL} is not present in the GenX text catalogue"
+
+log "Verifying GenX image catalogue access"
+image_catalogue="$(${genx_curl[@]} "${genx_base}/api/v1/models?category=image")" || fail "GenX image catalogue request failed"
+grep -Eq '"(id|model_id|models|data)"' <<<"${image_catalogue}" || fail "GenX image catalogue returned no recognizable model data"
+
+log "Verifying GenX video catalogue access"
+video_catalogue="$(${genx_curl[@]} "${genx_base}/api/v1/models?category=video")" || fail "GenX video catalogue request failed"
+grep -Eq '"(id|model_id|models|data)"' <<<"${video_catalogue}" || fail "GenX video catalogue returned no recognizable model data"
+
+if ! ${genx_curl[@]} "${genx_base}/api/v1/account/credits" >/dev/null; then
+  log "WARNING: GenX credit-balance endpoint was unavailable. Catalogue access passed, but confirm sufficient account credit before acceptance generation."
+else
+  log "GenX account access passed"
+fi
+
 if command -v getent >/dev/null 2>&1; then
   if ! getent ahostsv4 "${DOMAIN}" >/dev/null 2>&1; then
     log "WARNING: DNS for ${DOMAIN} does not currently resolve from this VPS. TLS issuance will wait until DNS is correct."
@@ -73,5 +99,6 @@ mkdir -p "${BACKUP_DIR:-/opt/amarktai/backups}"
 
 log "Preflight passed"
 log "Domain: ${DOMAIN}"
+log "GenX text model: ${DEFAULT_TEXT_MODEL}"
 log "CPU cores: ${cpu_count}; RAM: ~${memory_gb} GB; free disk: ${disk_gb} GB"
-log "Compose configuration is valid"
+log "Compose configuration and GenX catalogue access are valid"
