@@ -22,6 +22,10 @@ class ApiClient {
     return typeof window === 'undefined' ? null : localStorage.getItem('org_id');
   }
 
+  private isFormData(value: unknown): value is FormData {
+    return typeof FormData !== 'undefined' && value instanceof FormData;
+  }
+
   private buildURL(endpoint: string, params?: Record<string, string>): string {
     const url = new URL(`${this.baseURL}${endpoint}`);
     const merged = { ...(params || {}) };
@@ -35,9 +39,19 @@ class ApiClient {
 
   private prepareBody(body: unknown): unknown {
     const organizationId = this.getOrganizationId();
-    if (!organizationId || !body || typeof body !== 'object' || Array.isArray(body) || body instanceof FormData) return body;
+    if (!organizationId || !body || typeof body !== 'object' || Array.isArray(body)) return body;
+    if (this.isFormData(body)) {
+      if (!body.has('organization_id')) body.append('organization_id', organizationId);
+      return body;
+    }
     const record = body as Record<string, unknown>;
     return record.organization_id ? record : { ...record, organization_id: organizationId };
+  }
+
+  private serializeBody(body: unknown): BodyInit | undefined {
+    if (body === undefined || body === null) return undefined;
+    if (this.isFormData(body)) return body;
+    return JSON.stringify(body);
   }
 
   private async handleResponse<T>(response: Response): Promise<T> {
@@ -60,8 +74,9 @@ class ApiClient {
     return response.json();
   }
 
-  private getHeaders(): HeadersInit {
-    const headers: HeadersInit = { 'Content-Type': 'application/json' };
+  private getHeaders(body?: unknown): HeadersInit {
+    const headers: HeadersInit = {};
+    if (!this.isFormData(body)) headers['Content-Type'] = 'application/json';
     const token = this.getToken();
     if (token) headers.Authorization = `Bearer ${token}`;
     const organizationId = this.getOrganizationId();
@@ -76,13 +91,13 @@ class ApiClient {
 
   async post<T>(endpoint: string, config?: RequestConfig): Promise<T> {
     const body = this.prepareBody(config?.body);
-    const response = await fetch(this.buildURL(endpoint, config?.params), { method: 'POST', headers: { ...this.getHeaders(), ...config?.headers }, body: body ? JSON.stringify(body) : undefined });
+    const response = await fetch(this.buildURL(endpoint, config?.params), { method: 'POST', headers: { ...this.getHeaders(body), ...config?.headers }, body: this.serializeBody(body) });
     return this.handleResponse<T>(response);
   }
 
   async put<T>(endpoint: string, config?: RequestConfig): Promise<T> {
     const body = this.prepareBody(config?.body);
-    const response = await fetch(this.buildURL(endpoint, config?.params), { method: 'PUT', headers: { ...this.getHeaders(), ...config?.headers }, body: body ? JSON.stringify(body) : undefined });
+    const response = await fetch(this.buildURL(endpoint, config?.params), { method: 'PUT', headers: { ...this.getHeaders(body), ...config?.headers }, body: this.serializeBody(body) });
     return this.handleResponse<T>(response);
   }
 
@@ -93,7 +108,7 @@ class ApiClient {
 
   async patch<T>(endpoint: string, config?: RequestConfig): Promise<T> {
     const body = this.prepareBody(config?.body);
-    const response = await fetch(this.buildURL(endpoint, config?.params), { method: 'PATCH', headers: { ...this.getHeaders(), ...config?.headers }, body: body ? JSON.stringify(body) : undefined });
+    const response = await fetch(this.buildURL(endpoint, config?.params), { method: 'PATCH', headers: { ...this.getHeaders(body), ...config?.headers }, body: this.serializeBody(body) });
     return this.handleResponse<T>(response);
   }
 }
