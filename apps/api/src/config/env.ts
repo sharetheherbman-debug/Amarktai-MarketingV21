@@ -89,6 +89,9 @@ export const env = {
   DEEPINFRA_API_KEY: getEnv('DEEPINFRA_API_KEY'),
   DEEPINFRA_BASE_URL: getEnv('DEEPINFRA_BASE_URL', 'https://api.deepinfra.com/v1'),
 
+  STRIPE_SECRET_KEY: getEnv('STRIPE_SECRET_KEY'),
+  STRIPE_WEBHOOK_SECRET: getEnv('STRIPE_WEBHOOK_SECRET'),
+
   SMTP_HOST: getEnv('SMTP_HOST', 'smtp.gmail.com'),
   SMTP_PORT: getEnvNumber('SMTP_PORT', 587),
   SMTP_USER: getEnv('SMTP_USER'),
