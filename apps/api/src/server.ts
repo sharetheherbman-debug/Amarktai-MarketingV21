@@ -1,4 +1,4 @@
-import express, { Request, Response } from 'express';
+import express, { NextFunction, Request, Response } from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import compression from 'compression';
@@ -44,6 +44,7 @@ import whiteLabelRoutes from './routes/white-label';
 import templateLibraryRoutes from './routes/template-library';
 import clientReportsRoutes from './routes/client-reports';
 import adminRoutes from './routes/admin';
+import marketplaceCommerceRoutes from './routes/marketplace-commerce';
 import marketplaceRoutes from './routes/marketplace';
 import developerRoutes from './routes/developer';
 import studioOperationalRoutes from './routes/studio-operational-models';
@@ -53,6 +54,7 @@ import longformVideoRoutes from './routes/longform-video';
 import longformProductionRoutes from './routes/longform-production';
 import longformSceneProductionRoutes from './routes/longform-scene-production';
 import scheduler from './services/scheduler.service';
+import { processStripeEvent, verifyStripeEvent } from './services/marketplace-payment.service';
 
 const app = express();
 app.set('trust proxy', env.TRUST_PROXY_HOPS);
@@ -111,6 +113,28 @@ app.use(compression());
 app.use(morgan('combined', {
   stream: { write: (message: string) => logger.http(message.trim()) },
 }));
+
+// Stripe signature verification requires the exact raw UTF-8 request body.
+// This webhook is mounted before cookie, CSRF and JSON parsing middleware.
+app.post(
+  '/api/v1/marketplace/stripe/webhook',
+  express.raw({ type: 'application/json', limit: '1mb' }),
+  async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const signature = req.header('stripe-signature');
+      if (!signature || !Buffer.isBuffer(req.body)) {
+        res.status(400).json({ success: false, error: { message: 'Stripe signature and raw body required', code: 'STRIPE_SIGNATURE_REQUIRED' } });
+        return;
+      }
+      const event = verifyStripeEvent(req.body, signature);
+      await processStripeEvent(event);
+      res.json({ received: true });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
 app.use(cookieParser());
 app.use(csrfProtection);
 app.use(express.json({ limit: '10mb' }));
@@ -159,6 +183,7 @@ app.use('/api/v1/white-label', whiteLabelRoutes);
 app.use('/api/v1/template-library', templateLibraryRoutes);
 app.use('/api/v1/client-reports', clientReportsRoutes);
 app.use('/api/v1/admin', adminRoutes);
+app.use('/api/v1/marketplace', marketplaceCommerceRoutes);
 app.use('/api/v1/marketplace', marketplaceRoutes);
 app.use('/api/v1/developer', developerRoutes);
 app.use('/api/v1/studio', studioOperationalRoutes);
