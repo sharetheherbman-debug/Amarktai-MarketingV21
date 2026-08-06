@@ -9,6 +9,7 @@ require_command docker
 require_command openssl
 require_command tar
 require_command sha256sum
+require_command curl
 load_production_env
 
 backup_file="${1:-}"
@@ -22,6 +23,7 @@ if [[ -f "${backup_file}.sha256" ]]; then
 fi
 
 work_dir="$(mktemp -d)"
+chmod 755 "${work_dir}"
 plain_bundle="${work_dir}/backup.tar.gz"
 trap 'rm -rf "${work_dir}"' EXIT
 
@@ -46,12 +48,15 @@ compose stop caddy nginx web api generation-worker render-worker || true
 compose up -d postgres redis
 
 log "Waiting for PostgreSQL"
+postgres_ready=0
 for _attempt in $(seq 1 30); do
   if compose exec -T postgres pg_isready -U "${POSTGRES_USER:-amarktai}" -d postgres >/dev/null 2>&1; then
+    postgres_ready=1
     break
   fi
   sleep 2
 done
+[[ "${postgres_ready}" == "1" ]] || fail "PostgreSQL did not become ready for restore"
 
 log "Replacing production database"
 compose exec -T postgres dropdb \
@@ -61,16 +66,17 @@ compose exec -T postgres createdb \
   --username "${POSTGRES_USER:-amarktai}" \
   --owner "${POSTGRES_USER:-amarktai}" \
   "${POSTGRES_DB:-amarktai_marketing}"
-cat "${work_dir}/database.dump" | compose exec -T postgres pg_restore \
+compose exec -T postgres pg_restore \
   --username "${POSTGRES_USER:-amarktai}" \
   --dbname "${POSTGRES_DB:-amarktai_marketing}" \
-  --no-owner --no-acl
+  --no-owner --no-acl < "${work_dir}/database.dump"
 
 log "Replacing Studio uploads"
 compose run --rm --no-deps \
+  --user 0:0 \
   --entrypoint sh \
-  -v "${work_dir}:/backup" \
-  api -c 'find /app/uploads -mindepth 1 -maxdepth 1 -exec rm -rf {} + && tar -C /app/uploads -xzf /backup/uploads.tar.gz'
+  -v "${work_dir}:/backup:ro" \
+  api -c 'find /app/uploads -mindepth 1 -maxdepth 1 -exec rm -rf {} + && tar -C /app/uploads -xzf /backup/uploads.tar.gz && chown -R 1001:1001 /app/uploads'
 
 log "Applying current migrations and restarting services"
 compose run --rm migrate
