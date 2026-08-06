@@ -15,7 +15,7 @@ import { requireAuth } from './middleware/auth';
 import { requireOrganizationMembership } from './middleware/organization-access';
 import { providerRouter } from './providers/provider-router';
 
-import healthRoutes, { closeHealthQueues } from './routes/health';
+import healthRoutes from './routes/health';
 import authRoutes from './routes/auth';
 import organizationRoutes from './routes/organizations';
 import userRoutes from './routes/users';
@@ -213,7 +213,6 @@ async function startServer() {
         logger.info('HTTP server closed');
         scheduler.stopScheduler();
         try {
-          await closeHealthQueues();
           await closePool();
           await closeRedis();
           clearTimeout(forceExit);
