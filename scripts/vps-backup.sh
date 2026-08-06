@@ -23,6 +23,7 @@ chmod 700 "${backup_dir}"
 
 timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
 work_dir="$(mktemp -d)"
+chmod 755 "${work_dir}"
 plain_bundle="${backup_dir}/amarktai-${timestamp}.tar.gz"
 encrypted_bundle="${plain_bundle}.enc"
 trap 'rm -rf "${work_dir}" "${plain_bundle}"' EXIT
@@ -37,9 +38,10 @@ compose exec -T postgres pg_dump \
 
 log "Creating Studio upload backup"
 compose run --rm --no-deps \
+  --user 0:0 \
   --entrypoint sh \
   -v "${work_dir}:/backup" \
-  api -c 'tar -C /app/uploads -czf /backup/uploads.tar.gz .'
+  api -c 'tar -C /app/uploads -czf /backup/uploads.tar.gz . && chmod 0644 /backup/uploads.tar.gz'
 
 {
   printf 'created_at=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
