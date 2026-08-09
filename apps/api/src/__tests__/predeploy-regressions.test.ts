@@ -48,7 +48,7 @@ describe('pre-deployment runtime regressions', () => {
       'campaigns', 'content', 'agents', 'prompts', 'brand-dna', 'knowledge',
       'competitors', 'trends', 'content-studio', 'templates', 'calendar', 'seo',
       'campaign-ai', 'amai', 'crm', 'integrations', 'generation-credits',
-      'agency', 'template-library',
+      'relaunch-control', 'agency', 'template-library',
     ]) {
       expect(server).toContain(`app.use('/api/v1/${route}', ...tenant`);
     }
@@ -140,6 +140,25 @@ describe('pre-deployment runtime regressions', () => {
     expect(page).toContain('acceptTrustedSession');
   });
 
+  test('Relaunch Control Centre starts stopped and enforces GBP and credit boundaries', () => {
+    const migration = read('apps/api/src/db/migrations/027_relaunch_control_centre.sql');
+    const service = read('apps/api/src/services/relaunch-control.service.ts');
+    const route = read('apps/api/src/routes/relaunch-control.ts');
+    const page = read('apps/web/app/(dashboard)/relaunch-control/page.tsx');
+
+    expect(migration).toContain("operating_mode VARCHAR(20) NOT NULL DEFAULT 'manual'");
+    expect(migration).toContain('emergency_stop BOOLEAN NOT NULL DEFAULT TRUE');
+    expect(migration).toContain('daily_ad_budget_pence');
+    expect(migration).toContain('prevent_relaunch_control_audit_mutation');
+    expect(service).toContain('Only organization owners and admins');
+    expect(service).toContain('Emergency stop is active');
+    expect(service).toContain('Per-action Generation Credit limit exceeded');
+    expect(route).toContain("router.post('/emergency-stop'");
+    expect(route).toContain("router.post('/actions/:id/decision'");
+    expect(page).toContain('Relaunch Control Centre');
+    expect(page).toContain('Daily advertising budget');
+  });
+
   test('external content ingestion uses the public-network fetch guard', () => {
     for (const service of [
       'apps/api/src/services/knowledge-ingestion.service.ts',
@@ -164,7 +183,7 @@ describe('pre-deployment runtime regressions', () => {
     expect(service).not.toContain("verification_status = 'verified' WHERE id = $1");
   });
 
-  test('clean-install repair, GBP wallet, pricing and connector migrations are present', () => {
+  test('clean-install repair, GBP wallet, pricing, connector and control migrations are present', () => {
     for (const migration of [
       '018_external_integration_schema_alignment.sql',
       '020_provider_runtime_integrity.sql',
@@ -174,6 +193,7 @@ describe('pre-deployment runtime regressions', () => {
       '024_genx_retail_pricing_status.sql',
       '025_gbp_billing_policy.sql',
       '026_application_connectors.sql',
+      '027_relaunch_control_centre.sql',
     ]) {
       expect(fs.existsSync(path.resolve(repositoryRoot, 'apps/api/src/db/migrations', migration))).toBe(true);
     }
