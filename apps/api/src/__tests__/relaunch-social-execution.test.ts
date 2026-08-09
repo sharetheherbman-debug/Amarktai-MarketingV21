@@ -25,6 +25,7 @@ describe('Relaunch Control execution boundary', () => {
     expect(controlledRoutes).toContain('publishPostThroughControlCentre');
     expect(controlledRoutes).toContain('res.status(202).json');
     expect(controlledRoutes).toContain("status: 'pending_approval'");
+    expect(controlledRoutes).toContain("status: 'blocked_by_policy'");
     expect(server.indexOf("app.use('/api/v1/amai', ...tenant, controlledSocialRoutes)")).toBeLessThan(
       server.indexOf("app.use('/api/v1/amai', ...tenant, amaiRoutes)")
     );
@@ -44,6 +45,14 @@ describe('Relaunch Control execution boundary', () => {
     expect(transactionIndex).toBeGreaterThan(-1);
     expect(transactionCloseIndex).toBeGreaterThan(transactionIndex);
     expect(throwIndex).toBeGreaterThan(transactionCloseIndex);
+  });
+
+  test('temporary operating-window and daily-budget holds are re-evaluated later', () => {
+    const gate = read('apps/api/src/services/relaunch-execution-gate.service.ts');
+
+    expect(gate).toContain("return temporaryBlock(\n        'The action is outside the configured operating window'");
+    expect(gate).toContain("return temporaryBlock('Daily Generation Credit limit exceeded'");
+    expect(gate).toContain("return temporaryBlock('Daily advertising budget exceeded'");
   });
 
   test('a worker that loses the atomic post claim cannot fail another worker decision', () => {
