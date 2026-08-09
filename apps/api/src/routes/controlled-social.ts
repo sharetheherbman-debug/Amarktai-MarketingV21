@@ -7,9 +7,25 @@ import { publishPostThroughControlCentre } from '../services/controlled-social-p
 
 const router = Router();
 
-function isApprovalHold(error: unknown): boolean {
-  return error instanceof AppError
-    && ['RELAUNCH_APPROVAL_REQUIRED', 'RELAUNCH_ACTION_BLOCKED'].includes(error.code);
+type ControlHold = { status: 'pending_approval' | 'blocked_by_policy'; approvalRequired: boolean; message: string };
+
+function controlHold(error: unknown): ControlHold | null {
+  if (!(error instanceof AppError)) return null;
+  if (error.code === 'RELAUNCH_APPROVAL_REQUIRED') {
+    return {
+      status: 'pending_approval',
+      approvalRequired: true,
+      message: error.message,
+    };
+  }
+  if (error.code === 'RELAUNCH_ACTION_BLOCKED') {
+    return {
+      status: 'blocked_by_policy',
+      approvalRequired: false,
+      message: error.message,
+    };
+  }
+  return null;
 }
 
 router.post('/social/posts', async (
@@ -57,14 +73,15 @@ router.post('/social/posts', async (
       );
       res.status(201).json({ success: true, data: published });
     } catch (error) {
-      if (!isApprovalHold(error)) throw error;
+      const hold = controlHold(error);
+      if (!hold) throw error;
       res.status(202).json({
         success: true,
         data: {
           ...post,
-          status: 'pending_approval',
-          approval_required: true,
-          approval_message: error instanceof Error ? error.message : 'Relaunch Control approval required',
+          status: hold.status,
+          approval_required: hold.approvalRequired,
+          control_message: hold.message,
         },
       });
     }
@@ -86,14 +103,15 @@ router.post('/social/posts/:id/publish', async (
     );
     res.json({ success: true, data: post });
   } catch (error) {
-    if (isApprovalHold(error)) {
+    const hold = controlHold(error);
+    if (hold) {
       res.status(202).json({
         success: true,
         data: {
           id: req.params.id,
-          status: 'pending_approval',
-          approval_required: true,
-          approval_message: error instanceof Error ? error.message : 'Relaunch Control approval required',
+          status: hold.status,
+          approval_required: hold.approvalRequired,
+          control_message: hold.message,
         },
       });
       return;
