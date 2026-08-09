@@ -118,6 +118,28 @@ describe('pre-deployment runtime regressions', () => {
     expect(pricing).toContain('GENX_PRICE_STALE');
   });
 
+  test('application connector SSO is signed, replay protected and one-use', () => {
+    const migration = read('apps/api/src/db/migrations/026_application_connectors.sql');
+    const service = read('apps/api/src/services/application-connector.service.ts');
+    const route = read('apps/api/src/routes/application-connectors.ts');
+    const server = read('apps/api/src/server.ts');
+    const page = read('apps/web/app/connector/sso/page.tsx');
+
+    expect(migration).toContain('application_connector_nonces');
+    expect(migration).toContain('application_sso_codes');
+    expect(migration).toContain('application_conversion_events');
+    expect(service).toContain("createHmac('sha256'");
+    expect(service).toContain('timingSafeEqual');
+    expect(service).toContain('APPLICATION_REPLAY_DETECTED');
+    expect(service).toContain('used_at=NOW()');
+    expect(service).toContain("currency must be GBP");
+    expect(route).toContain("router.post('/sso/issue'");
+    expect(route).toContain("router.post('/sso/redeem'");
+    expect(route).toContain("router.post('/events/conversion'");
+    expect(server).toContain("app.use('/api/v1/application-connectors'");
+    expect(page).toContain('acceptTrustedSession');
+  });
+
   test('external content ingestion uses the public-network fetch guard', () => {
     for (const service of [
       'apps/api/src/services/knowledge-ingestion.service.ts',
@@ -142,7 +164,7 @@ describe('pre-deployment runtime regressions', () => {
     expect(service).not.toContain("verification_status = 'verified' WHERE id = $1");
   });
 
-  test('clean-install repair, GBP wallet and pricing migrations are present', () => {
+  test('clean-install repair, GBP wallet, pricing and connector migrations are present', () => {
     for (const migration of [
       '018_external_integration_schema_alignment.sql',
       '020_provider_runtime_integrity.sql',
@@ -151,6 +173,7 @@ describe('pre-deployment runtime regressions', () => {
       '023_genx_gbp_credit_wallet.sql',
       '024_genx_retail_pricing_status.sql',
       '025_gbp_billing_policy.sql',
+      '026_application_connectors.sql',
     ]) {
       expect(fs.existsSync(path.resolve(repositoryRoot, 'apps/api/src/db/migrations', migration))).toBe(true);
     }
