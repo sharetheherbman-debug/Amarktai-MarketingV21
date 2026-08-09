@@ -6,8 +6,10 @@ export interface Organization {
   name: string;
   slug: string;
   logo?: string;
-  plan: 'free' | 'pro' | 'enterprise';
-  createdAt: string;
+  plan?: 'free' | 'pro' | 'enterprise';
+  createdAt?: string;
+  created_at?: string;
+  member_role?: string;
 }
 
 export interface User {
@@ -16,8 +18,10 @@ export interface User {
   name: string;
   avatar?: string;
   role: 'user' | 'admin' | 'superadmin';
-  createdAt: string;
-  updatedAt: string;
+  createdAt?: string;
+  created_at?: string;
+  updatedAt?: string;
+  updated_at?: string;
 }
 
 interface LoginCredentials {
@@ -31,10 +35,18 @@ interface RegisterData {
   name: string;
 }
 
-interface AuthResponse {
+interface ApiEnvelope<T> {
+  success: boolean;
+  data?: T;
+  error?: { message?: string; code?: string };
+}
+
+interface SessionData {
   user: User;
-  token: string;
-  refreshToken: string;
+  accessToken: string;
+  organization?: Organization;
+  organizations?: Organization[];
+  target_path?: string;
 }
 
 interface AuthState {
@@ -47,15 +59,49 @@ interface AuthState {
   currentOrganization: Organization | null;
   login: (credentials: LoginCredentials) => Promise<void>;
   register: (data: RegisterData) => Promise<void>;
-  logout: () => void;
+  logout: () => Promise<void>;
   refreshToken: () => Promise<void>;
   checkAuth: () => Promise<void>;
+  acceptTrustedSession: (session: SessionData) => void;
   setUser: (user: User) => void;
   setCurrentOrganization: (org: Organization) => void;
   clearError: () => void;
 }
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api';
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api/v1';
+
+async function parseEnvelope<T>(response: Response): Promise<T> {
+  const payload = await response.json().catch(() => ({})) as ApiEnvelope<T>;
+  if (!response.ok || !payload.success || payload.data === undefined) {
+    throw new Error(payload.error?.message || response.statusText || 'Request failed');
+  }
+  return payload.data;
+}
+
+async function fetchOrganizations(accessToken: string): Promise<Organization[]> {
+  const response = await fetch(`${API_URL}/organizations`, {
+    credentials: 'include',
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  return parseEnvelope<Organization[]>(response);
+}
+
+function persistSession(set: (state: Partial<AuthState>) => void, session: SessionData): void {
+  const organizations = session.organizations || (session.organization ? [session.organization] : []);
+  const currentOrganization = session.organization || organizations[0] || null;
+  localStorage.setItem('auth_token', session.accessToken);
+  if (currentOrganization) localStorage.setItem('org_id', currentOrganization.id);
+  else localStorage.removeItem('org_id');
+  set({
+    user: session.user,
+    token: session.accessToken,
+    isAuthenticated: true,
+    isLoading: false,
+    error: null,
+    organizations,
+    currentOrganization,
+  });
+}
 
 export const useAuthStore = create<AuthState>()(
   persist(
@@ -73,32 +119,15 @@ export const useAuthStore = create<AuthState>()(
         try {
           const response = await fetch(`${API_URL}/auth/login`, {
             method: 'POST',
+            credentials: 'include',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(credentials),
           });
-
-          if (!response.ok) {
-            const error = await response.json();
-            throw new Error(error.message || 'Login failed');
-          }
-
-          const data: AuthResponse & { organizations?: Organization[] } = await response.json();
-          localStorage.setItem('auth_token', data.token);
-          localStorage.setItem('refresh_token', data.refreshToken);
-          const orgs = data.organizations ?? [];
-          set({
-            user: data.user,
-            token: data.token,
-            isAuthenticated: true,
-            isLoading: false,
-            organizations: orgs,
-            currentOrganization: orgs[0] ?? null,
-          });
+          const data = await parseEnvelope<{ user: User; accessToken: string }>(response);
+          const organizations = await fetchOrganizations(data.accessToken);
+          persistSession(set, { ...data, organizations });
         } catch (error) {
-          set({
-            error: error instanceof Error ? error.message : 'Login failed',
-            isLoading: false,
-          });
+          set({ error: error instanceof Error ? error.message : 'Login failed', isLoading: false });
           throw error;
         }
       },
@@ -108,108 +137,92 @@ export const useAuthStore = create<AuthState>()(
         try {
           const response = await fetch(`${API_URL}/auth/register`, {
             method: 'POST',
+            credentials: 'include',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(data),
           });
-
-          if (!response.ok) {
-            const error = await response.json();
-            throw new Error(error.message || 'Registration failed');
-          }
-
-          const result: AuthResponse = await response.json();
-          localStorage.setItem('auth_token', result.token);
-          localStorage.setItem('refresh_token', result.refreshToken);
-          set({
-            user: result.user,
-            token: result.token,
-            isAuthenticated: true,
-            isLoading: false,
-          });
+          const session = await parseEnvelope<{ user: User; accessToken: string }>(response);
+          persistSession(set, { ...session, organizations: [] });
         } catch (error) {
-          set({
-            error: error instanceof Error ? error.message : 'Registration failed',
-            isLoading: false,
-          });
+          set({ error: error instanceof Error ? error.message : 'Registration failed', isLoading: false });
           throw error;
         }
       },
 
-      logout: () => {
+      logout: async () => {
+        try {
+          await fetch(`${API_URL}/auth/logout`, { method: 'POST', credentials: 'include' });
+        } catch {
+          // Local logout must still complete when the API is unavailable.
+        }
         localStorage.removeItem('auth_token');
         localStorage.removeItem('refresh_token');
+        localStorage.removeItem('org_id');
         set({
           user: null,
           token: null,
           isAuthenticated: false,
+          isLoading: false,
           error: null,
+          organizations: [],
+          currentOrganization: null,
         });
       },
 
       refreshToken: async () => {
-        const refreshToken = localStorage.getItem('refresh_token');
-        if (!refreshToken) {
-          get().logout();
-          return;
-        }
-
         try {
           const response = await fetch(`${API_URL}/auth/refresh`, {
             method: 'POST',
+            credentials: 'include',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ refreshToken }),
+            body: JSON.stringify({}),
           });
-
-          if (!response.ok) {
-            throw new Error('Token refresh failed');
-          }
-
-          const data: AuthResponse = await response.json();
-          localStorage.setItem('auth_token', data.token);
-          localStorage.setItem('refresh_token', data.refreshToken);
-          set({
-            user: data.user,
-            token: data.token,
-            isAuthenticated: true,
-          });
+          const data = await parseEnvelope<{ accessToken: string }>(response);
+          localStorage.setItem('auth_token', data.accessToken);
+          set({ token: data.accessToken, isAuthenticated: true });
         } catch {
-          get().logout();
+          await get().logout();
         }
       },
 
       checkAuth: async () => {
-        const token = localStorage.getItem('auth_token');
+        let token = localStorage.getItem('auth_token');
         if (!token) {
-          set({ isAuthenticated: false, isLoading: false });
-          return;
+          set({ isLoading: true });
+          await get().refreshToken();
+          token = localStorage.getItem('auth_token');
+          if (!token) {
+            set({ isAuthenticated: false, isLoading: false });
+            return;
+          }
         }
 
         set({ isLoading: true });
         try {
           const response = await fetch(`${API_URL}/auth/me`, {
+            credentials: 'include',
             headers: { Authorization: `Bearer ${token}` },
           });
-
-          if (!response.ok) {
-            throw new Error('Auth check failed');
-          }
-
-          const user: User = await response.json();
-          set({
-            user,
-            token,
-            isAuthenticated: true,
-            isLoading: false,
-          });
+          const user = await parseEnvelope<User>(response);
+          const organizations = await fetchOrganizations(token);
+          const selectedId = localStorage.getItem('org_id');
+          const currentOrganization = organizations.find((org) => org.id === selectedId) || organizations[0] || null;
+          if (currentOrganization) localStorage.setItem('org_id', currentOrganization.id);
+          set({ user, token, isAuthenticated: true, isLoading: false, organizations, currentOrganization });
         } catch {
           await get().refreshToken();
           set({ isLoading: false });
         }
       },
 
+      acceptTrustedSession: (session: SessionData) => persistSession(set, session),
+
       setUser: (user: User) => set({ user }),
 
-      setCurrentOrganization: (org: Organization) => set({ currentOrganization: org }),
+      setCurrentOrganization: (org: Organization) => {
+        localStorage.setItem('org_id', org.id);
+        set({ currentOrganization: org });
+      },
 
       clearError: () => set({ error: null }),
     }),
