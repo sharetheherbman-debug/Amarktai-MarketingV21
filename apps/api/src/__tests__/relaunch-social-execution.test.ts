@@ -5,18 +5,27 @@ const repositoryRoot = path.resolve(__dirname, '..', '..', '..', '..');
 const read = (relative: string) => fs.readFileSync(path.resolve(repositoryRoot, relative), 'utf8');
 
 describe('Relaunch Control execution boundary', () => {
-  test('scheduled social delivery cannot bypass the approval gate', () => {
+  test('manual and scheduled social delivery cannot bypass the approval gate', () => {
     const scheduler = read('apps/api/src/services/scheduler.service.ts');
     const controlled = read('apps/api/src/services/controlled-social-publishing.service.ts');
+    const controlledRoutes = read('apps/api/src/routes/controlled-social.ts');
+    const server = read('apps/api/src/server.ts');
     const gate = read('apps/api/src/services/relaunch-execution-gate.service.ts');
 
     expect(scheduler).toContain('publishDuePostsThroughControlCentre');
     expect(scheduler).not.toContain("from './social-publishing.service'");
     expect(controlled).toContain('requireExecutionApproval');
+    expect(controlled).toContain('publishPostThroughControlCentre');
     expect(controlled).toContain("idempotency_key: `social-publish:${postId}`");
     expect(controlled).toContain("status='publishing'");
-    expect(controlled).toContain("status='scheduled'");
-    expect(controlled.indexOf('requireExecutionApproval')).toBeLessThan(controlled.indexOf('publishPost(postId'));
+    expect(controlled).toContain("status IN ('draft','scheduled','failed')");
+    expect(controlled.indexOf('requireExecutionApproval')).toBeLessThan(controlled.indexOf('deliverApprovedSocialPost(postId'));
+    expect(controlledRoutes).toContain("router.post('/social/posts'");
+    expect(controlledRoutes).toContain("router.post('/social/posts/:id/publish'");
+    expect(controlledRoutes).toContain('publishPostThroughControlCentre');
+    expect(server.indexOf("app.use('/api/v1/amai', ...tenant, controlledSocialRoutes)")).toBeLessThan(
+      server.indexOf("app.use('/api/v1/amai', ...tenant, amaiRoutes)")
+    );
     expect(gate).toContain('Emergency stop is active');
     expect(gate).toContain('Daily Generation Credit limit exceeded');
     expect(gate).toContain('Daily advertising budget exceeded');
