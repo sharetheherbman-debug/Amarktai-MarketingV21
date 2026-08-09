@@ -49,7 +49,19 @@ function getEnvBoolean(key: string, defaultValue: boolean): boolean {
   return value === 'true' || value === '1';
 }
 
+function getBasisPoints(key: string, defaultValue: number, maximum = 9999): number {
+  const value = getEnvNumber(key, defaultValue);
+  if (value < 0 || value > maximum) {
+    throw new Error(`${key} must be between 0 and ${maximum} basis points`);
+  }
+  return value;
+}
+
 const appUrl = getEnv('APP_URL', 'http://localhost:3000');
+const billingCurrency = getEnv('BILLING_CURRENCY', 'GBP').toUpperCase();
+if (billingCurrency !== 'GBP') {
+  throw new Error('BILLING_CURRENCY must be GBP for the EquiProfile launch deployment');
+}
 
 export const env = {
   NODE_ENV: getEnv('NODE_ENV', 'development'),
@@ -78,12 +90,26 @@ export const env = {
     /^[a-fA-F0-9]{64}$/
   ),
 
+  // GenX is the sole remote AI provider. The key is server-side only.
   GENX_API_KEY: isProduction ? getRequiredProductionValue('GENX_API_KEY', 'change-me-genx-key') : getEnv('GENX_API_KEY'),
   GENX_BASE_URL: getEnv('GENX_BASE_URL', 'https://query.genx.sh'),
   GENX_WEBHOOK_SECRET: getEnv('GENX_WEBHOOK_SECRET'),
   GENX_WEBHOOK_URL: getEnv('GENX_WEBHOOK_URL'),
   DEFAULT_TEXT_MODEL: getEnv('DEFAULT_TEXT_MODEL', 'gpt-5.6-luna'),
+  GENX_AGENT_TIER_ENABLED: getEnvBoolean('GENX_AGENT_TIER_ENABLED', true),
+  GENX_TARGET_MARGIN_BPS: getBasisPoints('GENX_TARGET_MARGIN_BPS', 4000),
+  GENX_RESERVATION_BUFFER_BPS: getBasisPoints('GENX_RESERVATION_BUFFER_BPS', 1500, 10000),
+  GENX_PRICE_REFRESH_MINUTES: getEnvNumber('GENX_PRICE_REFRESH_MINUTES', 360),
+  GENX_PRICE_MAX_AGE_MINUTES: getEnvNumber('GENX_PRICE_MAX_AGE_MINUTES', 720),
+  GENERATION_RESERVATION_TTL_MINUTES: getEnvNumber('GENERATION_RESERVATION_TTL_MINUTES', 60),
 
+  // Fixed launch commercial model: 100 credits represent GBP 1.00 retail value.
+  BILLING_CURRENCY: billingCurrency as 'GBP',
+  GENERATION_CREDITS_PER_GBP: getEnvNumber('GENERATION_CREDITS_PER_GBP', 100),
+
+  // Legacy provider variables remain temporarily readable only to avoid breaking
+  // old migrations and diagnostics while their code paths are removed. The
+  // ProviderRouter never loads or routes to them in GenX-only mode.
   TOGETHER_API_KEY: getEnv('TOGETHER_API_KEY'),
   TOGETHER_BASE_URL: getEnv('TOGETHER_BASE_URL', 'https://api.together.xyz/v1'),
   TOGETHER_DEFAULT_TEXT_MODEL: getEnv('TOGETHER_DEFAULT_TEXT_MODEL', 'meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo'),
@@ -104,7 +130,7 @@ export const env = {
   SMTP_PORT: getEnvNumber('SMTP_PORT', 587),
   SMTP_USER: getEnv('SMTP_USER'),
   SMTP_PASS: getEnv('SMTP_PASS'),
-  SMTP_FROM: getEnv('SMTP_FROM', 'noreply@amarktai.co.za'),
+  SMTP_FROM: getEnv('SMTP_FROM', 'noreply@equiprofile.online'),
 
   RATE_LIMIT_WINDOW_MS: getEnvNumber('RATE_LIMIT_WINDOW_MS', 900000),
   RATE_LIMIT_MAX_REQUESTS: getEnvNumber('RATE_LIMIT_MAX_REQUESTS', 100),
