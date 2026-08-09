@@ -17,6 +17,7 @@ import { providerRouter } from './providers/provider-router';
 
 import healthRoutes from './routes/health';
 import authRoutes from './routes/auth';
+import applicationConnectorRoutes from './routes/application-connectors';
 import organizationRoutes from './routes/organizations';
 import userRoutes from './routes/users';
 import providerRoutes from './routes/providers';
@@ -58,6 +59,7 @@ import longformSceneProductionRoutes from './routes/longform-scene-production';
 import scheduler from './services/scheduler.service';
 import { verifyStripeWebhook } from './services/stripe-client.service';
 import { processStripeEvent } from './services/stripe-webhook.service';
+import { ensureConfiguredEquiProfileConnector } from './services/application-connector.service';
 
 const app = express();
 app.set('trust proxy', env.TRUST_PROXY_HOPS);
@@ -80,7 +82,12 @@ app.use(cors({
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'X-CSRF-Token', 'X-Organization-Id', 'X-Idempotency-Key', 'Idempotency-Key', 'Range'],
+  allowedHeaders: [
+    'Content-Type', 'Authorization', 'X-Requested-With', 'X-CSRF-Token',
+    'X-Organization-Id', 'X-Idempotency-Key', 'Idempotency-Key', 'Range',
+    'X-Application-Id', 'X-Application-Key', 'X-Application-Timestamp',
+    'X-Application-Nonce', 'X-Application-Signature',
+  ],
   exposedHeaders: ['Content-Range', 'Accept-Ranges', 'Content-Length'],
   maxAge: 86400,
 }));
@@ -122,6 +129,7 @@ const tenant = [requireAuth, requireOrganizationMembership] as const;
 
 app.use('/api/v1/health', healthRoutes);
 app.use('/api/v1/auth', authRoutes);
+app.use('/api/v1/application-connectors', applicationConnectorRoutes);
 app.use('/api/v1/organizations', organizationRoutes);
 app.use('/api/v1/users', userRoutes);
 app.use('/api/v1/providers', providerRoutes);
@@ -168,6 +176,7 @@ async function startServer() {
   try {
     if (!await testConnection()) { logger.error('Failed to connect to database'); process.exit(1); }
     if (!await testRedisConnection()) { logger.error('Redis connection failed; queue-backed features cannot start'); process.exit(1); }
+    await ensureConfiguredEquiProfileConnector();
     await providerRouter.loadProviders();
 
     const server = app.listen(env.PORT, () => {
