@@ -3,7 +3,6 @@
     grace_period 15s
     on_demand_tls {
         ask http://amarktai-api:4000/api/v1/white-label/domains/authorize
-        burst 5
     }
     servers {
         protocols h1 h2 h3
