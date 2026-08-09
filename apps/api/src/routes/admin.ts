@@ -1,13 +1,25 @@
+import { randomUUID } from 'crypto';
 import { Router, Response, NextFunction } from 'express';
+import { z } from 'zod';
 import { requireAuth, requireRole, AuthRequest } from '../middleware/auth';
 import { ApiResponse } from '../types';
 import * as platformOps from '../services/platform-ops.service';
 import * as featureFlags from '../services/feature-flags.service';
 import * as licensing from '../services/licensing.service';
+import * as generationCredits from '../services/generation-credit.service';
 
 const router = Router();
 
 router.use(requireAuth, requireRole('admin', 'superadmin'));
+
+const creditGrantSchema = z.object({
+  credits: z.number().int().positive().max(100_000_000),
+  mode: z.enum(['free', 'at_cost', 'internal_funding', 'promotion']),
+  wholesale_cost_basis_pence: z.number().int().nonnegative().optional(),
+  description: z.string().trim().max(500).optional(),
+  idempotency_key: z.string().trim().min(8).max(255).optional(),
+  metadata: z.record(z.unknown()).optional(),
+});
 
 router.get('/health', async (_req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
   try { res.json({ success: true, data: await platformOps.getSystemHealth() }); }
@@ -43,6 +55,40 @@ router.get('/tenants', async (req: AuthRequest, res: Response<ApiResponse>, next
 router.get('/tenants/:orgId', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
   try { res.json({ success: true, data: await platformOps.getTenantDetails(req.params.orgId) }); }
   catch (error) { next(error); }
+});
+
+/**
+ * Platform-owner GBP Generation Credit controls.
+ *
+ * These endpoints never expose or modify the GenX API key. They operate only on
+ * the organisation wallet and immutable ledger. The admin may fund an internal
+ * workspace, grant promotional/free credits, or record an at-cost allocation.
+ */
+router.get('/credits/:orgId', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
+  try {
+    res.json({ success: true, data: await generationCredits.getWallet(req.params.orgId) });
+  } catch (error) { next(error); }
+});
+
+router.post('/credits/:orgId/grant', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
+  try {
+    const input = creditGrantSchema.parse(req.body);
+    const wallet = await generationCredits.grantCredits({
+      organizationId: req.params.orgId,
+      credits: input.credits,
+      mode: input.mode,
+      adminUserId: req.user!.userId,
+      wholesaleCostBasisPence: input.wholesale_cost_basis_pence,
+      description: input.description,
+      idempotencyKey: input.idempotency_key || `admin-credit-${req.params.orgId}-${randomUUID()}`,
+      metadata: {
+        source: 'platform_admin',
+        currency: 'GBP',
+        ...(input.metadata || {}),
+      },
+    });
+    res.status(201).json({ success: true, data: wallet });
+  } catch (error) { next(error); }
 });
 
 router.get('/audit-logs', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
