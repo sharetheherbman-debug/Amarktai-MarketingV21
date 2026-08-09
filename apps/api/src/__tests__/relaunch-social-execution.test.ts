@@ -45,4 +45,13 @@ describe('Relaunch Control execution boundary', () => {
     expect(transactionCloseIndex).toBeGreaterThan(transactionIndex);
     expect(throwIndex).toBeGreaterThan(transactionCloseIndex);
   });
+
+  test('a worker that loses the atomic post claim cannot fail another worker decision', () => {
+    const controlled = read('apps/api/src/services/controlled-social-publishing.service.ts');
+    const claimedBlock = controlled.indexOf('if (claimed) {');
+    const markFailed = controlled.indexOf('markExecutionFailed(decisionId, error)');
+
+    expect(claimedBlock).toBeGreaterThan(-1);
+    expect(markFailed).toBeGreaterThan(claimedBlock);
+  });
 });
