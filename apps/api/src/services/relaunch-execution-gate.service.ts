@@ -55,6 +55,16 @@ function mapDecision(row: Record<string, unknown>): ExecutionDecision {
   };
 }
 
+function temporaryBlock(reason: string, credits: number, adSpendPence: number): ExecutionDecision {
+  return {
+    id: '',
+    status: 'blocked',
+    decision_reason: reason,
+    requested_credits: credits,
+    requested_ad_spend_pence: adSpendPence,
+  };
+}
+
 function throwForDecision(decision: ExecutionDecision): never {
   const message = decision.decision_reason || 'The Relaunch Control Centre did not approve this action';
   if (decision.status === 'pending') {
@@ -66,9 +76,9 @@ function throwForDecision(decision: ExecutionDecision): never {
 /**
  * Authorize a real external action before delivery.
  *
- * The idempotency key permanently binds one external action to one decision.
- * Pending/blocked decisions are committed before an operational hold is raised,
- * so the approval queue always reflects the action that was prevented.
+ * Hard-limit and approval decisions are persisted and idempotent. Temporary
+ * holds—emergency stop, operating window and daily budgets—are returned without
+ * creating a permanent decision so the same action is evaluated again later.
  */
 export async function requireExecutionApproval(
   organizationId: string,
@@ -96,27 +106,7 @@ export async function requireExecutionApproval(
     if (!policy) throw new AppError(500, 'Relaunch policy is unavailable', 'RELAUNCH_POLICY_MISSING');
 
     if (policy.emergency_stop === true) {
-      const existing = await client.query(
-        `SELECT * FROM relaunch_action_decisions
-         WHERE organization_id=$1 AND idempotency_key=$2 FOR UPDATE`,
-        [organizationId, request.idempotency_key.trim()]
-      );
-      if (existing.rows.length > 0 && String(existing.rows[0].status) !== 'completed') {
-        const blocked = await client.query(
-          `UPDATE relaunch_action_decisions SET status='blocked',
-             decision_reason='Emergency stop is active',updated_at=NOW()
-           WHERE id=$1 RETURNING *`,
-          [existing.rows[0].id]
-        );
-        return mapDecision(blocked.rows[0]);
-      }
-      return {
-        id: '',
-        status: 'blocked',
-        decision_reason: 'Emergency stop is active',
-        requested_credits: requestedCredits,
-        requested_ad_spend_pence: requestedAdSpend,
-      } satisfies ExecutionDecision;
+      return temporaryBlock('Emergency stop is active', requestedCredits, requestedAdSpend);
     }
 
     const existing = await client.query(
@@ -163,23 +153,28 @@ export async function requireExecutionApproval(
     const overDailyCredit = dailyCreditLimit > 0 && creditsUsedToday + requestedCredits > dailyCreditLimit;
     const overDailyAd = dailyAdLimit > 0 && adSpendToday + requestedAdSpend > dailyAdLimit;
 
+    if (outsideWindow) {
+      return temporaryBlock(
+        'The action is outside the configured operating window',
+        requestedCredits,
+        requestedAdSpend
+      );
+    }
+    if (overDailyCredit) {
+      return temporaryBlock('Daily Generation Credit limit exceeded', requestedCredits, requestedAdSpend);
+    }
+    if (overDailyAd) {
+      return temporaryBlock('Daily advertising budget exceeded', requestedCredits, requestedAdSpend);
+    }
+
     let status: 'approved' | 'pending' | 'blocked';
     let reason: string;
-    if (outsideWindow) {
-      status = 'blocked';
-      reason = 'The action is outside the configured operating window';
-    } else if (overActionCredit) {
+    if (overActionCredit) {
       status = 'blocked';
       reason = 'Per-action Generation Credit limit exceeded';
     } else if (overCampaignAd) {
       status = 'blocked';
       reason = 'Per-campaign advertising limit exceeded';
-    } else if (overDailyCredit) {
-      status = 'blocked';
-      reason = 'Daily Generation Credit limit exceeded';
-    } else if (overDailyAd) {
-      status = 'blocked';
-      reason = 'Daily advertising budget exceeded';
     } else {
       const requiresApproval = operatingMode !== 'autonomous'
         || !channelAllowed
