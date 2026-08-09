@@ -3,38 +3,25 @@
 import { usePathname } from 'next/navigation';
 import Link from 'next/link';
 import {
-  LayoutDashboard,
-  Megaphone,
-  FileText,
-  Bot,
+  Activity,
   BarChart3,
-  Settings,
-  Users,
-  Cpu,
-  LogOut,
+  Bot,
+  CalendarDays,
   ChevronLeft,
   ChevronRight,
-  Dna,
-  BookOpen,
-  Eye,
-  TrendingUp,
-  Sparkles,
-  CalendarDays,
-  Search,
-  GitBranch,
-  Share2,
-  Building2,
-  Target,
-  Heart,
-  Puzzle,
+  Coins,
   CreditCard,
-  Palette,
-  Globe,
-  PieChart,
-  Activity,
-  Store,
-  Code,
+  FileText,
   Image,
+  LayoutDashboard,
+  LogOut,
+  Megaphone,
+  Puzzle,
+  Settings,
+  Share2,
+  Sparkles,
+  Target,
+  Users,
 } from 'lucide-react';
 import { useAuthStore } from '@/stores/auth.store';
 import { useUIStore } from '@/stores/ui.store';
@@ -51,86 +38,50 @@ interface NavSection {
   items: NavItem[];
 }
 
-const mainNav: NavSection[] = [
+const workspaceNav: NavSection[] = [
   {
     items: [
-      { label: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
-      { label: 'Content Studio', href: '/content-studio', icon: Sparkles },
-      { label: 'Creative Studio', href: '/creative-studio', icon: Image },
+      { label: 'Overview', href: '/dashboard', icon: LayoutDashboard },
       { label: 'Campaigns', href: '/campaigns', icon: Megaphone },
-      { label: 'Content', href: '/content', icon: FileText },
+      { label: 'Creative Studio', href: '/creative-studio', icon: Image },
+      { label: 'Content Studio', href: '/content-studio', icon: Sparkles },
+      { label: 'Content Calendar', href: '/content-studio/calendar', icon: CalendarDays },
     ],
   },
   {
-    title: 'AI',
+    title: 'Distribution',
     items: [
-      { label: 'AI Agents', href: '/agents', icon: Bot },
-      { label: 'Prompts', href: '/prompts', icon: FileText },
-      { label: 'Brand DNA', href: '/brand-dna', icon: Dna },
-      { label: 'Knowledge Base', href: '/knowledge', icon: BookOpen },
-      { label: 'Templates', href: '/content-studio/templates', icon: FileText },
-      { label: 'Calendar', href: '/content-studio/calendar', icon: CalendarDays },
-    ],
-  },
-  {
-    title: 'Intelligence',
-    items: [
-      { label: 'SEO', href: '/seo', icon: Search },
-      { label: 'Campaign Planner', href: '/campaign-planner', icon: Megaphone },
-      { label: 'Workflows', href: '/workflows', icon: GitBranch },
-      { label: 'Social Publishing', href: '/social', icon: Share2 },
+      { label: 'Publishing', href: '/social', icon: Share2 },
       { label: 'Advertising', href: '/advertising', icon: Megaphone },
-      { label: 'External Analytics', href: '/analytics', icon: BarChart3 },
+      { label: 'Analytics', href: '/analytics', icon: BarChart3 },
     ],
   },
   {
-    title: 'CRM',
+    title: 'Audience & Automation',
     items: [
-      { label: 'CRM & AI Actions', href: '/crm', icon: BarChart3 },
-      { label: 'Contacts', href: '/crm/contacts', icon: Users },
-      { label: 'Deals', href: '/crm/deals', icon: Target },
-      { label: 'Customers', href: '/crm/customers', icon: Heart },
+      { label: 'Audience & CRM', href: '/crm', icon: Users },
+      { label: 'AI Agents', href: '/agents', icon: Bot },
+      { label: 'Campaign Planner', href: '/campaign-planner', icon: Target },
+      { label: 'Content Library', href: '/content', icon: FileText },
     ],
   },
   {
-    title: 'Platform',
+    title: 'Workspace',
     items: [
-      { label: 'Integrations', href: '/integrations', icon: Puzzle },
-      { label: 'Marketplace', href: '/marketplace', icon: Store },
-      { label: 'Developer', href: '/developer', icon: Code },
+      { label: 'Connections', href: '/integrations', icon: Puzzle },
+      { label: 'Generation Credits', href: '/billing', icon: Coins },
       { label: 'Billing', href: '/billing', icon: CreditCard },
+      { label: 'Settings', href: '/settings', icon: Settings },
     ],
-  },
-  {
-    title: 'Research',
-    items: [
-      { label: 'Competitors', href: '/competitors', icon: Eye },
-      { label: 'Trends', href: '/trends', icon: TrendingUp },
-    ],
-  },
-  {
-    title: 'Agency',
-    items: [
-      { label: 'Agency Dashboard', href: '/agency', icon: Building2 },
-      { label: 'Clients', href: '/agency/clients', icon: Users },
-      { label: 'White Label', href: '/agency/white-label', icon: Palette },
-      { label: 'Client Portal', href: '/agency/portal', icon: Globe },
-      { label: 'Templates', href: '/agency/templates', icon: FileText },
-      { label: 'Reports', href: '/agency/reports', icon: PieChart },
-    ],
-  },
-  {
-    title: 'Settings',
-    items: [{ label: 'Settings', href: '/settings', icon: Settings }],
   },
 ];
 
 const adminNav: NavSection[] = [
   {
-    title: 'Admin',
+    title: 'Platform Admin',
     items: [
       { label: 'Console', href: '/admin/console', icon: Activity },
-      { label: 'Providers', href: '/admin/providers', icon: Cpu },
+      { label: 'GenX Runtime', href: '/admin/providers', icon: Sparkles },
       { label: 'Users', href: '/admin/users', icon: Users },
     ],
   },
@@ -141,10 +92,14 @@ export function DashboardSidebar() {
   const { user, logout } = useAuthStore();
   const { sidebarOpen, toggleSidebar } = useUIStore();
   const isAdmin = user?.role === 'admin' || user?.role === 'superadmin';
-  const sections = isAdmin ? [...mainNav, ...adminNav] : mainNav;
+  const sections = isAdmin ? [...workspaceNav, ...adminNav] : workspaceNav;
+  const appName = process.env.NEXT_PUBLIC_APP_NAME || 'EquiProfile Marketing';
 
   return (
-    <aside className={cn('fixed inset-y-0 left-0 z-40 flex flex-col border-r border-white/[0.06] glass transition-all duration-300', sidebarOpen ? 'w-64' : 'w-16')}>
+    <aside className={cn(
+      'fixed inset-y-0 left-0 z-40 flex flex-col border-r border-white/[0.06] glass transition-all duration-300',
+      sidebarOpen ? 'w-64' : 'w-16'
+    )}>
       <div className="flex h-16 items-center justify-between border-b border-white/[0.06] px-4">
         <Link href="/dashboard" className="flex items-center gap-2 overflow-hidden">
           <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-brand-500/20">
@@ -152,9 +107,18 @@ export function DashboardSidebar() {
               <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
             </svg>
           </div>
-          {sidebarOpen && <span className="whitespace-nowrap text-lg font-bold text-white">Amarkt<span className="text-brand-400">AI</span></span>}
+          {sidebarOpen && (
+            <span className="max-w-[175px] truncate whitespace-nowrap text-sm font-bold text-white">
+              {appName}
+            </span>
+          )}
         </Link>
-        <button type="button" onClick={toggleSidebar} className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-zinc-400 hover:bg-white/[0.06] hover:text-white" aria-label={sidebarOpen ? 'Collapse sidebar' : 'Expand sidebar'}>
+        <button
+          type="button"
+          onClick={toggleSidebar}
+          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-zinc-400 hover:bg-white/[0.06] hover:text-white"
+          aria-label={sidebarOpen ? 'Collapse sidebar' : 'Expand sidebar'}
+        >
           {sidebarOpen ? <ChevronLeft className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
         </button>
       </div>
@@ -162,12 +126,27 @@ export function DashboardSidebar() {
       <nav className="flex-1 overflow-y-auto px-3 py-4">
         {sections.map((section, sectionIndex) => (
           <div key={`${section.title || 'main'}-${sectionIndex}`} className={cn(sectionIndex > 0 && 'mt-6')}>
-            {section.title && sidebarOpen && <h3 className="mb-2 px-3 text-[11px] font-semibold uppercase tracking-wider text-zinc-500">{section.title}</h3>}
+            {section.title && sidebarOpen && (
+              <h3 className="mb-2 px-3 text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
+                {section.title}
+              </h3>
+            )}
             <div className="space-y-1">
               {section.items.map((item) => {
                 const isActive = pathname === item.href || pathname?.startsWith(`${item.href}/`);
                 return (
-                  <Link key={item.href} href={item.href} title={!sidebarOpen ? item.label : undefined} className={cn('flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all', isActive ? 'bg-brand-500/10 text-brand-400' : 'text-zinc-400 hover:bg-white/[0.04] hover:text-white', !sidebarOpen && 'justify-center')}>
+                  <Link
+                    key={`${item.label}-${item.href}`}
+                    href={item.href}
+                    title={!sidebarOpen ? item.label : undefined}
+                    className={cn(
+                      'flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all',
+                      isActive
+                        ? 'bg-brand-500/10 text-brand-400'
+                        : 'text-zinc-400 hover:bg-white/[0.04] hover:text-white',
+                      !sidebarOpen && 'justify-center'
+                    )}
+                  >
                     <item.icon className="h-5 w-5 shrink-0" />
                     {sidebarOpen && <span className="truncate">{item.label}</span>}
                   </Link>
@@ -183,10 +162,26 @@ export function DashboardSidebar() {
           {user?.avatar ? (
             <img src={user.avatar} alt={user.name} className="h-8 w-8 shrink-0 rounded-full object-cover" />
           ) : (
-            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-brand-500/20 text-xs font-semibold text-brand-400">{user?.name ? getInitials(user.name) : 'U'}</div>
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-brand-500/20 text-xs font-semibold text-brand-400">
+              {user?.name ? getInitials(user.name) : 'U'}
+            </div>
           )}
-          {sidebarOpen && <div className="flex-1 overflow-hidden"><p className="truncate text-sm font-medium text-white">{user?.name}</p><p className="truncate text-xs text-zinc-500">{user?.email}</p></div>}
-          {sidebarOpen && <button type="button" onClick={logout} className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-zinc-400 hover:bg-white/[0.06] hover:text-red-400" aria-label="Logout"><LogOut className="h-4 w-4" /></button>}
+          {sidebarOpen && (
+            <div className="flex-1 overflow-hidden">
+              <p className="truncate text-sm font-medium text-white">{user?.name}</p>
+              <p className="truncate text-xs text-zinc-500">{user?.email}</p>
+            </div>
+          )}
+          {sidebarOpen && (
+            <button
+              type="button"
+              onClick={logout}
+              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-zinc-400 hover:bg-white/[0.06] hover:text-red-400"
+              aria-label="Logout"
+            >
+              <LogOut className="h-4 w-4" />
+            </button>
+          )}
         </div>
       </div>
     </aside>
