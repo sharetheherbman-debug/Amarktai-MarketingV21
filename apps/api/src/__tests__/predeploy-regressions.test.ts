@@ -26,12 +26,29 @@ describe('pre-deployment runtime regressions', () => {
     expect(router).not.toContain('failover');
   });
 
+  test('the provider API is read-only and cannot accept credentials', () => {
+    const route = read('apps/api/src/routes/providers.ts');
+    const page = read('apps/web/app/(dashboard)/admin/providers/page.tsx');
+
+    expect(route).not.toContain('providerService.create');
+    expect(route).not.toContain('providerService.update');
+    expect(route).not.toContain('providerService.remove');
+    expect(route).not.toContain("router.post('/'");
+    expect(route).not.toContain("router.put('/:id'");
+    expect(route).not.toContain("router.delete('/:id'");
+    expect(page).not.toContain('API Key');
+    expect(page).not.toContain('Together AI');
+    expect(page).not.toContain('DeepInfra');
+    expect(page).toContain('Environment-only credentials');
+  });
+
   test('tenant-scoped platform routes are mounted behind membership checks', () => {
     const server = read('apps/api/src/server.ts');
     for (const route of [
       'campaigns', 'content', 'agents', 'prompts', 'brand-dna', 'knowledge',
       'competitors', 'trends', 'content-studio', 'templates', 'calendar', 'seo',
-      'campaign-ai', 'amai', 'crm', 'integrations', 'agency', 'template-library',
+      'campaign-ai', 'amai', 'crm', 'integrations', 'generation-credits',
+      'agency', 'template-library',
     ]) {
       expect(server).toContain(`app.use('/api/v1/${route}', ...tenant`);
     }
@@ -75,6 +92,32 @@ describe('pre-deployment runtime regressions', () => {
     expect(service).toContain('GENERATION_CREDITS_INSUFFICIENT');
   });
 
+  test('credit checkout is GBP, one-time and funded only by verified webhooks', () => {
+    const checkout = read('apps/api/src/services/generation-credit-stripe.service.ts');
+    const webhook = read('apps/api/src/services/stripe-webhook.service.ts');
+    const page = read('apps/web/app/(dashboard)/billing/page.tsx');
+
+    expect(checkout).toContain("params.set('mode', 'payment')");
+    expect(checkout).toContain("params.set('line_items[0][price_data][currency]', 'gbp')");
+    expect(checkout).toContain("paymentStatus !== 'paid'");
+    expect(checkout).toContain("currency !== 'GBP'");
+    expect(checkout).toContain('stripe-credit-session:${sessionId}');
+    expect(webhook).toContain('processGenerationCreditStripeEvent');
+    expect(page).toContain('Generation Credits');
+    expect(page).toContain("currency: 'GBP'");
+  });
+
+  test('GenX models require verified GBP price snapshots before retail use', () => {
+    const registry = read('apps/api/src/services/genx-model-registry.service.ts');
+    const pricing = read('apps/api/src/services/genx-pricing.service.ts');
+
+    expect(registry).toContain("retail_enabled=TRUE AND pricing_status='priced'");
+    expect(pricing).toContain('retailFromWholesale');
+    expect(pricing).toContain('GBP_FX_RATE_REQUIRED');
+    expect(pricing).toContain('GENX_MODEL_UNPRICED');
+    expect(pricing).toContain('GENX_PRICE_STALE');
+  });
+
   test('external content ingestion uses the public-network fetch guard', () => {
     for (const service of [
       'apps/api/src/services/knowledge-ingestion.service.ts',
@@ -99,13 +142,15 @@ describe('pre-deployment runtime regressions', () => {
     expect(service).not.toContain("verification_status = 'verified' WHERE id = $1");
   });
 
-  test('clean-install repair and GBP wallet migrations are present', () => {
+  test('clean-install repair, GBP wallet and pricing migrations are present', () => {
     for (const migration of [
       '018_external_integration_schema_alignment.sql',
       '020_provider_runtime_integrity.sql',
       '021_research_runtime_alignment.sql',
       '022_stripe_billing_runtime.sql',
       '023_genx_gbp_credit_wallet.sql',
+      '024_genx_retail_pricing_status.sql',
+      '025_gbp_billing_policy.sql',
     ]) {
       expect(fs.existsSync(path.resolve(repositoryRoot, 'apps/api/src/db/migrations', migration))).toBe(true);
     }
