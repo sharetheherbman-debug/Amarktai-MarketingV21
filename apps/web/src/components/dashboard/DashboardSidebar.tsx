@@ -19,6 +19,7 @@ import {
   Puzzle,
   Settings,
   Share2,
+  ShieldCheck,
   Sparkles,
   Target,
   Users,
@@ -42,6 +43,7 @@ const workspaceNav: NavSection[] = [
   {
     items: [
       { label: 'Overview', href: '/dashboard', icon: LayoutDashboard },
+      { label: 'Relaunch Control', href: '/relaunch-control', icon: ShieldCheck },
       { label: 'Campaigns', href: '/campaigns', icon: Megaphone },
       { label: 'Creative Studio', href: '/creative-studio', icon: Image },
       { label: 'Content Studio', href: '/content-studio', icon: Sparkles },
