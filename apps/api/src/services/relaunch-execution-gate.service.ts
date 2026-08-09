@@ -67,9 +67,8 @@ function throwForDecision(decision: ExecutionDecision): never {
  * Authorize a real external action before delivery.
  *
  * The idempotency key permanently binds one external action to one decision.
- * An approved pending decision is reused on the next attempt; emergency stop is
- * checked again immediately before execution so an old approval cannot bypass a
- * newly activated stop.
+ * Pending/blocked decisions are committed before an operational hold is raised,
+ * so the approval queue always reflects the action that was prevented.
  */
 export async function requireExecutionApproval(
   organizationId: string,
@@ -82,7 +81,7 @@ export async function requireExecutionApproval(
   const requestedCredits = asNonNegativeInteger(request.requested_credits, 'requested_credits');
   const requestedAdSpend = asNonNegativeInteger(request.requested_ad_spend_pence, 'requested_ad_spend_pence');
 
-  return transaction(async (client) => {
+  const decision = await transaction(async (client) => {
     await client.query(
       `INSERT INTO relaunch_control_policies (organization_id)
        VALUES ($1) ON CONFLICT (organization_id) DO NOTHING`,
@@ -103,14 +102,21 @@ export async function requireExecutionApproval(
         [organizationId, request.idempotency_key.trim()]
       );
       if (existing.rows.length > 0 && String(existing.rows[0].status) !== 'completed') {
-        await client.query(
+        const blocked = await client.query(
           `UPDATE relaunch_action_decisions SET status='blocked',
              decision_reason='Emergency stop is active',updated_at=NOW()
-           WHERE id=$1`,
+           WHERE id=$1 RETURNING *`,
           [existing.rows[0].id]
         );
+        return mapDecision(blocked.rows[0]);
       }
-      throw new AppError(423, 'Emergency stop is active', 'RELAUNCH_ACTION_BLOCKED');
+      return {
+        id: '',
+        status: 'blocked',
+        decision_reason: 'Emergency stop is active',
+        requested_credits: requestedCredits,
+        requested_ad_spend_pence: requestedAdSpend,
+      } satisfies ExecutionDecision;
     }
 
     const existing = await client.query(
@@ -118,11 +124,7 @@ export async function requireExecutionApproval(
        WHERE organization_id=$1 AND idempotency_key=$2 FOR UPDATE`,
       [organizationId, request.idempotency_key.trim()]
     );
-    if (existing.rows.length > 0) {
-      const decision = mapDecision(existing.rows[0]);
-      if (decision.status === 'approved') return decision;
-      throwForDecision(decision);
-    }
+    if (existing.rows.length > 0) return mapDecision(existing.rows[0]);
 
     const now = new Date();
     const activeFrom = policy.active_from ? new Date(String(policy.active_from)) : null;
@@ -214,11 +216,11 @@ export async function requireExecutionApproval(
         JSON.stringify(request.payload || {}),
       ]
     );
-
-    const decision = mapDecision(inserted.rows[0]);
-    if (decision.status === 'approved') return decision;
-    throwForDecision(decision);
+    return mapDecision(inserted.rows[0]);
   });
+
+  if (decision.status === 'approved') return decision;
+  throwForDecision(decision);
 }
 
 export async function markExecutionRunning(decisionId: string): Promise<void> {
