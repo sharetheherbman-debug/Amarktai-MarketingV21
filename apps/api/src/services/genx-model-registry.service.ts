@@ -10,6 +10,10 @@ export interface GenXModel extends GenXBaseModel {
   verification_status?: 'metadata_confirmed' | 'runtime_confirmed' | 'failed' | 'unverified';
   required_parameters?: string[];
   optional_parameters?: string[];
+  retail_enabled?: boolean;
+  pricing_status?: string;
+  pricing_last_synced_at?: string;
+  pricing_error?: string;
 }
 
 export type ModelOperation =
@@ -190,7 +194,11 @@ export async function syncModelsToDatabase(models: GenXModel[]): Promise<{ total
 
     const removedIds = lastCatalogueComplete ? [...existingIds].filter((id) => !incomingIds.has(id)) : [];
     if (removedIds.length > 0) {
-      await client.query('UPDATE genx_models SET available=FALSE, last_seen=$2 WHERE id=ANY($1::text[])', [removedIds, timestamp]);
+      await client.query(
+        `UPDATE genx_models SET available=FALSE,retail_enabled=FALSE,
+           pricing_status='unavailable',last_seen=$2 WHERE id=ANY($1::text[])`,
+        [removedIds, timestamp]
+      );
     }
     await client.query(
       'INSERT INTO genx_model_sync_runs (total_models,new_models,updated_models,removed_models,completed_at) VALUES ($1,$2,$3,$4,$5)',
@@ -200,8 +208,15 @@ export async function syncModelsToDatabase(models: GenXModel[]): Promise<{ total
   });
 }
 
+/**
+ * Models offered to generation workers must be both operational and covered by
+ * a current GBP retail price. This is the hard block that prevents unpriced
+ * GenX jobs from creating an unknown platform liability.
+ */
 export async function getAvailableModels(operation?: string): Promise<GenXModel[]> {
-  let sql = 'SELECT * FROM genx_models WHERE available=TRUE AND deprecated=FALSE';
+  let sql = `SELECT * FROM genx_models
+             WHERE available=TRUE AND deprecated=FALSE
+               AND retail_enabled=TRUE AND pricing_status='priced'`;
   const params: unknown[] = [];
   if (operation) { sql += ' AND operations ? $1'; params.push(operation); }
   sql += ' ORDER BY category,name';
@@ -209,9 +224,22 @@ export async function getAvailableModels(operation?: string): Promise<GenXModel[
   return result.rows.map(mapModelRow);
 }
 
+/** Admin catalogue view, including models that are blocked for missing prices. */
+export async function getCatalogueModels(category?: string): Promise<GenXModel[]> {
+  const params: unknown[] = [];
+  let sql = 'SELECT * FROM genx_models WHERE deprecated=FALSE';
+  if (category) { params.push(category); sql += ` AND category=$${params.length}`; }
+  sql += ' ORDER BY category,name';
+  const result = await query(sql, params);
+  return result.rows.map(mapModelRow);
+}
+
 export async function getModelsByCategory(category: string): Promise<GenXModel[]> {
   const result = await query(
-    'SELECT * FROM genx_models WHERE available=TRUE AND deprecated=FALSE AND category=$1 ORDER BY name',
+    `SELECT * FROM genx_models
+     WHERE available=TRUE AND deprecated=FALSE AND retail_enabled=TRUE
+       AND pricing_status='priced' AND category=$1
+     ORDER BY name`,
     [category]
   );
   return result.rows.map(mapModelRow);
@@ -226,6 +254,9 @@ export async function getModelStats(): Promise<Record<string, number>> {
   const result = await query(`SELECT
     COUNT(*) AS total,
     COUNT(*) FILTER (WHERE available=TRUE AND deprecated=FALSE) AS available,
+    COUNT(*) FILTER (WHERE retail_enabled=TRUE AND pricing_status='priced') AS retail_enabled,
+    COUNT(*) FILTER (WHERE pricing_status='unpriced') AS unpriced,
+    COUNT(*) FILTER (WHERE pricing_status='error') AS pricing_errors,
     COUNT(DISTINCT vendor) AS vendors,
     COUNT(*) FILTER (WHERE category='text') AS text_models,
     COUNT(*) FILTER (WHERE category='image') AS image_models,
@@ -236,9 +267,18 @@ export async function getModelStats(): Promise<Record<string, number>> {
     FROM genx_models`);
   const row = result.rows[0];
   return {
-    total: Number(row.total || 0), available: Number(row.available || 0), vendors: Number(row.vendors || 0),
-    text: Number(row.text_models || 0), image: Number(row.image_models || 0), video: Number(row.video_models || 0),
-    voice: Number(row.voice_models || 0), audio: Number(row.audio_models || 0), runtime_confirmed: Number(row.runtime_confirmed || 0),
+    total: Number(row.total || 0),
+    available: Number(row.available || 0),
+    retail_enabled: Number(row.retail_enabled || 0),
+    unpriced: Number(row.unpriced || 0),
+    pricing_errors: Number(row.pricing_errors || 0),
+    vendors: Number(row.vendors || 0),
+    text: Number(row.text_models || 0),
+    image: Number(row.image_models || 0),
+    video: Number(row.video_models || 0),
+    voice: Number(row.voice_models || 0),
+    audio: Number(row.audio_models || 0),
+    runtime_confirmed: Number(row.runtime_confirmed || 0),
   };
 }
 
@@ -260,5 +300,9 @@ function mapModelRow(row: Record<string, unknown>): GenXModel {
     last_verified: row.last_verified ? String(row.last_verified) : undefined,
     verification_status: (row.verification_status as GenXModel['verification_status']) || 'unverified',
     required_parameters: parse(row.required_parameters, []), optional_parameters: parse(row.optional_parameters, []),
+    retail_enabled: row.retail_enabled === true,
+    pricing_status: row.pricing_status ? String(row.pricing_status) : 'unpriced',
+    pricing_last_synced_at: row.pricing_last_synced_at ? String(row.pricing_last_synced_at) : undefined,
+    pricing_error: row.pricing_error ? String(row.pricing_error) : undefined,
   };
 }
