@@ -35,6 +35,7 @@ import templateRoutes from './routes/templates';
 import calendarRoutes from './routes/calendar';
 import seoRoutes from './routes/seo';
 import campaignAiRoutes from './routes/campaign-ai';
+import controlledSocialRoutes from './routes/controlled-social';
 import amaiRoutes from './routes/amai';
 import crmAiActionRoutes from './routes/crm-ai-actions';
 import crmRoutes from './routes/crm';
@@ -148,6 +149,9 @@ app.use('/api/v1/templates', ...tenant, templateRoutes);
 app.use('/api/v1/calendar', ...tenant, calendarRoutes);
 app.use('/api/v1/seo', ...tenant, seoRoutes);
 app.use('/api/v1/campaign-ai', ...tenant, campaignAiRoutes);
+// These two external-delivery endpoints are intercepted before the legacy AMAI
+// router so neither manual nor scheduled social publishing can bypass Relaunch Control.
+app.use('/api/v1/amai', ...tenant, controlledSocialRoutes);
 app.use('/api/v1/amai', ...tenant, amaiRoutes);
 app.use('/api/v1/crm', ...tenant, crmAiActionRoutes);
 app.use('/api/v1/crm', ...tenant, crmRoutes);
