@@ -23,4 +23,15 @@ describe('Relaunch Control execution boundary', () => {
     expect(gate).toContain("status='running'");
     expect(gate).toContain("status='completed'");
   });
+
+  test('pending decisions are committed before the operational hold is thrown', () => {
+    const gate = read('apps/api/src/services/relaunch-execution-gate.service.ts');
+    const transactionIndex = gate.indexOf('const decision = await transaction');
+    const transactionCloseIndex = gate.indexOf("if (decision.status === 'approved') return decision;");
+    const throwIndex = gate.lastIndexOf('throwForDecision(decision);');
+
+    expect(transactionIndex).toBeGreaterThan(-1);
+    expect(transactionCloseIndex).toBeGreaterThan(transactionIndex);
+    expect(throwIndex).toBeGreaterThan(transactionCloseIndex);
+  });
 });
