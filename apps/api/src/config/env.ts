@@ -63,6 +63,11 @@ if (billingCurrency !== 'GBP') {
   throw new Error('BILLING_CURRENCY must be GBP for the EquiProfile launch deployment');
 }
 
+const genxPricingCurrency = getEnv('GENX_PRICING_SOURCE_CURRENCY', 'USD').toUpperCase();
+if (!/^[A-Z]{3}$/.test(genxPricingCurrency)) {
+  throw new Error('GENX_PRICING_SOURCE_CURRENCY must be a three-letter currency code');
+}
+
 export const env = {
   NODE_ENV: getEnv('NODE_ENV', 'development'),
   PORT: getEnvNumber('PORT', 4000),
@@ -101,6 +106,8 @@ export const env = {
   GENX_RESERVATION_BUFFER_BPS: getBasisPoints('GENX_RESERVATION_BUFFER_BPS', 1500, 10000),
   GENX_PRICE_REFRESH_MINUTES: getEnvNumber('GENX_PRICE_REFRESH_MINUTES', 360),
   GENX_PRICE_MAX_AGE_MINUTES: getEnvNumber('GENX_PRICE_MAX_AGE_MINUTES', 720),
+  GENX_PRICING_SOURCE_CURRENCY: genxPricingCurrency,
+  GENX_FX_RATES_TO_GBP: getEnv('GENX_FX_RATES_TO_GBP', '{}'),
   GENERATION_RESERVATION_TTL_MINUTES: getEnvNumber('GENERATION_RESERVATION_TTL_MINUTES', 60),
 
   // Fixed launch commercial model: 100 credits represent GBP 1.00 retail value.
