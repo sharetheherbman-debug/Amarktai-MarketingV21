@@ -1,7 +1,7 @@
 import { query } from '../config/database';
 import { logger } from '../utils/logger';
 import { healthCheck as providerHealthCheck } from './provider.service';
-import { publishDuePosts } from './social-publishing.service';
+import { publishDuePostsThroughControlCentre } from './controlled-social-publishing.service';
 import { checkCompetitor } from './competitor.service';
 import { checkMonitor } from './trend.service';
 
@@ -81,8 +81,8 @@ class SchedulerService {
 
   private registerDefaultTasks(): void {
     this.scheduleTask('publish-due-social-posts', 60 * 1000, async () => {
-      const published = await publishDuePosts(25);
-      if (published > 0) logger.info(`Published ${published} scheduled social posts`);
+      const published = await publishDuePostsThroughControlCentre(25);
+      if (published > 0) logger.info(`Published ${published} approved scheduled social posts`);
     });
 
     this.scheduleTask('check-trend-monitors', 15 * 60 * 1000, async () => {
