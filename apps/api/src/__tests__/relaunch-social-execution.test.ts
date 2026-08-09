@@ -23,6 +23,8 @@ describe('Relaunch Control execution boundary', () => {
     expect(controlledRoutes).toContain("router.post('/social/posts'");
     expect(controlledRoutes).toContain("router.post('/social/posts/:id/publish'");
     expect(controlledRoutes).toContain('publishPostThroughControlCentre');
+    expect(controlledRoutes).toContain('res.status(202).json');
+    expect(controlledRoutes).toContain("status: 'pending_approval'");
     expect(server.indexOf("app.use('/api/v1/amai', ...tenant, controlledSocialRoutes)")).toBeLessThan(
       server.indexOf("app.use('/api/v1/amai', ...tenant, amaiRoutes)")
     );
