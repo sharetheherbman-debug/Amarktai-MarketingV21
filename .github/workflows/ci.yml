@@ -139,10 +139,15 @@ jobs:
       - run: npm ci
       - name: Build API
         run: cd apps/api && npm run build
-      - name: Copy SQL migrations
+      - name: Copy all SQL migrations
         run: mkdir -p apps/api/dist/db && cp -R apps/api/src/db/migrations apps/api/dist/db/migrations
-      - name: Execute migrations 000-016
+      - name: Execute every migration in filename order
         run: node apps/api/dist/db/migrate.js
+      - name: Verify latest GBP credit migration was applied
+        run: |
+          applied=$(psql "$DATABASE_URL" -Atc "SELECT COUNT(*) FROM schema_migrations WHERE filename='023_genx_gbp_credit_wallet.sql'")
+          test "$applied" = "1"
+          psql "$DATABASE_URL" -Atc "SELECT filename FROM schema_migrations ORDER BY filename"
 
   docker:
     name: Docker Build
