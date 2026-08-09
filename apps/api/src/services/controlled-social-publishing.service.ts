@@ -82,8 +82,8 @@ async function executeControlledSocialPost(
          WHERE id=$2 AND organization_id=$3 AND status='publishing'`,
         [message, postId, organizationId]
       );
+      if (decisionId) await markExecutionFailed(decisionId, error);
     }
-    if (decisionId) await markExecutionFailed(decisionId, error);
     throw error;
   }
 }
