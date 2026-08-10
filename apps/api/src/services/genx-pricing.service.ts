@@ -1,6 +1,11 @@
 import { query, transaction } from '../config/database';
 import { env } from '../config/env';
 import { AppError, NotFoundError } from '../middleware/errorHandler';
+import {
+  genxMultimodalProvider,
+  type GenXAccountPricingModel,
+  type GenXAccountPriceUnit,
+} from '../providers/genx-multimodal.provider';
 import type { GenXModel } from './genx-model-registry.service';
 
 export interface ExtractedPriceComponent {
@@ -92,6 +97,10 @@ function normalizeUnit(value: string): string {
     million_tokens: 'million_tokens',
     '1m_tokens': 'million_tokens',
     per_million_tokens: 'million_tokens',
+    character: 'character',
+    characters: 'character',
+    thousand_characters: 'thousand_characters',
+    '1k_characters': 'thousand_characters',
     request: 'request',
     requests: 'request',
     generation: 'request',
@@ -101,8 +110,6 @@ function normalizeUnit(value: string): string {
     seconds: 'second',
     minute: 'minute',
     minutes: 'minute',
-    character: 'character',
-    characters: 'character',
   };
   return aliases[normalized] || normalized;
 }
@@ -174,9 +181,10 @@ function collectCandidates(
 }
 
 /**
- * Reads only unambiguous prices from the authenticated GenX catalogue.
- * Models with no clear billable unit remain disabled rather than being treated
- * as free or charged from a guessed rate.
+ * Legacy/object-catalogue price extraction remains available for compatibility
+ * tests and historical records. Production refreshes use the authenticated
+ * /api/v1/account/pricing rate card below because it is adjusted for the
+ * account's actual GenX tier.
  */
 export function extractPriceComponents(model: GenXModel): ExtractedPriceComponent[] {
   const raw = objectValue(model.raw_metadata || model.metadata || {});
@@ -316,6 +324,147 @@ export function extractPriceComponents(model: GenXModel): ExtractedPriceComponen
   );
 }
 
+function normalizedProviderCredits(price: GenXAccountPriceUnit): number {
+  const credits = Number(price.credits);
+  const milliCredits = Number(price.mcredits);
+  if (!Number.isFinite(credits) || credits < 0 || !Number.isFinite(milliCredits) || milliCredits < 0) {
+    throw new AppError(502, 'GenX account pricing contained an invalid credit amount', 'GENX_ACCOUNT_PRICE_INVALID');
+  }
+
+  const fromMilliCredits = milliCredits / 1000;
+  const tolerance = Math.max(0.000001, Math.abs(credits) * 0.000001);
+  if (Math.abs(credits - fromMilliCredits) > tolerance) {
+    throw new AppError(502, 'GenX credits and mcredits disagree', 'GENX_ACCOUNT_PRICE_INCONSISTENT');
+  }
+  return fromMilliCredits;
+}
+
+function unitForQuantity(kind: 'token' | 'character' | 'image' | 'second' | 'minute' | 'request', quantity: number): string {
+  if (kind === 'token') {
+    if (quantity === 1) return 'token';
+    if (quantity === 1000) return 'thousand_tokens';
+    if (quantity === 1_000_000) return 'million_tokens';
+    return `${quantity}_tokens`;
+  }
+  if (kind === 'character') {
+    if (quantity === 1) return 'character';
+    if (quantity === 1000) return 'thousand_characters';
+    return `${quantity}_characters`;
+  }
+  if (kind === 'image') return quantity === 1 ? 'image' : `${quantity}_images`;
+  if (kind === 'second') return quantity === 1 ? 'second' : `${quantity}_seconds`;
+  if (kind === 'minute') return quantity === 1 ? 'minute' : `${quantity}_minutes`;
+  return quantity === 1 ? 'request' : `${quantity}_requests`;
+}
+
+function accountMetricContract(
+  model: GenXModel,
+  price: GenXAccountPriceUnit
+): { operation: string; billableUnit: string } | null {
+  const metric = String(price.metric || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[\s\-\/]+/g, '_');
+  const quantity = Number(price.unit_quantity);
+  if (!metric || !Number.isFinite(quantity) || quantity <= 0) return null;
+
+  const category = String(model.category || '').toLowerCase();
+  const primaryOperation = String(model.operations?.[0] || (
+    category === 'image' ? 'text_to_image' :
+      category === 'video' ? 'text_to_video' :
+        category === 'voice' ? 'text_to_speech' :
+          category === 'audio' ? 'audio_generation' : 'text_generation'
+  ));
+
+  if (metric.includes('cached') && metric.includes('input') && metric.includes('token')) {
+    return { operation: 'text_cached_input', billableUnit: unitForQuantity('token', quantity) };
+  }
+  if (metric.includes('input') && metric.includes('token')) {
+    return { operation: 'text_input', billableUnit: unitForQuantity('token', quantity) };
+  }
+  if (metric.includes('output') && metric.includes('token')) {
+    return { operation: 'text_output', billableUnit: unitForQuantity('token', quantity) };
+  }
+  if (metric.includes('token')) {
+    return { operation: 'text_generation', billableUnit: unitForQuantity('token', quantity) };
+  }
+  if (metric.includes('character') || metric.includes('char')) {
+    return {
+      operation: category === 'voice' ? 'text_to_speech' : primaryOperation,
+      billableUnit: unitForQuantity('character', quantity),
+    };
+  }
+  if (metric.includes('image')) {
+    return { operation: category === 'video' ? primaryOperation : 'text_to_image', billableUnit: unitForQuantity('image', quantity) };
+  }
+  if (metric.includes('minute')) {
+    return { operation: primaryOperation, billableUnit: unitForQuantity('minute', quantity) };
+  }
+  if (metric.includes('second') || metric === 'sec' || metric.endsWith('_sec')) {
+    const operation = category === 'video'
+      ? 'text_to_video'
+      : category === 'voice'
+        ? 'text_to_speech'
+        : category === 'audio'
+          ? 'audio_generation'
+          : primaryOperation;
+    return { operation, billableUnit: unitForQuantity('second', quantity) };
+  }
+  if (metric.includes('request') || metric.includes('generation') || metric.includes('job')) {
+    return { operation: primaryOperation, billableUnit: unitForQuantity('request', quantity) };
+  }
+
+  return null;
+}
+
+export function extractAccountPriceComponents(
+  model: GenXModel,
+  accountPricing: GenXAccountPricingModel
+): ExtractedPriceComponent[] {
+  if (env.GENX_PRICING_SOURCE_CURRENCY !== 'USD') {
+    throw new AppError(
+      500,
+      'GenX account credits are converted through USD; GENX_PRICING_SOURCE_CURRENCY must be USD',
+      'GENX_ACCOUNT_CREDIT_CURRENCY_INVALID'
+    );
+  }
+
+  if (accountPricing.model !== model.id) {
+    throw new AppError(500, 'GenX pricing record does not match model', 'GENX_ACCOUNT_PRICE_MODEL_MISMATCH');
+  }
+
+  const deduplicated = new Map<string, ExtractedPriceComponent>();
+  for (const price of accountPricing.pricing) {
+    const contract = accountMetricContract(model, price);
+    if (!contract) continue;
+
+    const providerCredits = normalizedProviderCredits(price);
+    const sourceUnitCostUsd = providerCredits / env.GENX_PROVIDER_CREDITS_PER_USD;
+    const key = `${contract.operation}:${contract.billableUnit}`;
+    deduplicated.set(key, {
+      operation: contract.operation,
+      billableUnit: contract.billableUnit,
+      sourceCurrency: 'USD',
+      sourceUnitCost: sourceUnitCostUsd,
+      // /account/pricing is documented as adjusted for the authenticated
+      // account tier. The launch key is expected to be Agent tier.
+      agentTierApplied: env.GENX_AGENT_TIER_ENABLED,
+      rawMetadata: {
+        source: 'genx_account_pricing',
+        tier_adjusted: true,
+        provider_credits: providerCredits,
+        provider_credits_per_usd: env.GENX_PROVIDER_CREDITS_PER_USD,
+        billing_mode: accountPricing.billing_mode || null,
+        model: accountPricing.model,
+        category: accountPricing.category,
+        provider: accountPricing.provider || null,
+        price,
+      },
+    });
+  }
+  return [...deduplicated.values()];
+}
+
 function configuredFxRates(): Record<string, number> {
   let rawRates: Record<string, unknown>;
   try {
@@ -385,17 +534,44 @@ export async function syncPricingFromModels(models: GenXModel[]): Promise<{
   let snapshotsCreated = 0;
   const errors: Array<{ model_id: string; error: string }> = [];
 
+  let accountPricing: GenXAccountPricingModel[];
+  try {
+    const categories = ['text', 'image', 'video', 'voice', 'audio'];
+    const categoryPricing = await Promise.all(
+      categories.map((category) => genxMultimodalProvider.listAccountPricing(category))
+    );
+    accountPricing = categoryPricing.flat();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    for (const model of models) {
+      await query(
+        `UPDATE genx_models SET retail_enabled=FALSE,pricing_status='error',
+           pricing_last_synced_at=NOW(),pricing_error=$2 WHERE id=$1`,
+        [model.id, `Authenticated GenX account pricing unavailable: ${message}`.slice(0, 2000)]
+      );
+    }
+    throw new AppError(502, 'Authenticated GenX account pricing request failed', 'GENX_ACCOUNT_PRICING_UNAVAILABLE');
+  }
+
+  const pricingByModel = new Map(accountPricing.map((entry) => [entry.model, entry]));
+
   for (const model of models) {
     try {
-      const components = extractPriceComponents(model);
+      const accountRecord = pricingByModel.get(model.id);
+      const components = accountRecord ? extractAccountPriceComponents(model, accountRecord) : [];
       if (components.length === 0) {
         unpriced += 1;
         await query(
           `UPDATE genx_models SET retail_enabled=FALSE,pricing_status='unpriced',
              pricing_last_synced_at=NOW(),
-             pricing_error='No unambiguous GenX price and billable unit were found'
+             pricing_error=$2
            WHERE id=$1`,
-          [model.id]
+          [
+            model.id,
+            accountRecord
+              ? 'Authenticated GenX account pricing contained no supported metric contract'
+              : 'No authenticated GenX account pricing record was returned for this model',
+          ]
         );
         continue;
       }
@@ -436,7 +612,7 @@ export async function syncPricingFromModels(models: GenXModel[]): Promise<{
                 fx_rate_to_gbp,wholesale_unit_cost_gbp,target_margin_bps,
                 retail_unit_cost_gbp,credits_per_unit,pricing_source,
                 agent_tier_applied,raw_metadata)
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'genx_api',$11,$12)`,
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'genx_account_pricing',$11,$12)`,
             [
               model.id,
               component.operation,
