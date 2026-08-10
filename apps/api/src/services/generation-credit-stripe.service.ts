@@ -3,6 +3,10 @@ import { env } from '../config/env';
 import { AppError, NotFoundError } from '../middleware/errorHandler';
 import { StripeEvent, stripeRequest, stringId } from './stripe-client.service';
 import { creditPaidStripePurchase } from './generation-credit.service';
+import {
+  applyGenerationCreditFinancialReversal,
+  reinstateGenerationCreditChargeback,
+} from './generation-credit-reversal.service';
 
 interface CreditPackRow extends Record<string, unknown> {
   code: string;
@@ -225,8 +229,87 @@ async function processPaidCheckout(event: StripeEvent, session: Record<string, u
   });
 }
 
+function requireGbp(object: Record<string, unknown>, eventType: string): void {
+  const currency = String(object.currency || '').toUpperCase();
+  if (currency && currency !== 'GBP') {
+    throw new AppError(409, `${eventType} currency must be GBP, received ${currency}`, 'STRIPE_CURRENCY_MISMATCH');
+  }
+}
+
+async function processRefund(event: StripeEvent, charge: Record<string, unknown>): Promise<void> {
+  requireGbp(charge, event.type);
+  const amountRefunded = Number(charge.amount_refunded || 0);
+  if (!Number.isSafeInteger(amountRefunded) || amountRefunded <= 0) return;
+
+  await applyGenerationCreditFinancialReversal({
+    kind: 'refund',
+    amountPence: amountRefunded,
+    amountIsCumulative: true,
+    stripePaymentIntentId: stringId(charge.payment_intent) || null,
+    stripeChargeId: stringId(charge.id) || null,
+    stripeEventId: event.id,
+    stripeEventType: event.type,
+    idempotencyKey: `stripe-credit-refund:${event.id}`,
+    metadata: { livemode: event.livemode === true },
+  });
+}
+
+async function processChargebackWithdrawn(event: StripeEvent, dispute: Record<string, unknown>): Promise<void> {
+  requireGbp(dispute, event.type);
+  const amount = Number(dispute.amount || 0);
+  const disputeId = String(dispute.id || '');
+  if (!Number.isSafeInteger(amount) || amount <= 0 || !disputeId) return;
+
+  await applyGenerationCreditFinancialReversal({
+    kind: 'chargeback',
+    amountPence: amount,
+    stripePaymentIntentId: stringId(dispute.payment_intent) || null,
+    stripeChargeId: stringId(dispute.charge) || null,
+    stripeEventId: event.id,
+    stripeEventType: event.type,
+    stripeDisputeId: disputeId,
+    idempotencyKey: `stripe-credit-chargeback:${event.id}`,
+    metadata: {
+      livemode: event.livemode === true,
+      dispute_reason: dispute.reason || null,
+      dispute_status: dispute.status || null,
+    },
+  });
+}
+
+async function processChargebackReinstated(event: StripeEvent, dispute: Record<string, unknown>): Promise<void> {
+  requireGbp(dispute, event.type);
+  const amount = Number(dispute.amount || 0);
+  const disputeId = String(dispute.id || '');
+  if (!Number.isSafeInteger(amount) || amount <= 0 || !disputeId) return;
+
+  await reinstateGenerationCreditChargeback({
+    amountPence: amount,
+    stripePaymentIntentId: stringId(dispute.payment_intent) || null,
+    stripeChargeId: stringId(dispute.charge) || null,
+    stripeEventId: event.id,
+    stripeEventType: event.type,
+    stripeDisputeId: disputeId,
+    idempotencyKey: `stripe-credit-chargeback-reinstated:${event.id}`,
+  });
+}
+
 export async function processGenerationCreditStripeEvent(event: StripeEvent): Promise<void> {
   const object = event.data.object;
-  if (!['checkout.session.completed', 'checkout.session.async_payment_succeeded'].includes(event.type)) return;
-  await processPaidCheckout(event, object);
+
+  if (['checkout.session.completed', 'checkout.session.async_payment_succeeded'].includes(event.type)) {
+    await processPaidCheckout(event, object);
+    return;
+  }
+  if (event.type === 'charge.refunded') {
+    await processRefund(event, object);
+    return;
+  }
+  if (event.type === 'charge.dispute.funds_withdrawn') {
+    await processChargebackWithdrawn(event, object);
+    return;
+  }
+  if (event.type === 'charge.dispute.funds_reinstated') {
+    await processChargebackReinstated(event, object);
+  }
 }
