@@ -1,5 +1,9 @@
 import { logger } from '../utils/logger';
 import { env } from '../config/env';
+import {
+  routerParameterContract,
+  translateRouterGenerationParams,
+} from './genx-router-parameter-contracts';
 
 export interface GenXJob {
   id: string;
@@ -181,7 +185,7 @@ export class GenXMultimodalProvider {
   async generate(request: GenXGenerateRequest): Promise<GenXJob> {
     const raw = recordValue(await this.request('POST', '/api/v1/generate', {
       model: request.model,
-      params: request.params,
+      params: translateRouterGenerationParams(request.model, request.params),
       metadata: request.metadata || {},
       webhook_url: request.webhook_url,
     }));
@@ -283,15 +287,26 @@ export class GenXMultimodalProvider {
 
   private normalizeModel(model: Record<string, unknown>, categoryHint = ''): GenXModel {
     const id = String(model.id || model.model_id || model.model || model.slug || '');
+    const category = String(model.category || model.type || categoryHint || this.inferCategory(model));
+    const explicitParameters = recordValue(model.parameters || model.input_schema || model.schema);
+    const explicitOperations = arrayValue(model.operations || model.capabilities).map(String);
+    const fallbackContract = routerParameterContract(id, category);
+    const parameters = Object.keys(explicitParameters).length > 0
+      ? explicitParameters
+      : fallbackContract?.parameters || {};
+    const operations = explicitOperations.length > 0
+      ? explicitOperations
+      : fallbackContract?.operations || [];
+
     return {
       id,
       name: String(model.name || model.display_name || id),
-      category: String(model.category || model.type || categoryHint || this.inferCategory(model)),
+      category,
       vendor: model.vendor || model.provider ? String(model.vendor || model.provider) : undefined,
       inputs: arrayValue(model.inputs).map(String),
       outputs: arrayValue(model.outputs).map(String),
-      operations: arrayValue(model.operations || model.capabilities).map(String),
-      parameters: recordValue(model.parameters || model.input_schema || model.schema),
+      operations,
+      parameters,
       available: (
         model.available !== false &&
         model.is_active !== false &&
@@ -299,7 +314,14 @@ export class GenXMultimodalProvider {
         model.status !== 'unavailable'
       ),
       deprecated: model.deprecated === true || model.status === 'deprecated' || Boolean(model.retired_at),
-      metadata: model,
+      metadata: {
+        ...model,
+        parameter_contract_source: Object.keys(explicitParameters).length > 0
+          ? 'router_model_detail'
+          : fallbackContract
+            ? 'documented_launch_fallback'
+            : 'none',
+      },
     };
   }
 
@@ -351,8 +373,8 @@ export class GenXMultimodalProvider {
       throw new Error(`GenX API error ${response.status}: ${text.slice(0, 500) || response.statusText}`);
     }
     if (!text) return {};
-    try { return JSON.parse(text) as unknown; }
-    catch { throw new Error(`GenX API returned non-JSON data for ${path}`); }
+    try { return JSON.parse(text) as unknown;
+    } catch { throw new Error(`GenX API returned non-JSON data for ${path}`); }
   }
 
   private async uploadRequest(path: string, form: FormData): Promise<unknown> {
@@ -365,8 +387,8 @@ export class GenXMultimodalProvider {
     const text = await response.text();
     if (!response.ok) throw new Error(`GenX upload error ${response.status}: ${text.slice(0, 500)}`);
     if (!text) return {};
-    try { return JSON.parse(text) as unknown; }
-    catch { throw new Error('GenX upload returned non-JSON data'); }
+    try { return JSON.parse(text) as unknown;
+    } catch { throw new Error('GenX upload returned non-JSON data'); }
   }
 }
 
