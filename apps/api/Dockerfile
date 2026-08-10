@@ -25,8 +25,12 @@ COPY --from=build /app/apps/api/package.json ./package.json
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/version.json ./version.json
 
-RUN mkdir -p /app/uploads/studio /app/uploads/studio/renders /app/uploads/studio/continuity && \
-    chown -R apiuser:nodejs /app/uploads
+RUN mkdir -p \
+      /app/logs \
+      /app/uploads/studio \
+      /app/uploads/studio/renders \
+      /app/uploads/studio/continuity && \
+    chown -R apiuser:nodejs /app/logs /app/uploads
 
 ENV NODE_ENV=production
 ENV PORT=4000
