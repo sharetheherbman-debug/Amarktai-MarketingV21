@@ -1,7 +1,8 @@
+import { createHash } from 'node:crypto';
 import { query } from '../config/database';
 import { NotFoundError, AppError } from '../middleware/errorHandler';
 import { logger } from '../utils/logger';
-import { deliverEmail } from './email-delivery.service';
+import { deliverEmailBatchThroughControlCentre } from './controlled-email-delivery.service';
 
 export interface ClientReport {
   id: string; agency_id: string; client_organization_id: string; client_name?: string;
@@ -111,7 +112,12 @@ export async function publishReport(reportId: string, agencyId: string): Promise
   return mapReportRow(result.rows[0]);
 }
 
-export async function sendReport(reportId: string, agencyId: string, recipients: string[]): Promise<ClientReport> {
+export async function sendReport(
+  reportId: string,
+  agencyId: string,
+  recipients: string[],
+  requestedByUserId?: string | null
+): Promise<ClientReport> {
   const uniqueRecipients = [...new Set(recipients.map((email) => email.trim().toLowerCase()).filter(Boolean))].slice(0, 20);
   if (uniqueRecipients.length === 0) throw new AppError(400, 'At least one recipient is required', 'REPORT_RECIPIENT_REQUIRED');
   const report = await getReport(reportId, agencyId);
@@ -119,18 +125,39 @@ export async function sendReport(reportId: string, agencyId: string, recipients:
   if (agencyResult.rows.length === 0) throw new NotFoundError('Agency');
   const organizationId = String(agencyResult.rows[0].organization_id);
   const html = reportHtml(report);
-  const deliveries = [];
-  for (const recipient of uniqueRecipients) {
-    deliveries.push({ recipient, ...(await deliverEmail(organizationId, recipient, report.title, html)) });
-  }
+  const recipientDigest = createHash('sha256').update(uniqueRecipients.join('\n')).digest('hex').slice(0, 24);
+
+  const controlled = await deliverEmailBatchThroughControlCentre({
+    organizationId,
+    deliveries: uniqueRecipients.map((recipient) => ({
+      to: recipient,
+      subject: report.title,
+      html,
+    })),
+    actionTitle: `Send client report: ${report.title}`,
+    actionSummary: `${uniqueRecipients.length} report recipient(s)`,
+    idempotencyKey: `client-report-email:${reportId}:${recipientDigest}`,
+    requestedByUserId: requestedByUserId || null,
+    payload: {
+      report_id: reportId,
+      agency_id: agencyId,
+      recipient_count: uniqueRecipients.length,
+    },
+  });
+
   const result = await query(
     `UPDATE client_reports
      SET status='sent',sent_at=NOW(),updated_at=NOW(),
          content=jsonb_set(COALESCE(content,'{}'::jsonb),'{delivery}',$1::jsonb,TRUE)
      WHERE id=$2 AND agency_id=$3 RETURNING *`,
-    [JSON.stringify({ delivered_at: new Date().toISOString(), recipients: uniqueRecipients, deliveries }), reportId, agencyId]
+    [JSON.stringify({
+      delivered_at: new Date().toISOString(),
+      decision_id: controlled.decision_id,
+      recipients: uniqueRecipients,
+      deliveries: controlled.deliveries,
+    }), reportId, agencyId]
   );
-  logger.info(`Report ${reportId} delivered to ${uniqueRecipients.length} recipient(s)`);
+  logger.info(`Report ${reportId} delivered to ${uniqueRecipients.length} recipient(s) through Relaunch Control`);
   return mapReportRow(result.rows[0]);
 }
 
