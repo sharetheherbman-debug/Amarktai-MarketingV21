@@ -40,10 +40,17 @@ check_url() {
   log "PASS ${label}"
 }
 
-services=(postgres redis api generation-worker render-worker web nginx caddy)
+services=(postgres redis api generation-worker render-worker web nginx)
+if ! shared_host_nginx_enabled; then
+  services+=(caddy)
+fi
 for service in "${services[@]}"; do
   wait_for_service "${service}"
 done
+
+if shared_host_nginx_enabled; then
+  check_url "loopback edge readiness" "http://127.0.0.1:${HTTP_PORT:-8080}/ready" '"status":"ready"'
+fi
 
 check_url "edge health" "${base_url}/health" '"status":"ok"'
 check_url "application readiness" "${base_url}/ready" '"status":"ready"'
