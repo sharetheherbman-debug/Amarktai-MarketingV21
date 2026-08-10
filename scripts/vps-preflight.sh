@@ -159,13 +159,31 @@ def items(value):
 rows = items(raw)
 if not rows:
     raise SystemExit(f'{category} account pricing is empty')
+
 price_count = 0
+priced_models = 0
+unpriced_models = []
+
 for row in rows:
-    if not isinstance(row, dict) or not str(row.get('model') or row.get('model_id') or row.get('id') or '').strip():
+    if not isinstance(row, dict):
+        raise SystemExit(f'{category} account pricing contains a non-object record')
+
+    model_id = str(row.get('model') or row.get('model_id') or row.get('id') or '').strip()
+    if not model_id:
         raise SystemExit(f'{category} account pricing contains a record without model identity')
+
     prices = row.get('pricing')
-    if not isinstance(prices, list) or not prices:
-        raise SystemExit(f'{category} account pricing contains a model without pricing rows')
+    if prices is None or prices == []:
+        # GenX may catalogue a model before/after a billable rate is available.
+        # Production runtime treats this exact state as unpriced and forces
+        # retail_enabled=FALSE; it must not block other safely priced models.
+        unpriced_models.append(model_id)
+        continue
+
+    if not isinstance(prices, list):
+        raise SystemExit(f'{category} account pricing contains a non-array pricing contract for {model_id}')
+
+    priced_models += 1
     for price in prices:
         if not isinstance(price, dict) or not str(price.get('metric') or '').strip():
             raise SystemExit(f'{category} account pricing contains a row without metric')
@@ -177,7 +195,22 @@ for row in rows:
         if abs(credits - (mcredits / 1000.0)) > max(0.000001, abs(credits) * 0.000001):
             raise SystemExit(f'{category} account pricing credits/mcredits mismatch')
         price_count += 1
-print(f'[amarktai] GenX {category} account pricing: {len(rows)} models / {price_count} metric rows')
+
+if priced_models == 0 or price_count == 0:
+    raise SystemExit(f'{category} account pricing contains no safely billable models')
+
+print(
+    f'[amarktai] GenX {category} account pricing: '
+    f'{len(rows)} models / {priced_models} priced / '
+    f'{len(unpriced_models)} unpriced / {price_count} metric rows'
+)
+if unpriced_models:
+    preview = ', '.join(unpriced_models[:10])
+    suffix = '' if len(unpriced_models) <= 10 else f' (+{len(unpriced_models) - 10} more)'
+    print(
+        f'[amarktai] WARNING: GenX {category} models without account pricing '
+        f'will remain retail-disabled: {preview}{suffix}'
+    )
 PY
 }
 
