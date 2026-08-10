@@ -27,12 +27,21 @@ load_production_env() {
   set +a
 }
 
+shared_host_nginx_enabled() {
+  [[ "${SHARED_HOST_NGINX:-false}" =~ ^(1|true|yes|on)$ ]]
+}
+
 compose() {
-  docker compose \
-    --env-file "${ENV_FILE}" \
-    -f "${BASE_COMPOSE}" \
-    -f "${PRODUCTION_COMPOSE}" \
-    "$@"
+  local args=(
+    --env-file "${ENV_FILE}"
+    -f "${BASE_COMPOSE}"
+  )
+
+  if ! shared_host_nginx_enabled; then
+    args+=( -f "${PRODUCTION_COMPOSE}" )
+  fi
+
+  docker compose "${args[@]}" "$@"
 }
 
 container_health() {
