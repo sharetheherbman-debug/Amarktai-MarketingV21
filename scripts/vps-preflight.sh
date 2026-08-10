@@ -11,6 +11,7 @@ require_command openssl
 require_command git
 require_command awk
 require_command grep
+require_command python3
 
 load_production_env
 
@@ -18,6 +19,7 @@ required_variables=(
   DOMAIN TLS_EMAIL APP_URL API_URL CORS_ORIGIN
   POSTGRES_PASSWORD REDIS_PASSWORD JWT_SECRET JWT_REFRESH_SECRET
   ENCRYPTION_KEY GENX_API_KEY GENX_BASE_URL DEFAULT_TEXT_MODEL GENX_WEBHOOK_SECRET GENX_WEBHOOK_URL
+  GENX_PROVIDER_CREDITS_PER_USD GENX_FX_RATES_TO_GBP
 )
 
 for key in "${required_variables[@]}"; do
@@ -39,6 +41,19 @@ done
 [[ "${API_URL}" == "https://${DOMAIN}/api" ]] || fail "API_URL must be https://${DOMAIN}/api"
 [[ ",${CORS_ORIGIN}," == *",https://${DOMAIN},"* ]] || fail "CORS_ORIGIN must include https://${DOMAIN}"
 [[ "${GENX_WEBHOOK_URL}" == "https://${DOMAIN}/api/v1/webhooks/genx" ]] || fail "GENX_WEBHOOK_URL must use the public signed webhook route"
+[[ "${GENX_PROVIDER_CREDITS_PER_USD}" == "100" ]] || fail "GENX_PROVIDER_CREDITS_PER_USD must be 100 for the verified GenX Router accounting contract"
+
+python3 - "${GENX_FX_RATES_TO_GBP}" <<'PY' || fail "GENX_FX_RATES_TO_GBP must be valid JSON with a positive USD-to-GBP rate"
+import json
+import math
+import sys
+rates = json.loads(sys.argv[1])
+if not isinstance(rates, dict):
+    raise SystemExit(1)
+usd = float(rates.get('USD', 0))
+if not math.isfinite(usd) or usd <= 0:
+    raise SystemExit(1)
+PY
 
 if [[ "${GENX_API_KEY}" != gnxk_* ]]; then
   log "WARNING: GENX_API_KEY does not use the current gnxk_ prefix; the live API checks below will determine whether it is valid."
@@ -75,21 +90,114 @@ genx_request() {
     "$1"
 }
 
-log "Verifying GenX text model access"
-text_catalogue="$(genx_request "${genx_base}/v1/models")" || fail "GenX text catalogue request failed; verify GENX_API_KEY and GENX_BASE_URL"
-[[ -n "${text_catalogue}" ]] || fail "GenX text catalogue returned an empty response"
-grep -Fq "${DEFAULT_TEXT_MODEL}" <<<"${text_catalogue}" || fail "DEFAULT_TEXT_MODEL ${DEFAULT_TEXT_MODEL} is not present in the GenX text catalogue"
+validate_catalogue() {
+  local category="$1"
+  local payload="$2"
+  python3 - "$category" "$payload" <<'PY'
+import json
+import sys
+category, text = sys.argv[1], sys.argv[2]
+raw = json.loads(text)
 
-log "Verifying GenX image catalogue access"
-image_catalogue="$(genx_request "${genx_base}/api/v1/models?category=image")" || fail "GenX image catalogue request failed"
-grep -Eq '"(id|model_id|models|data)"' <<<"${image_catalogue}" || fail "GenX image catalogue returned no recognizable model data"
+def items(value):
+    if isinstance(value, list):
+        return value
+    if not isinstance(value, dict):
+        return []
+    for key in ('data', 'models', 'items', 'results'):
+        child = value.get(key)
+        if isinstance(child, list):
+            return child
+        if isinstance(child, dict):
+            for nested in ('models', 'items', 'results', 'data'):
+                nested_value = child.get(nested)
+                if isinstance(nested_value, list):
+                    return nested_value
+    return []
 
-log "Verifying GenX video catalogue access"
-video_catalogue="$(genx_request "${genx_base}/api/v1/models?category=video")" || fail "GenX video catalogue request failed"
-grep -Eq '"(id|model_id|models|data)"' <<<"${video_catalogue}" || fail "GenX video catalogue returned no recognizable model data"
+rows = items(raw)
+if not rows:
+    raise SystemExit(f'{category} catalogue is empty')
+identifiable = 0
+for row in rows:
+    if isinstance(row, str) and row.strip():
+        identifiable += 1
+    elif isinstance(row, dict) and any(row.get(k) for k in ('id', 'model_id', 'model', 'slug')):
+        identifiable += 1
+if identifiable != len(rows):
+    raise SystemExit(f'{category} catalogue contains unidentifiable entries')
+print(f'[amarktai] GenX {category} catalogue: {len(rows)} identifiable models')
+PY
+}
+
+validate_account_pricing() {
+  local category="$1"
+  local payload="$2"
+  python3 - "$category" "$payload" <<'PY'
+import json
+import math
+import sys
+category, text = sys.argv[1], sys.argv[2]
+raw = json.loads(text)
+
+def items(value):
+    if isinstance(value, list):
+        return value
+    if not isinstance(value, dict):
+        return []
+    for key in ('data', 'pricing', 'prices', 'models', 'items', 'results'):
+        child = value.get(key)
+        if isinstance(child, list):
+            return child
+        if isinstance(child, dict):
+            for nested in ('pricing', 'prices', 'models', 'items', 'results', 'data'):
+                nested_value = child.get(nested)
+                if isinstance(nested_value, list):
+                    return nested_value
+    return []
+
+rows = items(raw)
+if not rows:
+    raise SystemExit(f'{category} account pricing is empty')
+price_count = 0
+for row in rows:
+    if not isinstance(row, dict) or not str(row.get('model') or row.get('model_id') or row.get('id') or '').strip():
+        raise SystemExit(f'{category} account pricing contains a record without model identity')
+    prices = row.get('pricing')
+    if not isinstance(prices, list) or not prices:
+        raise SystemExit(f'{category} account pricing contains a model without pricing rows')
+    for price in prices:
+        if not isinstance(price, dict) or not str(price.get('metric') or '').strip():
+            raise SystemExit(f'{category} account pricing contains a row without metric')
+        unit = float(price.get('unit_quantity', 0))
+        credits = float(price.get('credits', -1))
+        mcredits = float(price.get('mcredits', -1))
+        if not all(math.isfinite(v) for v in (unit, credits, mcredits)) or unit <= 0 or credits < 0 or mcredits < 0:
+            raise SystemExit(f'{category} account pricing contains invalid numeric values')
+        if abs(credits - (mcredits / 1000.0)) > max(0.000001, abs(credits) * 0.000001):
+            raise SystemExit(f'{category} account pricing credits/mcredits mismatch')
+        price_count += 1
+print(f'[amarktai] GenX {category} account pricing: {len(rows)} models / {price_count} metric rows')
+PY
+}
+
+log "Verifying GenX streaming text model access"
+text_catalogue="$(genx_request "${genx_base}/v1/models")" || fail "GenX streaming text catalogue request failed; verify GENX_API_KEY and GENX_BASE_URL"
+[[ -n "${text_catalogue}" ]] || fail "GenX streaming text catalogue returned an empty response"
+grep -Fq "${DEFAULT_TEXT_MODEL}" <<<"${text_catalogue}" || fail "DEFAULT_TEXT_MODEL ${DEFAULT_TEXT_MODEL} is not present in the GenX streaming text catalogue"
+
+for category in text image video voice audio; do
+  log "Verifying GenX ${category} Router catalogue contract"
+  catalogue="$(genx_request "${genx_base}/api/v1/models?category=${category}")" || fail "GenX ${category} catalogue request failed"
+  validate_catalogue "${category}" "${catalogue}" || fail "GenX ${category} catalogue returned an unsupported contract"
+
+  log "Verifying GenX ${category} authenticated account pricing"
+  account_pricing="$(genx_request "${genx_base}/api/v1/account/pricing?category=${category}")" || fail "GenX ${category} account pricing request failed"
+  validate_account_pricing "${category}" "${account_pricing}" || fail "GenX ${category} account pricing returned an unsupported contract"
+done
 
 if ! genx_request "${genx_base}/api/v1/account/credits" >/dev/null; then
-  log "WARNING: GenX credit-balance endpoint was unavailable. Catalogue access passed, but confirm sufficient account credit before acceptance generation."
+  log "WARNING: GenX credit-balance endpoint was unavailable. Catalogue and account pricing access passed, but confirm sufficient account credit before acceptance generation."
 else
   log "GenX account access passed"
 fi
@@ -106,4 +214,4 @@ log "Preflight passed"
 log "Domain: ${DOMAIN}"
 log "GenX text model: ${DEFAULT_TEXT_MODEL}"
 log "CPU cores: ${cpu_count}; RAM: ~${memory_gb} GB; free disk: ${disk_gb} GB"
-log "Compose configuration and GenX catalogue access are valid"
+log "Compose configuration, GenX catalogues and authenticated tier pricing are valid"
