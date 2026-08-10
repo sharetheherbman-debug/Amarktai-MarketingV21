@@ -11,12 +11,20 @@ load_production_env
 on_error() {
   log "Deployment failed. Recent service logs follow."
   compose ps || true
-  compose logs --tail=120 api generation-worker render-worker web nginx caddy || true
+  if shared_host_nginx_enabled; then
+    compose logs --tail=120 api generation-worker render-worker web nginx || true
+  else
+    compose logs --tail=120 api generation-worker render-worker web nginx caddy || true
+  fi
 }
 trap on_error ERR
 
 log "Pulling base images"
-compose pull postgres redis nginx caddy
+if shared_host_nginx_enabled; then
+  compose pull postgres redis nginx
+else
+  compose pull postgres redis nginx caddy
+fi
 
 log "Building application images"
 compose build --pull api generation-worker render-worker web migrate
@@ -27,8 +35,13 @@ compose up -d postgres redis
 log "Running database migrations"
 compose run --rm migrate
 
-log "Starting application, workers and HTTPS edge"
-compose up -d api generation-worker render-worker web nginx caddy
+if shared_host_nginx_enabled; then
+  log "Starting application and loopback edge behind the existing host Nginx"
+  compose up -d api generation-worker render-worker web nginx
+else
+  log "Starting application, workers and HTTPS edge"
+  compose up -d api generation-worker render-worker web nginx caddy
+fi
 
 log "Waiting for https://${DOMAIN}/ready"
 ready=0
