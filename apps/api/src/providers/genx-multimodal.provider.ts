@@ -29,6 +29,23 @@ export interface GenXModel {
   metadata?: Record<string, unknown>;
 }
 
+export interface GenXAccountPriceUnit {
+  metric: string;
+  unit_quantity: number;
+  credits: number;
+  mcredits: number;
+}
+
+export interface GenXAccountPricingModel {
+  model: string;
+  name: string;
+  category: string;
+  provider?: string;
+  billing_mode?: string;
+  pricing: GenXAccountPriceUnit[];
+  raw: Record<string, unknown>;
+}
+
 export interface GenXGenerateRequest {
   model: string;
   params: Record<string, unknown>;
@@ -55,6 +72,27 @@ function arrayValue(value: unknown): unknown[] {
   return Array.isArray(value) ? value : [];
 }
 
+function catalogueItems(raw: unknown): unknown[] {
+  const root = recordValue(raw);
+  const data = root.data;
+  const dataRecord = recordValue(data);
+  return arrayValue(raw).length > 0
+    ? arrayValue(raw)
+    : arrayValue(data).length > 0
+      ? arrayValue(data)
+      : arrayValue(root.models).length > 0
+        ? arrayValue(root.models)
+        : arrayValue(root.items).length > 0
+          ? arrayValue(root.items)
+          : arrayValue(root.results).length > 0
+            ? arrayValue(root.results)
+            : arrayValue(dataRecord.models).length > 0
+              ? arrayValue(dataRecord.models)
+              : arrayValue(dataRecord.items).length > 0
+                ? arrayValue(dataRecord.items)
+                : arrayValue(dataRecord.results);
+}
+
 export class GenXMultimodalProvider {
   private apiKey: string;
   private baseUrl: string;
@@ -67,19 +105,71 @@ export class GenXMultimodalProvider {
   async listModels(category?: string): Promise<GenXModel[]> {
     const suffix = category ? `?category=${encodeURIComponent(category)}` : '';
     const raw = await this.request('GET', `/api/v1/models${suffix}`);
-    const root = recordValue(raw);
-    const data = root.data;
-    const dataRecord = recordValue(data);
-    const models = arrayValue(raw).length > 0
-      ? arrayValue(raw)
-      : arrayValue(data).length > 0
-        ? arrayValue(data)
-        : arrayValue(root.models).length > 0
-          ? arrayValue(root.models)
-          : arrayValue(dataRecord.models).length > 0
-            ? arrayValue(dataRecord.models)
-            : arrayValue(dataRecord.items);
-    return models.map((model) => this.normalizeModel(recordValue(model))).filter((model) => Boolean(model.id));
+    const items = catalogueItems(raw);
+    const models: GenXModel[] = [];
+
+    // The live Router catalogue returns model IDs as strings. Enrich those IDs
+    // from the documented model-detail endpoint in modest batches so catalogue
+    // refreshes stay below account concurrency limits. Object catalogues remain
+    // supported for backwards compatibility.
+    const batchSize = 8;
+    for (let index = 0; index < items.length; index += batchSize) {
+      const batch = items.slice(index, index + batchSize);
+      const enriched = await Promise.all(batch.map(async (item) => {
+        if (typeof item === 'string' && item.trim()) {
+          const modelId = item.trim();
+          try {
+            const detail = await this.getModel(modelId);
+            return {
+              ...detail,
+              category: detail.category || category || this.inferCategory({ model: modelId }),
+            };
+          } catch (error) {
+            logger.warn(`GenX model detail unavailable for ${modelId}; retaining catalogue identity: ${error}`);
+            return this.normalizeModel({ model: modelId, category: category || '' }, category);
+          }
+        }
+        return this.normalizeModel(recordValue(item), category);
+      }));
+      models.push(...enriched.filter((model) => Boolean(model.id)));
+    }
+
+    return models;
+  }
+
+  async listAccountPricing(category?: string): Promise<GenXAccountPricingModel[]> {
+    const suffix = category ? `?category=${encodeURIComponent(category)}` : '';
+    const raw = await this.request('GET', `/api/v1/account/pricing${suffix}`);
+    const items = catalogueItems(raw);
+
+    return items.map((item) => {
+      const record = recordValue(item);
+      const model = String(record.model || record.model_id || record.id || '').trim();
+      const pricing = arrayValue(record.pricing).map((row) => {
+        const price = recordValue(row);
+        return {
+          metric: String(price.metric || '').trim(),
+          unit_quantity: Number(price.unit_quantity || 0),
+          credits: Number(price.credits || 0),
+          mcredits: Number(price.mcredits || 0),
+        };
+      }).filter((row) => (
+        Boolean(row.metric) &&
+        Number.isFinite(row.unit_quantity) && row.unit_quantity > 0 &&
+        Number.isFinite(row.credits) && row.credits >= 0 &&
+        Number.isFinite(row.mcredits) && row.mcredits >= 0
+      ));
+
+      return {
+        model,
+        name: String(record.name || model),
+        category: String(record.category || category || ''),
+        provider: record.provider ? String(record.provider) : undefined,
+        billing_mode: record.billing_mode ? String(record.billing_mode) : undefined,
+        pricing,
+        raw: record,
+      };
+    }).filter((model) => Boolean(model.model));
   }
 
   async getModel(modelId: string): Promise<GenXModel> {
@@ -191,18 +281,24 @@ export class GenXMultimodalProvider {
     }
   }
 
-  private normalizeModel(model: Record<string, unknown>): GenXModel {
+  private normalizeModel(model: Record<string, unknown>, categoryHint = ''): GenXModel {
+    const id = String(model.id || model.model_id || model.model || model.slug || '');
     return {
-      id: String(model.id || model.model_id || model.slug || ''),
-      name: String(model.name || model.display_name || model.id || model.model_id || ''),
-      category: String(model.category || model.type || this.inferCategory(model)),
+      id,
+      name: String(model.name || model.display_name || id),
+      category: String(model.category || model.type || categoryHint || this.inferCategory(model)),
       vendor: model.vendor || model.provider ? String(model.vendor || model.provider) : undefined,
       inputs: arrayValue(model.inputs).map(String),
       outputs: arrayValue(model.outputs).map(String),
       operations: arrayValue(model.operations || model.capabilities).map(String),
       parameters: recordValue(model.parameters || model.input_schema || model.schema),
-      available: model.available !== false && model.status !== 'unavailable',
-      deprecated: model.deprecated === true || model.status === 'deprecated',
+      available: (
+        model.available !== false &&
+        model.is_active !== false &&
+        Number(model.is_active ?? 1) !== 0 &&
+        model.status !== 'unavailable'
+      ),
+      deprecated: model.deprecated === true || model.status === 'deprecated' || Boolean(model.retired_at),
       metadata: model,
     };
   }
@@ -234,7 +330,7 @@ export class GenXMultimodalProvider {
   }
 
   private inferCategory(model: Record<string, unknown>): string {
-    const id = String(model.id || model.model_id || '').toLowerCase();
+    const id = String(model.id || model.model_id || model.model || '').toLowerCase();
     if (id.includes('image') || id.includes('dall') || id.includes('flux') || id.includes('sdxl')) return 'image';
     if (id.includes('video') || id.includes('sora') || id.includes('runway') || id.includes('seedance')) return 'video';
     if (id.includes('whisper') || id.includes('tts') || id.includes('voice') || id.includes('speech')) return 'voice';
