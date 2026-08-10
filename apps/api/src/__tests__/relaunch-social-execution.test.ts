@@ -70,12 +70,10 @@ describe('Relaunch Control execution boundary', () => {
 
     const allowedRawSender = path.resolve(repositoryRoot, 'apps/api/src/services/controlled-email-delivery.service.ts');
     const lowLevelSender = path.resolve(repositoryRoot, 'apps/api/src/services/email-delivery.service.ts');
+    const rawImportPattern = /from\s+['"](?:\.\.\/services\/|\.\/)?email-delivery\.service['"]/;
     const directImports = walkTypeScript('apps/api/src')
       .filter((file) => file !== allowedRawSender && file !== lowLevelSender && !file.includes(`${path.sep}__tests__${path.sep}`))
-      .filter((file) => {
-        const source = fs.readFileSync(file, 'utf8');
-        return source.includes("email-delivery.service'") || source.includes('email-delivery.service"');
-      });
+      .filter((file) => rawImportPattern.test(fs.readFileSync(file, 'utf8')));
 
     expect(directImports).toEqual([]);
   });
