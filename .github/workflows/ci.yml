@@ -167,6 +167,9 @@ jobs:
       GENX_API_KEY: docker-placeholder-genx-key
       GENX_WEBHOOK_SECRET: docker-webhook-secret-that-is-long-enough
       GENX_WEBHOOK_URL: https://marketing.example.com/api/v1/webhooks/genx
+      GENX_FX_RATES_TO_GBP: '{"USD":0.79,"EUR":0.86}'
+      APPLICATION_CONNECTOR_SIGNING_SECRET: docker-connector-signing-secret-that-is-long-enough
+      EQUIPROFILE_CONNECTOR_KEY: docker-equiprofile-connector-key-that-is-long-enough
     steps:
       - uses: actions/checkout@v4
       - name: Validate VPS shell scripts
