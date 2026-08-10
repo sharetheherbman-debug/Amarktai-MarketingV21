@@ -4,6 +4,20 @@ import path from 'path';
 const repositoryRoot = path.resolve(__dirname, '..', '..', '..', '..');
 const read = (relative: string) => fs.readFileSync(path.resolve(repositoryRoot, relative), 'utf8');
 
+function walkTypeScript(relative: string): string[] {
+  const root = path.resolve(repositoryRoot, relative);
+  const files: string[] = [];
+  const visit = (directory: string) => {
+    for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+      const absolute = path.join(directory, entry.name);
+      if (entry.isDirectory()) visit(absolute);
+      else if (entry.isFile() && entry.name.endsWith('.ts')) files.push(absolute);
+    }
+  };
+  visit(root);
+  return files;
+}
+
 describe('Relaunch Control execution boundary', () => {
   test('manual and scheduled social delivery cannot bypass the approval gate', () => {
     const scheduler = read('apps/api/src/services/scheduler.service.ts');
@@ -34,6 +48,49 @@ describe('Relaunch Control execution boundary', () => {
     expect(gate).toContain('Daily advertising budget exceeded');
     expect(gate).toContain("status='running'");
     expect(gate).toContain("status='completed'");
+  });
+
+  test('external email delivery cannot bypass the approval gate', () => {
+    const controlled = read('apps/api/src/services/controlled-email-delivery.service.ts');
+    const reports = read('apps/api/src/services/client-reports.service.ts');
+    const reportRoutes = read('apps/api/src/routes/client-reports.ts');
+
+    expect(controlled).toContain('requireExecutionApproval');
+    expect(controlled).toContain("action_type: 'email_send'");
+    expect(controlled).toContain("channel: 'email'");
+    expect(controlled).toContain('markExecutionRunning');
+    expect(controlled).toContain('markExecutionCompleted');
+    expect(controlled).toContain('markExecutionFailed');
+    expect(controlled.indexOf('requireExecutionApproval')).toBeLessThan(controlled.indexOf('await deliverEmail('));
+
+    expect(reports).toContain('deliverEmailBatchThroughControlCentre');
+    expect(reports).not.toContain("from './email-delivery.service'");
+    expect(reports).toContain('client-report-email:');
+    expect(reportRoutes).toContain('req.user!.userId');
+
+    const allowedRawSender = path.resolve(repositoryRoot, 'apps/api/src/services/controlled-email-delivery.service.ts');
+    const lowLevelSender = path.resolve(repositoryRoot, 'apps/api/src/services/email-delivery.service.ts');
+    const directImports = walkTypeScript('apps/api/src')
+      .filter((file) => file !== allowedRawSender && file !== lowLevelSender && !file.includes(`${path.sep}__tests__${path.sep}`))
+      .filter((file) => {
+        const source = fs.readFileSync(file, 'utf8');
+        return source.includes("email-delivery.service'") || source.includes('email-delivery.service"');
+      });
+
+    expect(directImports).toEqual([]);
+  });
+
+  test('advertising integration remains read-only until a controlled mutation path is implemented', () => {
+    const integrationRoutes = read('apps/api/src/routes/integrations.ts');
+    const external = read('apps/api/src/services/external-platform.service.ts');
+
+    expect(integrationRoutes).toContain("router.post('/advertising/connections/:id/sync'");
+    expect(integrationRoutes).toContain("router.get('/advertising/campaigns'");
+    expect(integrationRoutes).not.toMatch(/router\.(post|put|patch|delete)\('\/advertising\/campaigns/);
+    expect(external).toContain('export async function syncAdvertising(');
+    expect(external).not.toContain('campaigns:mutate');
+    expect(external).not.toContain('adGroups:mutate');
+    expect(external).not.toContain('campaignBudgets:mutate');
   });
 
   test('pending decisions are committed before the operational hold is thrown', () => {
