@@ -43,6 +43,12 @@ function getEnvNumber(key: string, defaultValue: number): number {
   return parsed;
 }
 
+function getPositiveEnvNumber(key: string, defaultValue: number): number {
+  const value = getEnvNumber(key, defaultValue);
+  if (value <= 0) throw new Error(`${key} must be greater than zero`);
+  return value;
+}
+
 function getEnvBoolean(key: string, defaultValue: boolean): boolean {
   const value = process.env[key];
   if (!value) return defaultValue;
@@ -107,6 +113,7 @@ export const env = {
   GENX_PRICE_REFRESH_MINUTES: getEnvNumber('GENX_PRICE_REFRESH_MINUTES', 360),
   GENX_PRICE_MAX_AGE_MINUTES: getEnvNumber('GENX_PRICE_MAX_AGE_MINUTES', 720),
   GENX_PRICING_SOURCE_CURRENCY: genxPricingCurrency,
+  GENX_PROVIDER_CREDITS_PER_USD: getPositiveEnvNumber('GENX_PROVIDER_CREDITS_PER_USD', 100),
   GENX_FX_RATES_TO_GBP: getEnv('GENX_FX_RATES_TO_GBP', '{}'),
   GENERATION_RESERVATION_TTL_MINUTES: getEnvNumber('GENERATION_RESERVATION_TTL_MINUTES', 60),
 
