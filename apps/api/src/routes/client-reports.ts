@@ -51,8 +51,17 @@ router.post('/:reportId/publish', requireAgencyAccess('owner', 'admin', 'manager
 });
 
 router.post('/:reportId/send', requireAgencyAccess('owner', 'admin', 'manager'), validateBody(sendReportSchema), async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction) => {
-  try { res.json({ success: true, data: await reportsService.sendReport(req.params.reportId, req.body.agency_id, req.body.recipients) }); }
-  catch (error) { next(error); }
+  try {
+    res.json({
+      success: true,
+      data: await reportsService.sendReport(
+        req.params.reportId,
+        req.body.agency_id,
+        req.body.recipients,
+        req.user!.userId
+      ),
+    });
+  } catch (error) { next(error); }
 });
 
 router.delete('/:reportId', requireAgencyAccess('owner', 'admin'), async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction) => {
