@@ -45,10 +45,10 @@ function requiredConnectorValue(key: string, developmentDefault = ''): string {
 function connectorConfig() {
   return {
     signingPepper: requiredConnectorValue('APPLICATION_CONNECTOR_SIGNING_SECRET', 'development-connector-signing-pepper'),
-    applicationId: process.env.EQUIPROFILE_APP_ID || 'equiprofile',
-    applicationName: process.env.EQUIPROFILE_APP_NAME || 'EquiProfile',
-    applicationUrl: process.env.EQUIPROFILE_APP_URL || 'http://localhost:5000',
-    connectorKey: requiredConnectorValue('EQUIPROFILE_CONNECTOR_KEY', 'development-equiprofile-connector-key'),
+    applicationId: process.env.HOST_APP_ID || process.env.EQUIPROFILE_APP_ID || 'equiprofile',
+    applicationName: process.env.HOST_APP_NAME || process.env.EQUIPROFILE_APP_NAME || 'EquiProfile',
+    applicationUrl: process.env.HOST_APP_URL || process.env.EQUIPROFILE_APP_URL || 'http://localhost:5000',
+    connectorKey: process.env.HOST_APP_CONNECTOR_KEY || requiredConnectorValue('EQUIPROFILE_CONNECTOR_KEY', 'development-equiprofile-connector-key'),
     maxClockSkewSeconds: Number(process.env.APPLICATION_CONNECTOR_MAX_CLOCK_SKEW_SECONDS || 300),
     ssoCodeTtlSeconds: Number(process.env.APPLICATION_SSO_CODE_TTL_SECONDS || 120),
   };
@@ -221,6 +221,7 @@ export async function redeemSsoCode(code: string): Promise<{
   accessToken: string;
   refreshToken: string;
   target_path: string;
+  mfa_enrollment_required: boolean;
 }> {
   if (!code || code.length < 32) throw new UnauthorizedError('Invalid SSO code');
   const codeHash = hashOpaqueValue(code);
@@ -243,7 +244,7 @@ export async function redeemSsoCode(code: string): Promise<{
 
     const email = String(sso.email).toLowerCase();
     let userResult = await client.query(
-      'SELECT id,email,name,avatar,role,email_verified,status,created_at FROM users WHERE LOWER(email)=$1 AND deleted_at IS NULL FOR UPDATE',
+      'SELECT id,email,name,avatar,role,email_verified,status,created_at,two_factor_enabled FROM users WHERE LOWER(email)=$1 AND deleted_at IS NULL FOR UPDATE',
       [email]
     );
     if (userResult.rows.length === 0) {
@@ -251,7 +252,7 @@ export async function redeemSsoCode(code: string): Promise<{
       userResult = await client.query(
         `INSERT INTO users (email,password_hash,name,role,email_verified,status)
          VALUES ($1,$2,$3,'admin',TRUE,'active')
-         RETURNING id,email,name,avatar,role,email_verified,status,created_at`,
+         RETURNING id,email,name,avatar,role,email_verified,status,created_at,two_factor_enabled`,
         [email, passwordHash, String(sso.display_name)]
       );
     } else {
@@ -260,7 +261,7 @@ export async function redeemSsoCode(code: string): Promise<{
            role=CASE WHEN role='superadmin' THEN role ELSE 'admin' END,
            updated_at=NOW()
          WHERE id=$1
-         RETURNING id,email,name,avatar,role,email_verified,status,created_at`,
+         RETURNING id,email,name,avatar,role,email_verified,status,created_at,two_factor_enabled`,
         [userResult.rows[0].id, String(sso.display_name)]
       );
     }
@@ -298,7 +299,11 @@ export async function redeemSsoCode(code: string): Promise<{
       "SELECT COUNT(*)::int AS count FROM organization_members WHERE organization_id=$1 AND role='owner'",
       [organization.id]
     );
-    const membershipRole = Number(ownerCount.rows[0]?.count || 0) === 0 ? 'owner' : 'admin';
+    if (Number(ownerCount.rows[0]?.count || 0) > 0) {
+      const existingOwner = await client.query("SELECT user_id FROM organization_members WHERE organization_id=$1 AND role='owner'", [organization.id]);
+      if (String(existingOwner.rows[0]?.user_id) !== String(user.id)) throw new AppError(409, 'This application already has a Marketing owner', 'OWNER_ALREADY_PROVISIONED');
+    }
+    const membershipRole = 'owner';
     await client.query(
       `INSERT INTO organization_members (organization_id,user_id,role,invited_by)
        VALUES ($1,$2,$3,$2)
@@ -307,13 +312,13 @@ export async function redeemSsoCode(code: string): Promise<{
       [organization.id, user.id, membershipRole]
     );
 
-    const accessToken = generateAccessToken(user.id, user.email, user.role);
-    const refreshToken = generateRefreshToken(user.id);
-    const refreshTokenHash = hashOpaqueValue(refreshToken);
-    await client.query(
+    const mfaComplete = user.two_factor_enabled === true;
+    const accessToken = generateAccessToken(user.id, user.email, user.role, mfaComplete);
+    const refreshToken = mfaComplete ? generateRefreshToken(user.id) : '';
+    if (refreshToken) await client.query(
       `INSERT INTO refresh_tokens (user_id,token_hash,expires_at)
        VALUES ($1,$2,NOW() + INTERVAL '7 days')`,
-      [user.id, refreshTokenHash]
+      [user.id, hashOpaqueValue(refreshToken)]
     );
     await client.query('UPDATE users SET last_login_at=NOW() WHERE id=$1', [user.id]);
 
@@ -322,6 +327,7 @@ export async function redeemSsoCode(code: string): Promise<{
       organization,
       accessToken,
       refreshToken,
+      mfa_enrollment_required: !mfaComplete,
       target_path: safeTargetPath(String(sso.target_path)),
     };
   });

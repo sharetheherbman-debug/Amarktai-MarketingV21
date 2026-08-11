@@ -124,7 +124,7 @@ app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use(generalLimiter);
 
-app.get('/', (_req: Request, res: Response) => res.json({ name: 'AmarktAI Marketing API', version: '1.0.0', status: 'running', timestamp: new Date().toISOString() }));
+app.get('/', (_req: Request, res: Response) => res.json({ name: 'EquiProfile Marketing API', version: '1.0.0', status: 'running', timestamp: new Date().toISOString() }));
 app.get('/health', (_req: Request, res: Response) => res.json({ status: 'ok', timestamp: new Date().toISOString() }));
 
 const tenant = [requireAuth, requireOrganizationMembership] as const;
@@ -156,7 +156,7 @@ app.use('/api/v1/amai', ...tenant, amaiRoutes);
 app.use('/api/v1/crm', ...tenant, crmAiActionRoutes);
 app.use('/api/v1/crm', ...tenant, crmRoutes);
 app.use('/api/v1/integrations', ...tenant, integrationRoutes);
-app.use('/api/v1/billing', billingRoutes);
+app.use('/api/v1/billing', ...tenant, billingRoutes);
 app.use('/api/v1/generation-credits', ...tenant, generationCreditRoutes);
 app.use('/api/v1/relaunch-control', ...tenant, relaunchControlRoutes);
 app.use('/api/v1/agency', ...tenant, agencyRoutes);

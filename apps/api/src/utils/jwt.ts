@@ -7,8 +7,8 @@ export interface TokenPayload extends AuthPayload {
   exp: number;
 }
 
-export function generateAccessToken(userId: string, email: string, role: string): string {
-  const payload: AuthPayload = { userId, email, role: role as any };
+export function generateAccessToken(userId: string, email: string, role: string, mfa = true): string {
+  const payload: AuthPayload = { userId, email, role: role as any, mfa };
   return jwt.sign(payload, env.JWT_SECRET, {
     expiresIn: env.JWT_EXPIRES_IN as string,
   } as jwt.SignOptions);

@@ -312,6 +312,7 @@ export interface AuthPayload {
   userId: string;
   email: string;
   role: UserRole;
+  mfa: boolean;
 }
 
 export interface TokenPair {

@@ -37,7 +37,7 @@ router.post('/sso/redeem', async (req: Request, res: Response<ApiResponse>, next
       ...cookieOptions,
       maxAge: 15 * 60 * 1000,
     });
-    res.cookie('refreshToken', session.refreshToken, {
+    if (session.refreshToken) res.cookie('refreshToken', session.refreshToken, {
       ...cookieOptions,
       maxAge: 7 * 24 * 60 * 60 * 1000,
     });
@@ -50,6 +50,7 @@ router.post('/sso/redeem', async (req: Request, res: Response<ApiResponse>, next
         accessToken: session.accessToken,
         refreshToken: session.refreshToken,
         target_path: session.target_path,
+        mfa_enrollment_required: session.mfa_enrollment_required,
       },
     });
   } catch (error) {

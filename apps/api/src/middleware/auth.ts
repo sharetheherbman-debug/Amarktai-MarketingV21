@@ -26,10 +26,15 @@ export function requireAuth(req: AuthRequest, res: Response, next: NextFunction)
     }
 
     const payload = verifyAccessToken(token);
+    if (payload.mfa !== true) {
+      res.status(403).json({ success: false, error: { message: 'Marketing MFA verification required', code: 'MFA_REQUIRED' } });
+      return;
+    }
     req.user = {
       userId: payload.userId,
       email: payload.email,
       role: payload.role,
+      mfa: true,
     };
     next();
   } catch (error) {
@@ -38,6 +43,19 @@ export function requireAuth(req: AuthRequest, res: Response, next: NextFunction)
       success: false,
       error: { message: 'Invalid or expired token', code: 'INVALID_TOKEN' },
     });
+  }
+}
+
+export function requireMfaEnrollment(req: AuthRequest, res: Response, next: NextFunction): void {
+  try {
+    const authHeader = req.headers.authorization;
+    const token = authHeader?.startsWith('Bearer ') ? authHeader.substring(7) : undefined;
+    if (!token) throw new Error('missing');
+    const payload = verifyAccessToken(token);
+    req.user = { userId: payload.userId, email: payload.email, role: payload.role, mfa: payload.mfa };
+    next();
+  } catch {
+    res.status(401).json({ success: false, error: { message: 'MFA enrollment session required', code: 'UNAUTHORIZED' } });
   }
 }
 
