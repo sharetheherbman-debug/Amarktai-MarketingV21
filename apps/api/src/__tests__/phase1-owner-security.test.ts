@@ -5,10 +5,16 @@ const root = path.resolve(__dirname, '..', '..', '..', '..');
 const read = (file: string) => fs.readFileSync(path.join(root, file), 'utf8').replace(/\r\n/g, '\n');
 
 describe('Phase 1 owner-only security boundary', () => {
-  test('public registration and public product entry are disabled', () => {
+  test('public registration and every legacy public product route prefix are disabled', () => {
     expect(read('apps/api/src/routes/auth.ts')).toContain('REGISTRATION_DISABLED');
     const middleware = read('apps/web/middleware.ts');
-    expect(middleware).toContain("'/', '/register', '/pricing'");
+    for (const route of [
+      '/', '/register', '/pricing', '/features', '/about', '/ai-agents', '/blog',
+      '/contact', '/docs', '/compare', '/use-cases', '/integrations',
+    ]) {
+      expect(middleware).toContain(`'${route}'`);
+    }
+    expect(middleware).toContain('pathname.startsWith(`${prefix}/`)');
     expect(middleware).toContain("new URL('/login'");
   });
 
