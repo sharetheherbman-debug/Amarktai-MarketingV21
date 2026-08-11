@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuthStore } from '@/stores/auth.store';
 import { useUIStore } from '@/stores/ui.store';
@@ -12,23 +12,30 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const router = useRouter();
   const { isAuthenticated, isLoading, checkAuth } = useAuthStore();
   const { sidebarOpen } = useUIStore();
+  const [authChecked, setAuthChecked] = useState(false);
 
   useEffect(() => {
-    checkAuth();
+    let active = true;
+    void checkAuth().finally(() => {
+      if (active) setAuthChecked(true);
+    });
+    return () => {
+      active = false;
+    };
   }, [checkAuth]);
 
   useEffect(() => {
-    if (!isLoading && !isAuthenticated) {
-      router.push('/login');
+    if (authChecked && !isLoading && !isAuthenticated) {
+      router.replace('/login');
     }
-  }, [isLoading, isAuthenticated, router]);
+  }, [authChecked, isLoading, isAuthenticated, router]);
 
-  if (isLoading) {
+  if (!authChecked || isLoading) {
     return (
       <div className="flex h-screen items-center justify-center bg-[var(--color-bg)]">
         <div className="flex flex-col items-center gap-4">
           <div className="h-8 w-8 animate-spin rounded-full border-2 border-brand-500 border-t-transparent" />
-          <p className="text-sm text-zinc-400">Loading...</p>
+          <p className="text-sm text-zinc-400">Checking secure session...</p>
         </div>
       </div>
     );
