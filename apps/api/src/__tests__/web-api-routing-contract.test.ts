@@ -26,7 +26,29 @@ describe('Web/API routing contract', () => {
     expect(authStore).toContain('`${API_URL}/organizations`');
 
     expect(apiClient).toContain("if (!trimmed || trimmed === '/api') return '/api/v1';");
-    expect(apiClient).toContain("new URL(joined, origin)");
+    expect(apiClient).toContain('new URL(joined, origin)');
     expect(apiClient).toContain('return `${url.pathname}${url.search}${url.hash}`;');
+  });
+
+  it('establishes the owner session before entering the dashboard', () => {
+    const loginPage = fs.readFileSync(
+      path.join(repoRoot, 'apps/web/app/(auth)/login/page.tsx'),
+      'utf8'
+    );
+    const dashboardLayout = fs.readFileSync(
+      path.join(repoRoot, 'apps/web/app/(dashboard)/layout.tsx'),
+      'utf8'
+    );
+
+    expect(loginPage).toContain("import { useAuthStore } from '@/stores/auth.store';");
+    expect(loginPage).toContain('await login({ email, password });');
+    expect(loginPage).toContain("router.replace('/dashboard');");
+    expect(loginPage).not.toContain("fetch('/api/auth/login'");
+    expect(loginPage).not.toContain('Sign up');
+
+    expect(dashboardLayout).toContain('const [authChecked, setAuthChecked] = useState(false);');
+    expect(dashboardLayout).toContain('if (authChecked && !isLoading && !isAuthenticated)');
+    expect(dashboardLayout).toContain("router.replace('/login');");
+    expect(dashboardLayout).toContain('if (!authChecked || isLoading)');
   });
 });
