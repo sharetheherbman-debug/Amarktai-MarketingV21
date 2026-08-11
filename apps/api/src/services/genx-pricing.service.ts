@@ -674,6 +674,7 @@ export async function quoteGeneration(input: {
   modelId: string;
   operation: string;
   quantity: number;
+  quantityUnit?: 'billing_units' | 'tokens';
 }): Promise<GenXPriceQuote> {
   if (!Number.isFinite(input.quantity) || input.quantity <= 0) {
     throw new AppError(400, 'Quantity must be positive', 'GENX_QUOTE_QUANTITY_INVALID');
@@ -711,8 +712,12 @@ export async function quoteGeneration(input: {
     );
   }
 
-  const wholesale = Number(row.wholesale_unit_cost_gbp) * input.quantity;
-  const retail = Number(row.retail_unit_cost_gbp) * input.quantity;
+  const billableUnit = String(row.billable_unit);
+  const quantity = input.quantityUnit === 'tokens'
+    ? tokenQuantityForBillingUnit(input.quantity, billableUnit)
+    : input.quantity;
+  const wholesale = Number(row.wholesale_unit_cost_gbp) * quantity;
+  const retail = Number(row.retail_unit_cost_gbp) * quantity;
   const baseCredits = Math.max(
     1,
     Math.ceil(retail * env.GENERATION_CREDITS_PER_GBP)
@@ -725,8 +730,8 @@ export async function quoteGeneration(input: {
   return {
     model_id: input.modelId,
     operation: input.operation,
-    billable_unit: String(row.billable_unit),
-    quantity: input.quantity,
+    billable_unit: billableUnit,
+    quantity,
     currency: 'GBP',
     wholesale_cost_gbp: wholesale,
     retail_charge_gbp: retail,
@@ -736,4 +741,23 @@ export async function quoteGeneration(input: {
     price_snapshot_id: String(row.id),
     price_effective_from: effectiveFrom.toISOString(),
   };
+}
+
+/** Convert raw provider token usage to the immutable catalogue billing unit. */
+export function tokenQuantityForBillingUnit(tokens: number, billableUnit: string): number {
+  if (!Number.isFinite(tokens) || tokens <= 0) {
+    throw new AppError(400, 'Token quantity must be positive', 'GENX_QUOTE_QUANTITY_INVALID');
+  }
+  const normalized = billableUnit.trim().toLowerCase();
+  if (normalized === 'token') return tokens;
+  if (normalized === 'thousand_tokens' || normalized === '1k_tokens') return tokens / 1_000;
+  if (normalized === 'million_tokens' || normalized === '1m_tokens') return tokens / 1_000_000;
+  if (normalized === 'request' || normalized.endsWith('_requests')) return 1;
+  const explicit = normalized.match(/^(\d+)_tokens$/);
+  if (explicit) return tokens / Number(explicit[1]);
+  throw new AppError(
+    503,
+    `Unsupported text billing unit: ${billableUnit}`,
+    'GENX_TEXT_BILLING_UNIT_UNSUPPORTED'
+  );
 }

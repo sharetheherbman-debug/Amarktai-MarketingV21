@@ -1,7 +1,7 @@
 import { query } from '../config/database';
 import { logger } from '../utils/logger';
 import { NotFoundError, AppError } from '../middleware/errorHandler';
-import { providerRouter } from '../providers/provider-router';
+import { generateGovernedText } from './governed-text-generation.service';
 import { contextEngine } from './context-engine.service';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -278,12 +278,14 @@ ${context.brandDna ? `Brand: ${context.brandDna.substring(0, 300)}` : ''}
 Return JSON: {"score":0,"factors":["..."],"next_action":"..."}`;
 
   try {
-    const result = await providerRouter.routeRequest(
-      [{ role: 'user', content: prompt }],
-      'gpt-4o-mini',
-      { max_tokens: 1000, temperature: 0.3 },
-      { organizationId: orgId }
-    );
+    const result = await generateGovernedText({
+      organizationId: orgId,
+      title: 'Analyse CRM lead',
+      prompt,
+      maxTokens: 1000,
+      temperature: 0.3,
+      payload: { purpose: 'crm_lead_analysis', contact_id: contactId },
+    });
     const parsed = JSON.parse(result.content.replace(/```json\n?|\n?```/g, ''));
     await query('UPDATE crm_contacts SET lead_score = $1, ai_next_action = $2, ai_insights = $3 WHERE id = $4', [parsed.score, parsed.next_action, JSON.stringify({ factors: parsed.factors }), contactId]);
     return parsed;
@@ -360,12 +362,14 @@ Description: ${deal.description || 'None'}
 Return JSON: {"health_score":0-100,"forecast":{"win_probability":0,"expected_value":0,"risk_factors":["..."]},"summary":"..."}`;
 
   try {
-    const result = await providerRouter.routeRequest(
-      [{ role: 'user', content: prompt }],
-      'gpt-4o-mini',
-      { max_tokens: 1500, temperature: 0.3 },
-      { organizationId: orgId }
-    );
+    const result = await generateGovernedText({
+      organizationId: orgId,
+      title: 'Analyse CRM deal',
+      prompt,
+      maxTokens: 1500,
+      temperature: 0.3,
+      payload: { purpose: 'crm_deal_analysis', deal_id: dealId },
+    });
     const parsed = JSON.parse(result.content.replace(/```json\n?|\n?```/g, ''));
     await query('UPDATE crm_deals SET ai_health_score = $1, ai_forecast = $2, ai_summary = $3 WHERE id = $4', [parsed.health_score, JSON.stringify(parsed.forecast), parsed.summary, dealId]);
     return parsed;
@@ -436,12 +440,14 @@ Lifetime Value: $${customer.lifetime_value_cents / 100}
 Return JSON: {"health_score":0-100,"churn_risk":0-100,"recommendations":["..."],"summary":"..."}`;
 
   try {
-    const result = await providerRouter.routeRequest(
-      [{ role: 'user', content: prompt }],
-      'gpt-4o-mini',
-      { max_tokens: 1500, temperature: 0.3 },
-      { organizationId: orgId }
-    );
+    const result = await generateGovernedText({
+      organizationId: orgId,
+      title: 'Analyse customer health',
+      prompt,
+      maxTokens: 1500,
+      temperature: 0.3,
+      payload: { purpose: 'crm_customer_analysis', customer_id: customerId },
+    });
     const parsed = JSON.parse(result.content.replace(/```json\n?|\n?```/g, ''));
     await query('UPDATE crm_customers SET health_score = $1, churn_risk = $2, ai_retention_recommendations = $3, ai_health_summary = $4 WHERE id = $5',
       [parsed.health_score, parsed.churn_risk, JSON.stringify(parsed.recommendations), parsed.summary, customerId]);

@@ -82,8 +82,8 @@ router.post('/', validateBody(createCampaignSchema), async (req: AuthRequest, re
 router.get('/:id', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction) => {
   try {
     const result = await query(
-      'SELECT * FROM campaigns WHERE id = $1 AND deleted_at IS NULL',
-      [req.params.id]
+      'SELECT * FROM campaigns WHERE id = $1 AND organization_id = $2 AND deleted_at IS NULL',
+      [req.params.id, req.organizationId]
     );
 
     if (result.rows.length === 0) {
@@ -111,10 +111,10 @@ router.put('/:id', async (req: AuthRequest, res: Response<ApiResponse>, next: Ne
     if (schedule) { updates.push(`schedule = $${paramCount++}`); values.push(JSON.stringify(schedule)); }
 
     updates.push(`updated_at = NOW()`);
-    values.push(req.params.id);
+    values.push(req.params.id, req.organizationId);
 
     const result = await query(
-      `UPDATE campaigns SET ${updates.join(', ')} WHERE id = $${paramCount} AND deleted_at IS NULL RETURNING *`,
+      `UPDATE campaigns SET ${updates.join(', ')} WHERE id = $${paramCount} AND organization_id = $${paramCount + 1} AND deleted_at IS NULL RETURNING *`,
       values
     );
 
@@ -131,8 +131,8 @@ router.put('/:id', async (req: AuthRequest, res: Response<ApiResponse>, next: Ne
 router.delete('/:id', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction) => {
   try {
     const result = await query(
-      'UPDATE campaigns SET deleted_at = NOW() WHERE id = $1 AND deleted_at IS NULL RETURNING id',
-      [req.params.id]
+      'UPDATE campaigns SET deleted_at = NOW() WHERE id = $1 AND organization_id = $2 AND deleted_at IS NULL RETURNING id',
+      [req.params.id, req.organizationId]
     );
 
     if (result.rows.length === 0) {

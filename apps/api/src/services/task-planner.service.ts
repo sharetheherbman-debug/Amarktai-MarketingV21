@@ -1,11 +1,10 @@
 import { query } from '../config/database';
 import { logger } from '../utils/logger';
 import { AppError } from '../middleware/errorHandler';
-import { providerRouter } from '../providers/provider-router';
+import { generateGovernedText } from './governed-text-generation.service';
 import * as memoryService from '../memory/memory.service';
 import { v4 as uuidv4 } from 'uuid';
 import { ChatMessage } from '../types';
-import { env } from '../config/env';
 
 export interface PlanOptions {
   orgId: string;
@@ -132,14 +131,21 @@ export async function createPlan(options: PlanOptions): Promise<TaskPlan> {
   if (!goal.trim()) throw new AppError(400, 'Goal is required', 'VALIDATION_ERROR');
   logger.info(`Creating task plan for goal: ${goal.substring(0, 100)}...`);
   const [agents, brandContext] = await Promise.all([getAvailableAgents(orgId), getBrandContext(orgId)]);
-  const result = await providerRouter.routeRequest(
-    buildPlanningPrompt(goal, agents, brandContext, context, maxTasks),
-    env.DEFAULT_TEXT_MODEL,
-    { temperature: 0.2, max_tokens: 2500 },
-    { organizationId: orgId, userId }
-  );
+  const planId = uuidv4();
+  const result = await generateGovernedText({
+    organizationId: orgId,
+    userId,
+    generationJobId: planId,
+    idempotencyKey: `task-plan:${planId}`,
+    title: 'Create autonomous task plan',
+    summary: goal.slice(0, 240),
+    messages: buildPlanningPrompt(goal, agents, brandContext, context, maxTasks),
+    maxTokens: 2500,
+    temperature: 0.2,
+    payload: { purpose: 'task_planning', maximum_tasks: maxTasks },
+  });
   const plan: TaskPlan = {
-    id: uuidv4(),
+    id: planId,
     ...parsePlanResponse(result.content, goal, agents, maxTasks),
     createdAt: new Date(),
   };

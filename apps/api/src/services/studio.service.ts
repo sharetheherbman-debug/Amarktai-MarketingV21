@@ -153,8 +153,10 @@ export async function createGeneration(
     },
     {
       jobId: `studio:${generation.id}`,
-      attempts: 3,
-      backoff: { type: 'exponential', delay: 5000 },
+      // Control Centre approvals may be granted after the owner reviews the
+      // queued request. Retain the same job/idempotency key while it waits.
+      attempts: 60,
+      backoff: { type: 'fixed', delay: 30_000 },
       removeOnComplete: { age: 86400 },
       removeOnFail: { age: 604800 },
     }
@@ -176,6 +178,32 @@ export async function getGeneration(id: string, orgId: string): Promise<StudioGe
   );
   if (result.rows.length === 0) throw new NotFoundError('Generation');
   return mapGenerationRow(result.rows[0]);
+}
+
+export async function retryGeneration(id: string, orgId: string, userId: string): Promise<StudioGeneration> {
+  const result = await query(
+    `SELECT * FROM studio_generations WHERE id=$1 AND organization_id=$2 FOR UPDATE`,
+    [id, orgId]
+  );
+  if (result.rows.length === 0) throw new NotFoundError('Generation');
+  const row = result.rows[0];
+  if (!['failed','cancelled'].includes(String(row.status))) return mapGenerationRow(row);
+  const options = typeof row.options === 'string' ? JSON.parse(row.options) : row.options || {};
+  const job = await generationQueue.add('studio-generate', {
+    kind: 'studio', generationId: id, organizationId: orgId, userId,
+    type: row.type, modelId: row.model, prompt: row.prompt,
+    negativePrompt: row.negative_prompt, options,
+  }, {
+    jobId: `studio:${id}:retry:${Number(row.attempt_count || 0) + 1}`,
+    attempts: 60, backoff: { type: 'fixed', delay: 30_000 },
+    removeOnComplete: { age: 86400 }, removeOnFail: { age: 604800 },
+  });
+  await query(
+    `UPDATE studio_generations SET status='pending',error_code=NULL,error_message=NULL,
+       cancellation_requested_at=NULL,queue_job_id=$1,updated_at=NOW() WHERE id=$2`,
+    [String(job.id), id]
+  );
+  return getGeneration(id, orgId);
 }
 
 export async function listGenerations(

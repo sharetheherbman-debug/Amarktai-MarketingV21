@@ -112,25 +112,6 @@ router.post('/social/connections/:id/test', async (req: AuthRequest, res: Respon
   } catch (error) { next(error); }
 });
 
-router.post('/social/posts', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
-  try {
-    const { organization_id, connection_id, body, content_id, campaign_id, media_urls, hashtags, scheduled_at, publish_now } = req.body;
-    if (!organization_id || !connection_id || !body) { res.status(400).json({ success: false, error: { message: 'organization_id, connection_id, and body required', code: 'BAD_REQUEST' } }); return; }
-    const post = await socialService.schedulePost(organization_id, connection_id, body, { content_id, campaign_id, media_urls, hashtags, scheduled_at });
-    const result = publish_now ? await socialService.publishPost(post.id, organization_id) : post;
-    res.status(201).json({ success: true, data: result });
-  } catch (error) { next(error); }
-});
-
-router.post('/social/posts/:id/publish', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
-  try {
-    const orgId = req.body.organization_id;
-    if (!orgId) { res.status(400).json({ success: false, error: { message: 'organization_id required', code: 'BAD_REQUEST' } }); return; }
-    const post = await socialService.publishPost(req.params.id, orgId);
-    res.json({ success: true, data: post });
-  } catch (error) { next(error); }
-});
-
 router.get('/social/posts', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
   try {
     const orgId = req.query.organization_id as string;

@@ -1,6 +1,6 @@
 import { query, transaction } from '../config/database';
 import { AppError, NotFoundError } from '../middleware/errorHandler';
-import { providerRouter } from '../providers/provider-router';
+import { generateGovernedText } from './governed-text-generation.service';
 
 interface SuggestedAction {
   action_type: string;
@@ -42,16 +42,20 @@ function normalizeActions(value: unknown): SuggestedAction[] {
   });
 }
 
-async function ask(orgId: string, prompt: string): Promise<Record<string, unknown>> {
-  const result = await providerRouter.routeRequest(
-    [
+async function ask(orgId: string, prompt: string, userId?: string): Promise<Record<string, unknown>> {
+  const result = await generateGovernedText({
+    organizationId: orgId,
+    userId,
+    title: 'Generate CRM recommendations',
+    summary: 'Analyse supplied CRM facts without changing customer records autonomously',
+    messages: [
       { role: 'system', content: 'You are a CRM analyst. Return only strict JSON matching the requested schema. Base recommendations only on the supplied facts.' },
       { role: 'user', content: prompt },
     ],
-    'gpt-4o-mini',
-    { max_tokens: 1800, temperature: 0.2 },
-    { organizationId: orgId }
-  );
+    maxTokens: 1800,
+    temperature: 0.2,
+    payload: { purpose: 'crm_recommendations' },
+  });
   return parseJson(result.content);
 }
 

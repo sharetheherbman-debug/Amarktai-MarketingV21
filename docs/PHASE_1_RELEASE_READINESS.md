@@ -2,74 +2,73 @@
 
 ## 1. Executive release decision
 
-**READY FOR CONTROLLED DEPLOYMENT** at code level. No production deployment, merge, DNS/TLS change, worker activation, external message, social publication or live charge was performed. This decision permits the exact candidates to enter controlled deployment; it does not claim live-provider acceptance.
+The code candidate is ready to enter controlled deployment acceptance. No production deployment, merge, DNS/TLS change, worker activation, external message, social publication, paid provider request or live charge was performed. This decision does not claim live-provider or subjective creative acceptance.
 
-## 2. Canonical repositories and takeover verification
+## 2. Canonical repositories
 
 - Management: `sharetheherbman-debug/Equiprofile-Marketing`, `phase-1/equiprofile-core-relaunch`, PR #2 to `main`.
 - Marketing: `sharetheherbman-debug/Amarktai-MarketingV21`, `phase-1/equiprofile-relaunch-genx-credits`, PR #3 to `development`.
-- Both heads matched the recorded takeover SHAs. Both PRs were open, draft, unmerged and mergeable. No branch was reset and no newer work was discarded.
+- Both branches matched the accepted heads at takeover. Both PRs remained open, draft and unmerged. No branch was reset and no newer work was discarded.
 
 ## 3. Management completion
 
-Pro/Stable/customer access boundaries, V2 launch selection, session revocation, suspended-account handling, origin protection, hidden exact-owner admin, non-executing embedded Marketing residue, signed connector/one-use SSO and consent-safe idempotent conversions remain covered. Management does not depend on Marketing availability.
+Pro/Stable/customer access boundaries, V2 launch selection, session revocation, suspended-account handling, origin protection, hidden exact-owner administration, non-executing embedded Marketing residue, signed connector/one-use SSO and consent-safe idempotent conversions remain covered. The upgrade page now truthfully presents EquiProfile Academy and EquiProfile Shop as disabled future products without changing checkout or entitlement behaviour.
 
-## 4. Marketing owner/authentication model
+## 4. Marketing owner and authentication model
 
-Phase 1 is one host application → one workspace → one owner. Public registration is disabled. Root/public product routes redirect to login. Password and connector SSO sessions both require Marketing TOTP. Enrollment secrets are encrypted; recovery codes are shown once, hashed, single-use and regenerable; replay counters, rate limits and audit evidence are present. Team-ready storage is preserved but outside launch navigation.
+Phase 1 is one host application to one workspace to one owner. Public registration is disabled. Root/public product routes redirect to login. Password and connector SSO sessions both require Marketing TOTP. Enrollment secrets are encrypted; recovery codes are shown once, hashed, single-use and regenerable; replay counters, rate limits and audit evidence are present. Team-ready storage is preserved but outside launch navigation.
 
-## 5. White-label, dashboard and product experience
+## 5. Product experience
 
-Release surfaces use EquiProfile Marketing, `marketing.equiprofile.online` metadata and `© 2026 Amarktai Network`. The dashboard uses live Control Centre, credit wallet, campaign, connection and GenX capability endpoints. Missing sources display unavailable, not fake metrics. Generation Credits show the internal wallet only; public checkout is not exposed.
-
-## 6. Launch-visible Marketing truth matrix
+Release surfaces use EquiProfile Marketing, `marketing.equiprofile.online` metadata and `© 2026 Amarktai Network`. The dashboard reads live Control Centre, wallet, campaign, connection and GenX capability state and displays unavailable states instead of invented metrics. Customer credit checkout is not exposed.
 
 | Surface | Phase 1 state |
 | --- | --- |
-| Login, reset, connector SSO, MFA | Working/code-tested; live mail and deployed MFA acceptance remain gates |
-| Dashboard | Working with live API state and truthful unavailable handling |
-| Relaunch Control Centre | Working/code-tested; live external-action proof remains a gate |
-| Generation Credits | Working wallet/ledger; public payment deferred |
-| Campaigns, content, Content/Creative Studio, calendar | Working/code-tested; real GenX/render proof remains a gate |
-| Agents, prompts, Brand DNA, knowledge, competitors, trends | Working/configuration-driven |
-| CRM and sales intelligence | Working wiring; live conversion flow remains a gate |
-| Social, email, analytics, integrations | Code-ready; provider connection and controlled live tests remain gates |
-| Advertising | Read/sync only; spend mutation deferred |
-| Admin GenX/runtime | Operational surface; real catalogue/pricing/worker proof remains a gate |
-| Settings | Launch exposes truthful appearance/security controls only |
-| Teams, agency, marketplace, developer, workflows, customer billing | Preserved but hidden/deferred from launch navigation |
+| Login, reset, connector SSO, MFA | Code-tested; live mail and deployed MFA acceptance remain gates |
+| Dashboard and Control Centre | Working with live API state; external-action proof remains a gate |
+| Campaign planning and Content Studio | Structured, versioned, owner-approved, quality-checked and partially recoverable in code |
+| Creative Studio and long-form media | Governed and recoverable in code; exact GenX media/render acceptance remains a gate |
+| Social, email, analytics and integrations | Code-ready; connected-provider acceptance remains a gate |
+| Advertising | Read/sync only; spend mutation is intentionally unavailable |
+| Teams, agency, marketplace, developer workflows and customer billing | Preserved but hidden/deferred from launch navigation |
 
-## 7. GenX, credits and generation lifecycle
+## 6. Campaign intelligence and Studio
 
-GenX remains the only active remote generation provider. Pricing/catalogue failures fail closed. Quote → reserve → execute → settle and failure → release/reversal paths are regression-covered. Promotional grants remain internal. No live provider success was fabricated.
+The owner supplies a grounded business brief, edits and approves the strategy before asset production, and receives durable format-specific runs linked to briefs, variants and revisions. Quality checks cover brief/brand alignment, factual and prohibited-claim risks, channel structure, CTA, originality and accessibility. The owner can edit, autosave, compare, restore, duplicate, comment, request changes and regenerate a selected section. Exact content versions bind approvals transactionally. See `CAMPAIGN_INTELLIGENCE_AND_STUDIO_ACCEPTANCE.md` for the capability matrix and human-review criteria.
+
+## 7. GenX and Generation Credits
+
+GenX remains the sole active remote generation provider. Catalogue or pricing failure fails closed. Text input and output reserve and settle against distinct authenticated rate-card metrics; media uses the applicable immutable operation snapshot. Each asset settles its own actual usage. Failure/cancellation releases unused holds, and partial campaign failure does not recharge successful siblings. Promotional grants remain internal. No live provider or creative success was fabricated.
 
 ## 8. Control Centre and external integrations
 
-Safe defaults remain Manual plus Emergency Stop ON. Social publication, outbound email and scheduled/autonomous execution use the Control Centre gate, idempotency and audit state. Suppression/unsubscribe records and historical data were not deleted. Credentials remain server-side. Advertising remains read/sync only.
+Safe defaults remain Manual with Emergency Stop ON. Generation, rendering, scheduling, social publication, outbound email and retries use the shared Control Centre immediately before execution. Decisions bind a canonical payload hash, expire, recheck current policy/version/Emergency Stop when claimed and are immutably audited. Legacy raw social publish routes were removed. Advertising mutation remains unavailable.
 
-## 9. Connector, business knowledge and reusable engine
+## 9. Connector and reusable boundary
 
-The HMAC/timestamp/nonce/replay/idempotency connector remains server-to-server with separate databases, sessions and cookies. SSO is short-lived and one-use. Neutral `HOST_APP_*` variables take precedence while `EQUIPROFILE_*` aliases remain compatible. Pro/Stable business knowledge belongs in connector/workspace data, not reusable engine rules.
+The HMAC/timestamp/nonce/replay/idempotency connector keeps separate databases, sessions and cookies. SSO is short-lived and one-use. Neutral `HOST_APP_*` variables take precedence while `EQUIPROFILE_*` aliases remain compatible. EquiProfile business knowledge belongs in connector/workspace data, not reusable engine rules.
 
-## 10. Security, data, migrations and operations
+## 10. Security, data and migrations
 
-Migration `027_owner_mfa.sql` is additive. No production or historical rows were changed or dropped. Marketing dependency audit is clean. Management’s production audit has no critical/high advisories after runtime upgrades; two moderate spreadsheet-chain advisories remain documented. Nginx/compose, environment validation, health/readiness, workers, encrypted backup and confirmed restore assets remain present.
+Migrations `027_owner_mfa.sql` and `029_campaign_intelligence_and_execution_integrity.sql` are additive. Migration 029 adds exact-payload/expiry fields, immutable plan versions and decision auditing, per-asset campaign runs, approval-version binding and generation retry identity. No production/historical row is deleted. Marketing's production dependency audit is clean. Management has no critical/high production advisory; two moderate spreadsheet-chain advisories remain documented.
 
 ## 11. Verification evidence
 
-- Management: TypeScript/preflight pass; full Vitest suite passes; Management and server production builds pass.
-- Marketing: API/web production builds pass; 16 suites / 114 tests pass; verification passes TypeScript, build, docs, routes, database, security, branding and version.
-- Browser: root/register/pricing/features redirect to login; dashboard/MFA reject unauthenticated access; branding/legal text render; no console warnings/errors; 390px mobile has no horizontal overflow.
-- GitHub CLI is unavailable locally. Remote CI must be rechecked after push through GitHub.
+- Management: TypeScript and Management production build pass; all 101 suites and 747 tests pass in the final uncongested run.
+- Marketing: API/web production builds pass; 18 suites and 129 tests pass; verification passes TypeScript, build, docs, routes, database, security, branding and version.
+- Campaign/Studio: five deterministic campaign types, governed provider-path scanning, exact payload binding, policy/expiry/Emergency Stop rechecks, organisation scoping and partial asset recovery are regression-covered.
+- Browser: upgrade-page desktop rendering is captured; authenticated Marketing workflow screenshots require an isolated owner/database runtime.
 
-## 12. Remaining controlled deployment/live-provider gates
+## 12. Remaining controlled deployment gates
 
-1. Push exact commits and wait for remote CI.
-2. Verify VPS/database/upload/config backups; rehearse restore and rollback.
-3. Dry-run additive migrations, then deploy Marketing exact SHA with API/web/workers/proxy checks.
-4. Provision the owner, enroll TOTP, save recovery codes, and complete authenticated desktop/mobile/PWA acceptance.
-5. Grant 1,000 promotional credits and prove real GenX text, image and retained media/render paths with ledger reconciliation.
-6. Test one social publication, one email delivery with suppression/unsubscribe proof, and analytics synchronization.
-7. Configure `marketing.equiprofile.online` DNS/TLS and repeat canonical-domain acceptance.
-8. Deploy Management exact SHA, enable its connector, and prove one-use SSO plus Marketing MFA and consent-safe conversions.
-9. Prove workers, queues, observability, emergency stop, backup/restore and rollback before owner acceptance and merge decisions.
+1. Push exact commits and require green remote CI including clean migration and container jobs.
+2. Verify VPS/database/upload/config backups and rehearse restore/rollback.
+3. Deploy Marketing exact SHA with workers initially off; provision owner, enroll MFA and complete authenticated desktop/mobile acceptance.
+4. Grant 1,000 promotional credits and prove authenticated GenX text input/output pricing plus supported image/video/audio/render paths with ledger reconciliation.
+5. Execute the isolated end-to-end campaign script in `CAMPAIGN_INTELLIGENCE_AND_STUDIO_ACCEPTANCE.md`, including Manual, Approval, limited Autonomous and Emergency Stop cases.
+6. Test one sandbox social publication, one email delivery with suppression/unsubscribe proof and analytics/conversion synchronisation.
+7. Configure canonical DNS/TLS only after Marketing passes independently.
+8. Deploy Management exact SHA and prove one-use SSO, Marketing MFA and consent-safe conversions.
+9. Prove queues, observability, backup/restore and rollback before owner acceptance or merge decisions.
+
+Subjective campaign quality, authenticated browser flow and real media capability remain deployment acceptance gates. They cannot be certified honestly by source assertions or mocked provider responses alone.

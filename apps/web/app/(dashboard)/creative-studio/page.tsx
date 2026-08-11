@@ -103,7 +103,7 @@ export default function CreativeStudioPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold text-white">AmarktAI Creative Studio</h1>
+        <h1 className="text-2xl font-bold text-white">EquiProfile Creative Studio</h1>
         <p className="mt-1 text-sm text-zinc-400">Generate images, video, audio and long-form projects through GenX.</p>
       </div>
 
@@ -148,7 +148,7 @@ export default function CreativeStudioPage() {
                   <div className="mt-1 flex items-center justify-between">
                     <span className="text-[10px] text-zinc-500">{item.status} · {new Date(item.timestamp).toLocaleTimeString()}</span>
                     {item.url && (
-                      <button onClick={() => handleDownload(item.url!, `amarktai-${item.id}`)} className="rounded p-1 text-zinc-400 opacity-0 transition-opacity hover:text-white group-hover:opacity-100">
+                      <button aria-label="Download generated asset" onClick={() => handleDownload(item.url!, `equiprofile-${item.id}`)} className="rounded p-1 text-zinc-400 opacity-0 transition-opacity hover:text-white focus:opacity-100 group-hover:opacity-100">
                         <Download className="h-3.5 w-3.5" />
                       </button>
                     )}

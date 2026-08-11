@@ -17,8 +17,9 @@ import * as brandDnaService from './brand-dna.service';
 import * as promptService from './prompt.service';
 import * as knowledgeService from './knowledge.service';
 import * as memoryService from '../memory/memory.service';
-import { providerRouter } from '../providers/provider-router';
 import { contextEngine } from './context-engine.service';
+import * as contentQuality from './content-quality.service';
+import { generateGovernedText } from './governed-text-generation.service';
 
 // ─── Content CRUD ────────────────────────────────────────────────────────────
 
@@ -66,8 +67,8 @@ export async function create(orgId: string, data: CreateContentData, userId: str
   const readingTime = Math.ceil(wordCount / 200);
 
   const result = await query(
-    `INSERT INTO content_items (organization_id, title, body, excerpt, type, format, platform, campaign_id, project_id, template_id, metadata, word_count, reading_time_seconds, created_by, assigned_to)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+    `INSERT INTO content_items (organization_id, title, body, excerpt, type, format, platform, campaign_id, project_id, template_id, metadata, word_count, reading_time_seconds, created_by, assigned_to, parent_id)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
      RETURNING *`,
     [
       orgId,
@@ -85,6 +86,7 @@ export async function create(orgId: string, data: CreateContentData, userId: str
       readingTime,
       userId,
       data.assigned_to || null,
+      data.parent_id || null,
     ]
   );
 
@@ -96,6 +98,13 @@ export async function create(orgId: string, data: CreateContentData, userId: str
 
 export async function update(id: string, orgId: string, data: UpdateContentData, userId: string): Promise<ContentItem> {
   const existing = await getById(id, orgId);
+  if (data.status && ['approved', 'published', 'scheduled'].includes(data.status)) {
+    throw new AppError(
+      409,
+      'Approval, scheduling and publication must use the governed workflow',
+      'CONTENT_WORKFLOW_REQUIRED'
+    );
+  }
   const updates: string[] = [];
   const values: unknown[] = [];
   let paramIdx = 1;
@@ -155,6 +164,85 @@ export async function getVersions(contentId: string, orgId: string): Promise<Con
   return result.rows.map(mapVersionRow);
 }
 
+export async function restoreVersion(
+  contentId: string,
+  orgId: string,
+  version: number,
+  userId: string
+): Promise<ContentItem> {
+  const source = await query(
+    `SELECT title,body,metadata,version FROM content_versions
+     WHERE content_id=$1 AND organization_id=$2 AND version=$3`,
+    [contentId, orgId, version]
+  );
+  if (source.rows.length === 0) throw new NotFoundError('Content version');
+  const restored = await update(contentId, orgId, {
+    title: String(source.rows[0].title),
+    body: source.rows[0].body ? String(source.rows[0].body) : '',
+    metadata: {
+      ...(typeof source.rows[0].metadata === 'string' ? JSON.parse(source.rows[0].metadata) : source.rows[0].metadata || {}),
+      restored_from_version: version,
+    },
+    status: 'draft',
+  }, userId);
+  await query(
+    `UPDATE content_versions SET restored_from_version=$1
+     WHERE content_id=$2 AND organization_id=$3 AND version=$4`,
+    [version, contentId, orgId, restored.version]
+  );
+  return restored;
+}
+
+export async function duplicateContent(id: string, orgId: string, userId: string): Promise<ContentItem> {
+  const source = await getById(id, orgId);
+  return create(orgId, {
+    title: `${source.title} copy`, body: source.body || '', excerpt: source.excerpt || undefined,
+    type: source.type, format: source.format, platform: source.platform || undefined,
+    campaign_id: source.campaign_id || undefined, template_id: source.template_id || undefined,
+    metadata: { ...source.metadata, duplicated_from: source.id }, parent_id: source.id,
+  }, userId);
+}
+
+export async function reviseContent(
+  id: string,
+  orgId: string,
+  userId: string,
+  input: { instruction: string; selected_text?: string; idempotency_key?: string }
+): Promise<ContentItem> {
+  const content = await getById(id, orgId);
+  const instruction = String(input.instruction || '').trim();
+  if (!instruction) throw new AppError(400, 'A revision instruction is required', 'VALIDATION_ERROR');
+  const selected = String(input.selected_text || '');
+  if (selected && !(content.body || '').includes(selected)) {
+    throw new AppError(409, 'The selected text no longer matches this version', 'CONTENT_SELECTION_STALE');
+  }
+  const prompt = `Revise the supplied marketing copy according to the owner instruction.
+Preserve every factual claim, approved offer, call to action and brand constraint unless the instruction explicitly changes owner-supplied wording. Never invent facts, statistics, testimonials, guarantees or certifications.
+Return only the revised ${selected ? 'selection' : 'complete asset'}.
+
+OWNER INSTRUCTION:
+${instruction}
+
+${selected ? 'SELECTED COPY' : 'CURRENT ASSET'}:
+${selected || content.body || ''}`;
+  const result = await generateGovernedText({
+    organizationId: orgId, userId, campaignId: content.campaign_id,
+    idempotencyKey: input.idempotency_key,
+    title: `Revise content: ${content.title}`,
+    summary: selected ? 'Revise only the selected section' : 'Revise this individual asset',
+    prompt, maxTokens: getMaxTokens(content.type), temperature: 0.5,
+    payload: { purpose: 'targeted_revision', content_id: id, content_version: content.version },
+  });
+  const nextBody = selected ? (content.body || '').replace(selected, result.content) : result.content;
+  const revised = await update(id, orgId, {
+    body: nextBody,
+    metadata: { ...content.metadata, last_revision_instruction: instruction },
+    status: 'draft',
+  }, userId);
+  await contentQuality.runQualityChecks(revised.id, orgId);
+  return getById(revised.id, orgId);
+}
+
 async function saveVersion(orgId: string, content: ContentItem, userId: string): Promise<void> {
   await query(
     `INSERT INTO content_versions (content_id, organization_id, version, title, body, metadata, created_by)
@@ -171,9 +259,29 @@ export async function generateContent(
   userId: string
 ): Promise<{ content: ContentItem; job: ContentGenerationJob }> {
   const startTime = Date.now();
+  let campaignPlan: Record<string, any> | null = null;
+  if (request.campaign_plan_id) {
+    const planResult = await query(
+      `SELECT * FROM campaign_plans
+       WHERE id=$1 AND organization_id=$2`,
+      [request.campaign_plan_id, orgId]
+    );
+    if (planResult.rows.length === 0) throw new NotFoundError('Campaign plan');
+    campaignPlan = planResult.rows[0] as Record<string, any>;
+    if (String(campaignPlan.status) !== 'approved') {
+      throw new AppError(
+        409,
+        'Approve the campaign strategy before generating its assets',
+        'CAMPAIGN_PLAN_APPROVAL_REQUIRED'
+      );
+    }
+  }
 
   // 1. Create generation job
   const job = await createGenerationJob(orgId, request, userId);
+  if (job.status === 'completed' && job.content_id) {
+    return { content: await getById(job.content_id, orgId), job };
+  }
 
   try {
     // 2. Update job status to planning
@@ -205,18 +313,34 @@ export async function generateContent(
     }
 
     // 5. Build full prompt with context
-    const fullPrompt = buildGenerationPrompt(prompt, context, request);
+    const fullPrompt = buildGenerationPrompt(prompt, context, request, campaignPlan);
 
     // 6. Update job status to generating
     await updateJobStatus(job.id, 'generating');
 
     // 7. Generate content via Provider Router
-    const aiResponse = await providerRouter.routeRequest(
-      [{ role: 'user', content: fullPrompt }],
-      'gpt-4o',
-      { max_tokens: getMaxTokens(request.type), temperature: 0.7 },
-      { organizationId: orgId }
-    );
+    const attempt = Number(job.attempt_count || 0) + 1;
+    const aiResponse = await generateGovernedText({
+      organizationId: orgId,
+      userId,
+      campaignId: request.campaign_id,
+      generationJobId: job.id,
+      idempotencyKey: `${request.idempotency_key || `content:${job.id}`}:attempt:${attempt}`,
+      title: `Generate ${request.type} content`,
+      summary: request.title || request.prompt.slice(0, 160),
+      prompt: fullPrompt,
+      maxTokens: getMaxTokens(request.type),
+      temperature: 0.7,
+      payload: {
+        campaign_plan_id: request.campaign_plan_id || null,
+        brief_id: request.brief_id || null,
+        content_type: request.type,
+        platform: request.platform || null,
+      },
+      onAuthorized: async () => {
+        await query('UPDATE content_generation_jobs SET attempt_count=$1,updated_at=NOW() WHERE id=$2', [attempt, job.id]);
+      },
+    });
 
     const generatedText = aiResponse.content;
 
@@ -230,6 +354,22 @@ export async function generateContent(
       template_id: request.template_id,
       metadata: {
         generation_request: request,
+        campaign_plan_id: request.campaign_plan_id || null,
+        brief_id: request.brief_id || null,
+        alt_text: request.alt_text || null,
+        quality_brief: {
+          audience: request.audience || null,
+          objective: request.objective || null,
+          offer: request.offer || null,
+          calls_to_action: request.calls_to_action || [],
+          prohibited_claims: request.prohibited_claims || [],
+          required_terms: request.required_terms || [],
+          campaign_concept: campaignPlan
+            ? (typeof campaignPlan.creative_concept === 'string'
+                ? JSON.parse(campaignPlan.creative_concept).name
+                : campaignPlan.creative_concept?.name)
+            : null,
+        },
         context_used: {
           brand_dna: !!context.brandDna,
           knowledge: !!context.knowledge,
@@ -243,6 +383,12 @@ export async function generateContent(
       ['gpt-4o', prompt, JSON.stringify({ brandDna: context.brandDna?.substring(0, 200), knowledge: context.knowledge?.substring(0, 200) }), content.id]
     );
 
+    const quality = await contentQuality.runQualityChecks(content.id, orgId);
+    await query(
+      `UPDATE content_items SET workflow_state=$1,status='draft',updated_at=NOW() WHERE id=$2`,
+      [quality.passed ? 'ready_for_review' : 'needs_revision', content.id]
+    );
+
     // 10. Update job as completed
     const latency = Date.now() - startTime;
     await query(
@@ -251,7 +397,7 @@ export async function generateContent(
     );
 
     logger.info(`Content generated: ${content.id} in ${latency}ms`);
-    return { content, job: { ...job, status: 'completed', content_id: content.id } };
+    return { content: await getById(content.id, orgId), job: { ...job, status: 'completed', content_id: content.id } };
 
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Generation failed';
@@ -259,15 +405,28 @@ export async function generateContent(
       `UPDATE content_generation_jobs SET status = 'failed', error = $1, completed_at = NOW() WHERE id = $2`,
       [message, job.id]
     );
+    if (error instanceof AppError) throw error;
     throw new AppError(500, `Content generation failed: ${message}`, 'GENERATION_ERROR');
   }
 }
 
 async function createGenerationJob(orgId: string, request: GenerateContentRequest, userId: string): Promise<ContentGenerationJob> {
   const result = await query(
-    `INSERT INTO content_generation_jobs (organization_id, type, platform, input, template_id, created_by)
-     VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
-    [orgId, request.type, request.platform || null, JSON.stringify(request), request.template_id || null, userId]
+    `INSERT INTO content_generation_jobs
+       (organization_id, type, platform, input, template_id, created_by, idempotency_key)
+     VALUES ($1, $2, $3, $4, $5, $6, $7)
+     ON CONFLICT (organization_id,idempotency_key) WHERE idempotency_key IS NOT NULL
+     DO UPDATE SET updated_at=NOW()
+     RETURNING *`,
+    [
+      orgId,
+      request.type,
+      request.platform || null,
+      JSON.stringify(request),
+      request.template_id || null,
+      userId,
+      request.idempotency_key || null,
+    ]
   );
   return mapJobRow(result.rows[0]);
 }
@@ -281,7 +440,8 @@ async function updateJobStatus(jobId: string, status: string): Promise<void> {
 function buildGenerationPrompt(
   prompt: string,
   context: { brandDna: string; knowledge: string; fullContext: string },
-  request: GenerateContentRequest
+  request: GenerateContentRequest,
+  campaignPlan?: Record<string, any> | null
 ): string {
   const parts: string[] = [];
 
@@ -293,7 +453,33 @@ function buildGenerationPrompt(
     parts.push(`\nRELEVANT KNOWLEDGE:\n${context.knowledge.substring(0, 1000)}`);
   }
 
+  if (campaignPlan) {
+    const campaignContext = {
+      brief: typeof campaignPlan.brief === 'string' ? JSON.parse(campaignPlan.brief) : campaignPlan.brief,
+      strategy: typeof campaignPlan.strategy === 'string' ? JSON.parse(campaignPlan.strategy) : campaignPlan.strategy,
+      creative_concept: typeof campaignPlan.creative_concept === 'string' ? JSON.parse(campaignPlan.creative_concept) : campaignPlan.creative_concept,
+      messaging_plan: typeof campaignPlan.messaging_plan === 'string' ? JSON.parse(campaignPlan.messaging_plan) : campaignPlan.messaging_plan,
+      constraints: typeof campaignPlan.constraints === 'string' ? JSON.parse(campaignPlan.constraints) : campaignPlan.constraints,
+      approved_at: campaignPlan.approved_at,
+    };
+    parts.push(`\nAPPROVED CAMPAIGN STRATEGY:\n${JSON.stringify(campaignContext, null, 2)}`);
+  }
+
   parts.push(`\nTASK: ${prompt}`);
+  parts.push(`AUDIENCE: ${request.audience || 'Use the approved campaign audience or supplied business context.'}`);
+  parts.push(`OBJECTIVE: ${request.objective || 'Use the approved campaign objective.'}`);
+  if (request.offer) parts.push(`APPROVED OFFER: ${request.offer}`);
+  if (request.calls_to_action?.length) parts.push(`APPROVED CALLS TO ACTION: ${request.calls_to_action.join(' | ')}`);
+  if (request.creative_direction) parts.push(`CREATIVE DIRECTION: ${request.creative_direction}`);
+  if (request.prohibited_claims?.length) parts.push(`PROHIBITED CLAIMS: ${request.prohibited_claims.join(' | ')}`);
+  parts.push(`QUALITY RULES:
+- Do not invent facts, prices, statistics, testimonials, guarantees, certifications or product capabilities.
+- If a required fact is missing, use a clearly marked owner placeholder or omit the claim.
+- Write specifically for the selected audience, objective, format and platform.
+- Avoid generic filler, repeated ideas and clichÃ©s.
+- Preserve the approved offer and campaign concept.
+- Include one clear approved next step where appropriate.
+- Return only the finished customer-facing asset, not analysis, prompts or model commentary.`);
 
   if (request.max_words) parts.push(`\nMax words: ${request.max_words}`);
   if (request.tone) parts.push(`Tone: ${request.tone}`);
@@ -367,8 +553,10 @@ function mapContentRow(row: Record<string, unknown>): ContentItem {
     quality_score: parseFloat(row.quality_score as string) || 0,
     metadata: typeof row.metadata === 'string' ? JSON.parse(row.metadata) : (row.metadata as Record<string, unknown>) || {},
     ai_generated: row.ai_generated as boolean,
-    ai_model: row.ai_model as string | null,
-    ai_prompt: row.ai_prompt as string | null,
+    // Provider internals and raw prompts are deliberately not exposed through
+    // the customer-facing Studio API.
+    ai_model: null,
+    ai_prompt: null,
     ai_context: typeof row.ai_context === 'string' ? JSON.parse(row.ai_context) : (row.ai_context as Record<string, unknown>) || {},
     template_id: row.template_id as string | null,
     parent_id: row.parent_id as string | null,
@@ -423,5 +611,6 @@ function mapJobRow(row: Record<string, unknown>): ContentGenerationJob {
     created_by: row.created_by as string | null,
     created_at: row.created_at as string,
     updated_at: row.updated_at as string,
+    attempt_count: parseInt(row.attempt_count as string) || 0,
   };
 }

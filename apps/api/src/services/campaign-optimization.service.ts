@@ -1,9 +1,8 @@
 import { query } from '../config/database';
 import { logger } from '../utils/logger';
 import { AppError } from '../middleware/errorHandler';
-import { providerRouter } from '../providers/provider-router';
+import { generateGovernedText } from './governed-text-generation.service';
 import { contextEngine } from './context-engine.service';
-import { env } from '../config/env';
 
 export interface CampaignOptimization {
   id: string;
@@ -60,12 +59,19 @@ export async function analyzeCampaign(orgId: string, campaignId: string): Promis
   const prompt = `Analyze this marketing campaign and return 3-5 specific optimization recommendations as strict JSON.\n\nCampaign: ${campaign.name}\nType: ${campaign.type}\nStatus: ${campaign.status}\nMetrics: ${JSON.stringify(metrics)}\nContent: ${JSON.stringify(contentResult.rows)}\n${context.fullContext}\n\nSchema: [{"type":"content_rewrite|timing|keyword|audience|budget","recommendation":"specific action","impact_score":0,"data":{"steps":["..."]}}]`;
 
   try {
-    const result = await providerRouter.routeRequest(
-      [{ role: 'system', content: 'Return only valid JSON. Do not invent performance data that is not provided.' }, { role: 'user', content: prompt }],
-      env.DEFAULT_TEXT_MODEL,
-      { max_tokens: 3000, temperature: 0.3 },
-      { organizationId: orgId }
-    );
+    const result = await generateGovernedText({
+      organizationId: orgId,
+      campaignId,
+      title: `Analyse campaign: ${String(campaign.name || campaignId)}`,
+      summary: 'Generate bounded optimization recommendations from recorded campaign metrics',
+      messages: [
+        { role: 'system', content: 'Return only valid JSON. Do not invent performance data that is not provided.' },
+        { role: 'user', content: prompt },
+      ],
+      maxTokens: 3000,
+      temperature: 0.3,
+      payload: { campaign_id: campaignId, purpose: 'optimization_recommendations' },
+    });
     const recommendations = parseRecommendations(result.content);
     const optimizations: CampaignOptimization[] = [];
     for (const recommendation of recommendations) {

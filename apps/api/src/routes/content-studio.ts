@@ -85,6 +85,40 @@ router.get('/:id/versions', async (req: AuthRequest, res: Response<ApiResponse>,
   } catch (error) { next(error); }
 });
 
+router.post('/:id/versions/:version/restore', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
+  try {
+    const orgId = req.body.organization_id || req.query.organization_id as string;
+    const version = Number(req.params.version);
+    if (!orgId || !Number.isSafeInteger(version) || version < 1) {
+      res.status(400).json({ success: false, error: { message: 'organization_id and a valid version are required', code: 'BAD_REQUEST' } }); return;
+    }
+    const content = await contentEngine.restoreVersion(req.params.id, orgId, version, req.user!.userId);
+    res.json({ success: true, data: content });
+  } catch (error) { next(error); }
+});
+
+router.post('/:id/duplicate', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
+  try {
+    const orgId = String(req.body.organization_id || '');
+    if (!orgId) { res.status(400).json({ success: false, error: { message: 'organization_id is required', code: 'BAD_REQUEST' } }); return; }
+    res.status(201).json({ success: true, data: await contentEngine.duplicateContent(req.params.id, orgId, req.user!.userId) });
+  } catch (error) { next(error); }
+});
+
+router.post('/:id/revise', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
+  try {
+    const orgId = String(req.body.organization_id || '');
+    if (!orgId || !String(req.body.instruction || '').trim()) {
+      res.status(400).json({ success: false, error: { message: 'organization_id and instruction are required', code: 'BAD_REQUEST' } }); return;
+    }
+    res.json({ success: true, data: await contentEngine.reviseContent(req.params.id, orgId, req.user!.userId, {
+      instruction: String(req.body.instruction),
+      selected_text: req.body.selected_text ? String(req.body.selected_text) : undefined,
+      idempotency_key: req.body.idempotency_key ? String(req.body.idempotency_key) : undefined,
+    }) });
+  } catch (error) { next(error); }
+});
+
 router.post('/:id/quality-check', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
   try {
     const orgId = req.body.organization_id || req.query.organization_id as string;
@@ -106,9 +140,9 @@ router.get('/:id/quality-checks', async (req: AuthRequest, res: Response<ApiResp
 router.post('/:id/submit', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
   try {
     const orgId = req.body.organization_id;
-    const { assigned_to } = req.body;
-    if (!orgId || !assigned_to) { res.status(400).json({ success: false, error: { message: 'organization_id and assigned_to are required', code: 'BAD_REQUEST' } }); return; }
-    const approval = await contentWorkflow.submitForReview(req.params.id, orgId, assigned_to, req.user!.userId);
+    const assignedTo = req.body.assigned_to || req.user!.userId;
+    if (!orgId) { res.status(400).json({ success: false, error: { message: 'organization_id is required', code: 'BAD_REQUEST' } }); return; }
+    const approval = await contentWorkflow.submitForReview(req.params.id, orgId, assignedTo, req.user!.userId);
     res.json({ success: true, data: approval });
   } catch (error) { next(error); }
 });

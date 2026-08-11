@@ -166,10 +166,15 @@ Code-level release completion on 11 August 2026:
 - team, agency, marketplace, customer billing and other deferred surfaces are outside launch navigation while reusable structures remain intact;
 - customer Marketing checkout is absent from the Phase 1 UI; the internal wallet/ledger and promotional grants remain;
 - neutral `HOST_APP_*` connector variables work with backwards-compatible `EQUIPROFILE_*` aliases;
-- API/web builds, repository verification, 114 API regressions and unauthenticated desktop/mobile browser acceptance pass.
+- campaign planning now saves a structured, versioned strategy and requires owner approval before coordinated asset production;
+- Content Studio supports grounded generation, deterministic quality checks, autosave, version comparison/restoration, duplication, comments and targeted revision;
+- each text or media asset uses an isolated, governed run so partial failure can be retried without replacing or charging successful siblings;
+- text input/output and media operations reserve and settle Generation Credits against immutable authenticated GenX price snapshots;
+- execution approvals bind exact payloads, expire, recheck current policy and Emergency Stop, and write immutable decision/audit transitions;
+- API/web builds, repository verification, 129 API regressions and unauthenticated desktop/mobile browser acceptance pass.
 
 Still required as controlled deployment acceptance: real GenX generation, social publication, email delivery, analytics synchronisation, VPS workers/queues, canonical DNS/TLS, backup/restore evidence, authenticated owner browser/PWA testing and the Management production connector.
 
-See `docs/PHASE_1_RELEASE_READINESS.md` for the consolidated truth matrix and release decision.
+See `docs/PHASE_1_RELEASE_READINESS.md` for the consolidated truth matrix and `docs/CAMPAIGN_INTELLIGENCE_AND_STUDIO_ACCEPTANCE.md` for creative-quality and isolated end-to-end acceptance.
 
 This document is the binding Phase 1 implementation contract unless explicitly revised.

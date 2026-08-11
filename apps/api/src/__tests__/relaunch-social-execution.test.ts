@@ -23,6 +23,7 @@ describe('Relaunch Control execution boundary', () => {
     const scheduler = read('apps/api/src/services/scheduler.service.ts');
     const controlled = read('apps/api/src/services/controlled-social-publishing.service.ts');
     const controlledRoutes = read('apps/api/src/routes/controlled-social.ts');
+    const legacyRoutes = read('apps/api/src/routes/amai.ts');
     const server = read('apps/api/src/server.ts');
     const gate = read('apps/api/src/services/relaunch-execution-gate.service.ts');
 
@@ -40,6 +41,9 @@ describe('Relaunch Control execution boundary', () => {
     expect(controlledRoutes).toContain('res.status(202).json');
     expect(controlledRoutes).toContain("status: 'pending_approval'");
     expect(controlledRoutes).toContain("status: 'blocked_by_policy'");
+    expect(legacyRoutes).not.toContain("router.post('/social/posts'");
+    expect(legacyRoutes).not.toContain("router.post('/social/posts/:id/publish'");
+    expect(legacyRoutes).not.toContain('socialService.publishPost(');
     expect(server.indexOf("app.use('/api/v1/amai', ...tenant, controlledSocialRoutes)")).toBeLessThan(
       server.indexOf("app.use('/api/v1/amai', ...tenant, amaiRoutes)")
     );
@@ -105,9 +109,9 @@ describe('Relaunch Control execution boundary', () => {
   test('temporary operating-window and daily-budget holds are re-evaluated later', () => {
     const gate = read('apps/api/src/services/relaunch-execution-gate.service.ts');
 
-    expect(gate).toContain("return temporaryBlock(\n        'The action is outside the configured operating window'");
-    expect(gate).toContain("return temporaryBlock('Daily Generation Credit limit exceeded'");
-    expect(gate).toContain("return temporaryBlock('Daily advertising budget exceeded'");
+    expect(gate).toContain("return recordTemporaryBlock('The action is outside the configured operating window'");
+    expect(gate).toContain("return recordTemporaryBlock('Daily Generation Credit limit exceeded'");
+    expect(gate).toContain("return recordTemporaryBlock('Daily advertising budget exceeded'");
   });
 
   test('a worker that loses the atomic post claim cannot fail another worker decision', () => {

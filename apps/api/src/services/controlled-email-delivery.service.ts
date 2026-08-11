@@ -20,6 +20,7 @@ export interface ControlledEmailBatchRequest {
   actionSummary?: string;
   idempotencyKey: string;
   requestedByUserId?: string | null;
+  requestedBy?: 'system' | 'user' | 'application';
   payload?: Record<string, unknown>;
 }
 
@@ -52,7 +53,7 @@ export async function deliverEmailBatchThroughControlCentre(
     requested_credits: 0,
     requested_ad_spend_pence: 0,
     idempotency_key: request.idempotencyKey,
-    requested_by: 'user',
+    requested_by: request.requestedBy || 'user',
     requested_by_user_id: request.requestedByUserId || null,
     payload: {
       recipient_count: request.deliveries.length,

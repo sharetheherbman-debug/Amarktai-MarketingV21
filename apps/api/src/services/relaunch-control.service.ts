@@ -1,5 +1,6 @@
 import { query, transaction } from '../config/database';
 import { AppError, ForbiddenError, NotFoundError } from '../middleware/errorHandler';
+import { executionPayloadHash } from './relaunch-execution-gate.service';
 
 const CHANNELS = ['content', 'social', 'email', 'advertising', 'seo', 'analytics'] as const;
 type Channel = typeof CHANNELS[number];
@@ -325,9 +326,10 @@ export async function proposeAction(
     `INSERT INTO relaunch_action_decisions
        (organization_id,action_type,channel,title,summary,status,requested_credits,
         requested_ad_spend_pence,policy_version,requested_by,requested_by_user_id,
-        decision_reason,idempotency_key,payload,decided_at)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,
-       CASE WHEN $6='approved' THEN NOW() ELSE NULL END)
+        decision_reason,idempotency_key,payload,payload_hash,decided_at,approval_expires_at)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,
+       CASE WHEN $6='approved' THEN NOW() ELSE NULL END,
+       CASE WHEN $6='approved' THEN NOW() + interval '30 minutes' ELSE NULL END)
      ON CONFLICT (organization_id,idempotency_key) DO UPDATE SET
        idempotency_key=EXCLUDED.idempotency_key
      RETURNING *`,
@@ -335,7 +337,7 @@ export async function proposeAction(
       organizationId, action.action_type.trim(), action.channel, action.title.trim(),
       action.summary || null, status, requestedCredits, requestedAd, Number(policy.version || 0),
       action.requested_by || 'user', userId, reason, action.idempotency_key.trim(),
-      JSON.stringify(action.payload || {}),
+      JSON.stringify(action.payload || {}), executionPayloadHash(action.payload || {}),
     ]
   );
   return result.rows[0];
@@ -352,7 +354,9 @@ export async function decideAction(
   if (!reason?.trim()) throw new AppError(400, 'A decision reason is required', 'RELAUNCH_REASON_REQUIRED');
   const result = await query(
     `UPDATE relaunch_action_decisions SET
-       status=$4,decided_by_user_id=$3,decision_reason=$5,decided_at=NOW(),updated_at=NOW()
+       status=$4,decided_by_user_id=$3,decision_reason=$5,decided_at=NOW(),
+       approval_expires_at=CASE WHEN $4='approved' THEN NOW() + interval '30 minutes' ELSE NULL END,
+       updated_at=NOW()
      WHERE id=$1 AND organization_id=$2 AND status IN ('pending','approved')
      RETURNING *`,
     [actionId, organizationId, userId, decision, reason.trim()]

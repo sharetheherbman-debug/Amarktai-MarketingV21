@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import { query, transaction } from '../config/database';
 import { AppError } from '../middleware/errorHandler';
 
@@ -22,6 +23,26 @@ export interface ExecutionDecision {
   decision_reason: string | null;
   requested_credits: number;
   requested_ad_spend_pence: number;
+}
+
+const APPROVAL_TTL_MINUTES = Math.max(
+  1,
+  Number.parseInt(process.env.RELAUNCH_APPROVAL_TTL_MINUTES || '30', 10) || 30
+);
+
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
+  if (value && typeof value === 'object') {
+    return `{${Object.entries(value as Record<string, unknown>)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, entry]) => `${JSON.stringify(key)}:${canonicalJson(entry)}`)
+      .join(',')}}`;
+  }
+  return JSON.stringify(value) ?? 'null';
+}
+
+export function executionPayloadHash(payload: Record<string, unknown> = {}): string {
+  return crypto.createHash('sha256').update(canonicalJson(payload)).digest('hex');
 }
 
 function asNonNegativeInteger(value: unknown, field: string): number {
@@ -105,8 +126,32 @@ export async function requireExecutionApproval(
     const policy = policyResult.rows[0] as Record<string, unknown>;
     if (!policy) throw new AppError(500, 'Relaunch policy is unavailable', 'RELAUNCH_POLICY_MISSING');
 
+    const payload = request.payload || {};
+    const payloadHash = executionPayloadHash(payload);
+    const recordTemporaryBlock = async (reason: string): Promise<ExecutionDecision> => {
+      await client.query(
+        `INSERT INTO relaunch_control_audit
+           (organization_id,actor_user_id,event_type,next_state,reason)
+         VALUES ($1,$2,'action_temporarily_blocked',$3,$4)`,
+        [
+          organizationId,
+          request.requested_by_user_id || null,
+          JSON.stringify({
+            action_type: request.action_type,
+            channel: request.channel,
+            idempotency_key: request.idempotency_key,
+            payload_hash: payloadHash,
+            requested_credits: requestedCredits,
+            requested_ad_spend_pence: requestedAdSpend,
+          }),
+          reason,
+        ]
+      );
+      return temporaryBlock(reason, requestedCredits, requestedAdSpend);
+    };
+
     if (policy.emergency_stop === true) {
-      return temporaryBlock('Emergency stop is active', requestedCredits, requestedAdSpend);
+      return recordTemporaryBlock('Emergency stop is active');
     }
 
     const existing = await client.query(
@@ -114,7 +159,31 @@ export async function requireExecutionApproval(
        WHERE organization_id=$1 AND idempotency_key=$2 FOR UPDATE`,
       [organizationId, request.idempotency_key.trim()]
     );
-    if (existing.rows.length > 0) return mapDecision(existing.rows[0]);
+    if (existing.rows.length > 0) {
+      const row = existing.rows[0] as Record<string, unknown>;
+      const recordedHash = String(row.payload_hash || executionPayloadHash(
+        typeof row.payload === 'string' ? JSON.parse(row.payload) : row.payload || {}
+      ));
+      if (recordedHash !== payloadHash) {
+        throw new AppError(
+          409,
+          'The approved action payload does not match this execution request',
+          'RELAUNCH_APPROVAL_PAYLOAD_MISMATCH'
+        );
+      }
+      if (Number(row.policy_version || 0) !== Number(policy.version || 0)) {
+        throw new AppError(
+          409,
+          'The control policy changed; request a fresh decision',
+          'RELAUNCH_DECISION_STALE'
+        );
+      }
+      const expiresAt = row.approval_expires_at ? new Date(String(row.approval_expires_at)) : null;
+      if (String(row.status) === 'approved' && expiresAt && expiresAt <= new Date()) {
+        throw new AppError(409, 'The action approval expired', 'RELAUNCH_APPROVAL_EXPIRED');
+      }
+      return mapDecision(row);
+    }
 
     const now = new Date();
     const activeFrom = policy.active_from ? new Date(String(policy.active_from)) : null;
@@ -129,6 +198,28 @@ export async function requireExecutionApproval(
     const approvalAdThreshold = Number(policy.approval_ad_threshold_pence || 0);
     const dailyCreditLimit = Number(policy.daily_generation_credit_limit || 0);
     const dailyAdLimit = Number(policy.daily_ad_budget_pence || 0);
+    const campaignPlanId = typeof payload.campaign_plan_id === 'string' ? payload.campaign_plan_id : '';
+    let campaignCreditLimit = 0;
+    let campaignCreditsCommitted = 0;
+    let campaignPlanExecutable = true;
+    if (request.action_type === 'generation' && campaignPlanId) {
+      const planResult = await client.query(
+        `SELECT status,generation_credit_limit FROM campaign_plans
+         WHERE id=$1 AND organization_id=$2`,
+        [campaignPlanId, organizationId]
+      );
+      campaignPlanExecutable = planResult.rows.length > 0 && String(planResult.rows[0].status) === 'approved';
+      campaignCreditLimit = Number(planResult.rows[0]?.generation_credit_limit || 0);
+      const committed = await client.query(
+        `SELECT COALESCE(SUM(requested_credits),0)::bigint AS used
+         FROM relaunch_action_decisions
+         WHERE organization_id=$1 AND action_type='generation'
+           AND payload->>'campaign_plan_id'=$2
+           AND status IN ('pending','approved','running','completed')`,
+        [organizationId, campaignPlanId]
+      );
+      campaignCreditsCommitted = Number(committed.rows[0]?.used || 0);
+    }
 
     const creditUsage = await client.query(
       `SELECT COALESCE(SUM(credits),0)::bigint AS used
@@ -152,19 +243,23 @@ export async function requireExecutionApproval(
     const overCampaignAd = perCampaignAdLimit > 0 && requestedAdSpend > perCampaignAdLimit;
     const overDailyCredit = dailyCreditLimit > 0 && creditsUsedToday + requestedCredits > dailyCreditLimit;
     const overDailyAd = dailyAdLimit > 0 && adSpendToday + requestedAdSpend > dailyAdLimit;
+    const overCampaignCredits = campaignCreditLimit > 0
+      && campaignCreditsCommitted + requestedCredits > campaignCreditLimit;
 
     if (outsideWindow) {
-      return temporaryBlock(
-        'The action is outside the configured operating window',
-        requestedCredits,
-        requestedAdSpend
-      );
+      return recordTemporaryBlock('The action is outside the configured operating window');
     }
     if (overDailyCredit) {
-      return temporaryBlock('Daily Generation Credit limit exceeded', requestedCredits, requestedAdSpend);
+      return recordTemporaryBlock('Daily Generation Credit limit exceeded');
     }
     if (overDailyAd) {
-      return temporaryBlock('Daily advertising budget exceeded', requestedCredits, requestedAdSpend);
+      return recordTemporaryBlock('Daily advertising budget exceeded');
+    }
+    if (!campaignPlanExecutable) {
+      return recordTemporaryBlock('The campaign strategy must be approved before asset generation');
+    }
+    if (overCampaignCredits) {
+      return recordTemporaryBlock('Campaign Generation Credit limit exceeded');
     }
 
     let status: 'approved' | 'pending' | 'blocked';
@@ -190,9 +285,10 @@ export async function requireExecutionApproval(
       `INSERT INTO relaunch_action_decisions
          (organization_id,action_type,channel,title,summary,status,requested_credits,
           requested_ad_spend_pence,policy_version,requested_by,requested_by_user_id,
-          decision_reason,idempotency_key,payload,decided_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,
-         CASE WHEN $6='approved' THEN NOW() ELSE NULL END)
+          decision_reason,idempotency_key,payload,payload_hash,decided_at,approval_expires_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,
+         CASE WHEN $6='approved' THEN NOW() ELSE NULL END,
+         CASE WHEN $6='approved' THEN NOW() + ($16 || ' minutes')::interval ELSE NULL END)
        RETURNING *`,
       [
         organizationId,
@@ -208,7 +304,9 @@ export async function requireExecutionApproval(
         request.requested_by_user_id || null,
         reason,
         request.idempotency_key.trim(),
-        JSON.stringify(request.payload || {}),
+        JSON.stringify(payload),
+        payloadHash,
+        APPROVAL_TTL_MINUTES,
       ]
     );
     return mapDecision(inserted.rows[0]);
@@ -220,8 +318,16 @@ export async function requireExecutionApproval(
 
 export async function markExecutionRunning(decisionId: string): Promise<void> {
   const result = await query(
-    `UPDATE relaunch_action_decisions SET status='running',started_at=NOW(),updated_at=NOW()
-     WHERE id=$1 AND status='approved' RETURNING id`,
+    `UPDATE relaunch_action_decisions decision
+     SET status='running',started_at=NOW(),updated_at=NOW()
+     FROM relaunch_control_policies policy
+     WHERE decision.id=$1
+       AND decision.organization_id=policy.organization_id
+       AND decision.status='approved'
+       AND policy.emergency_stop=FALSE
+       AND decision.policy_version=policy.version
+       AND (decision.approval_expires_at IS NULL OR decision.approval_expires_at > NOW())
+     RETURNING decision.id`,
     [decisionId]
   );
   if (result.rows.length === 0) {

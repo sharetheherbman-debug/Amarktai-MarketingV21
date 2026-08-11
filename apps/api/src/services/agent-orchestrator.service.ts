@@ -3,7 +3,7 @@ import { logger } from '../utils/logger';
 import { NotFoundError, AppError } from '../middleware/errorHandler';
 import { contextEngine } from './context-engine.service';
 import { toolService } from './tool.service';
-import { providerRouter } from '../providers/provider-router';
+import { generateGovernedText } from './governed-text-generation.service';
 import * as usageService from './usage.service';
 import { v4 as uuidv4 } from 'uuid';
 import { ChatMessage, ToolCallResult } from '../types';
@@ -166,7 +166,16 @@ async function runTurn(
   orgId: string,
   userId?: string
 ): Promise<{ response: string; requestedCalls: RequestedToolCall[]; tokensIn: number; tokensOut: number }> {
-  const result = await providerRouter.routeRequest(messages, agent.model || 'gpt-4o-mini', undefined, { organizationId: orgId, userId });
+  const result = await generateGovernedText({
+    organizationId: orgId,
+    userId,
+    title: `Run ${agent.name} agent turn`,
+    summary: 'Generate a governed draft or select an allowed tool',
+    messages,
+    maxTokens: 4000,
+    temperature: 0.4,
+    payload: { purpose: 'agent_turn', agent_id: agent.id },
+  });
   const allowedTools = new Set(tools.map((tool) => String((tool.function as Record<string, unknown> | undefined)?.name || '')));
   const parsed = parseToolCalls(result.content, allowedTools);
   return { response: parsed.response, requestedCalls: parsed.calls, tokensIn: result.tokensIn, tokensOut: result.tokensOut };

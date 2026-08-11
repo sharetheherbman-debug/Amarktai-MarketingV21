@@ -6,6 +6,7 @@ jest.mock('../../config/database', () => ({
 import {
   extractPriceComponents,
   retailFromWholesale,
+  tokenQuantityForBillingUnit,
 } from '../../services/genx-pricing.service';
 import type { GenXModel } from '../../services/genx-model-registry.service';
 
@@ -74,5 +75,12 @@ describe('GenX pricing service', () => {
     const retail = retailFromWholesale(0.60, 4000);
     expect(retail).toBeCloseTo(1.00, 8);
     expect((retail - 0.60) / retail).toBeCloseTo(0.40, 8);
+  });
+
+  test('normalizes raw token usage to the provider catalogue billing unit', () => {
+    expect(tokenQuantityForBillingUnit(2_500, 'thousand_tokens')).toBe(2.5);
+    expect(tokenQuantityForBillingUnit(250_000, 'million_tokens')).toBe(0.25);
+    expect(tokenQuantityForBillingUnit(100, 'request')).toBe(1);
+    expect(() => tokenQuantityForBillingUnit(100, 'mystery_unit')).toThrow('Unsupported text billing unit');
   });
 });

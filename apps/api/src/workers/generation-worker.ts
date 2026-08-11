@@ -5,6 +5,15 @@ import { closePool, query } from '../config/database';
 import { logger } from '../utils/logger';
 import { genxMultimodalProvider } from '../providers/genx-multimodal.provider';
 import * as ffmpegService from '../services/ffmpeg.service';
+import { AppError } from '../middleware/errorHandler';
+import {
+  beginGovernedGeneration,
+  completeGovernedGeneration,
+  failGovernedGeneration,
+  markGovernedGenerationSubmitted,
+  type GovernedGeneration,
+} from '../services/governed-generation.service';
+import * as contentEngine from '../services/content-engine.service';
 
 const connection = {
   host: process.env.REDIS_HOST || 'localhost',
@@ -81,39 +90,80 @@ async function processStudio(job: Job): Promise<void> {
   const data = job.data as any;
   const generationId = data.generationId as string;
   const workerId = `generation-${process.pid}`;
-
-  await query(
-    `UPDATE studio_generations
-     SET status = 'processing', worker_id = $1, attempt_count = attempt_count + 1,
-         heartbeat_at = NOW(), updated_at = NOW()
-     WHERE id = $2`,
-    [workerId, generationId]
+  const generation = await query(
+    `SELECT campaign_id, user_id, type, model, prompt, options, attempt_count,
+            status, cancellation_requested_at
+     FROM studio_generations WHERE id=$1 AND organization_id=$2`,
+    [generationId, data.organizationId]
   );
+  if (generation.rows.length === 0) throw new Error('Studio generation not found');
+  if (String(generation.rows[0].status) === 'cancelled' || generation.rows[0].cancellation_requested_at) {
+    await query(
+      `UPDATE campaign_asset_runs SET status='cancelled',updated_at=NOW()
+       WHERE studio_generation_id=$1`,
+      [generationId]
+    );
+    return;
+  }
+  const generationOptions = asObject(generation.rows[0].options);
 
-  const params = await resolveContinuationReference(data.organizationId, data.options || {});
-  if (data.prompt) params.prompt = data.prompt;
-  if (data.negativePrompt) params.negative_prompt = data.negativePrompt;
-  delete params.idempotency_key;
+  let governed: GovernedGeneration | null = null;
+  try {
+    governed = await beginGovernedGeneration({
+      organizationId: data.organizationId,
+      userId: data.userId,
+      campaignId: generation.rows[0].campaign_id || null,
+      generationJobId: generationId,
+      modelId: data.modelId,
+      operation: data.type === 'cinema' ? 'text_to_video' : data.type,
+      quantity: Number(data.options?.quantity || 1),
+      idempotencyKey: `studio:${generationId}:attempt:${Number(generation.rows[0].attempt_count || 0) + 1}`,
+      title: `Generate ${String(data.type).replaceAll('_', ' ')}`,
+      summary: String(data.prompt || '').slice(0, 500),
+      requestedBy: 'user',
+      payload: {
+        generation_id: generationId,
+        campaign_plan_id: generationOptions.campaign_plan_id || null,
+        brief_id: generationOptions.brief_id || null,
+        variant_number: generationOptions.variant_number || null,
+      },
+      onAuthorized: async () => {
+        await query(
+          `UPDATE studio_generations
+           SET status = 'processing', worker_id = $1, attempt_count = attempt_count + 1,
+               heartbeat_at = NOW(), updated_at = NOW()
+           WHERE id = $2`,
+          [workerId, generationId]
+        );
+      },
+    });
 
-  const providerJob: any = await genxMultimodalProvider.generate({
-    model: data.modelId,
-    params,
-    metadata: {
-      organization_id: data.organizationId,
-      generation_id: generationId,
-      type: data.type,
-    },
-    webhook_url: process.env.GENX_WEBHOOK_URL,
-  } as any);
+    const params = await resolveContinuationReference(data.organizationId, data.options || {});
+    if (data.prompt) params.prompt = data.prompt;
+    if (data.negativePrompt) params.negative_prompt = data.negativePrompt;
+    delete params.idempotency_key;
 
-  await query(
+    const providerJob: any = await genxMultimodalProvider.generate({
+      model: data.modelId,
+      params,
+      metadata: {
+        organization_id: data.organizationId,
+        generation_id: generationId,
+        type: data.type,
+      },
+      webhook_url: process.env.GENX_WEBHOOK_URL,
+    } as any);
+
+    await markGovernedGenerationSubmitted(governed, providerJob.id);
+
+    await query(
     `UPDATE studio_generations
      SET provider_job_id = $1, heartbeat_at = NOW(), updated_at = NOW()
      WHERE id = $2`,
     [providerJob.id, generationId]
   );
 
-  const finalState = await waitForProviderJob(
+    const finalState = await waitForProviderJob(
     providerJob.id,
     maxWaitMs(data.type),
     async () => {
@@ -133,19 +183,19 @@ async function processStudio(job: Job): Promise<void> {
     }
   );
 
-  if (finalState.status === 'cancelled') return;
-  if (finalState.status === 'failed') throw new Error(finalState.error || 'GenX generation failed');
+    if (finalState.status === 'cancelled') throw new Error('Generation cancelled');
+    if (finalState.status === 'failed') throw new Error(finalState.error || 'GenX generation failed');
 
-  let outputUrl = finalState.result_url;
-  let resultData = finalState.result_data || {};
-  if (!outputUrl) {
-    const result: any = await genxMultimodalProvider.getJobResult(providerJob.id);
-    outputUrl = result.url;
-    resultData = result.data || resultData;
-  }
-  if (!outputUrl) throw new Error('GenX completed without a result URL');
+    let outputUrl = finalState.result_url;
+    let resultData = finalState.result_data || {};
+    if (!outputUrl) {
+      const result: any = await genxMultimodalProvider.getJobResult(providerJob.id);
+      outputUrl = result.url;
+      resultData = result.data || resultData;
+    }
+    if (!outputUrl) throw new Error('GenX completed without a result URL');
 
-  await query(
+    await query(
     `UPDATE studio_generations
      SET status = 'completed', progress = 100, output_urls = $1,
          metadata = COALESCE(metadata, '{}'::jsonb) || $2::jsonb,
@@ -161,11 +211,29 @@ async function processStudio(job: Job): Promise<void> {
       generationId,
     ]
   );
-  await query(
+    await completeGovernedGeneration(governed, providerJob.id, {
+      usage: finalState.usage || null,
+      generation_id: generationId,
+    });
+    await query(
+      `UPDATE campaign_asset_runs SET status='completed',completed_at=NOW(),updated_at=NOW()
+       WHERE studio_generation_id=$1`,
+      [generationId]
+    );
+    await query(
     `UPDATE genx_models SET verification_status = 'runtime_confirmed', last_verified = NOW()
      WHERE id = $1`,
-    [data.modelId]
-  );
+      [data.modelId]
+    );
+  } catch (error) {
+    if (governed) await failGovernedGeneration(governed, error);
+    throw error;
+  }
+}
+
+function sceneMetadataCampaignId(value: unknown): string | null {
+  const metadata = asObject(value);
+  return metadata.campaign_id ? String(metadata.campaign_id) : null;
 }
 
 async function createContinuityAsset(
@@ -316,6 +384,24 @@ async function processLongformScene(job: Job): Promise<void> {
   const scene = sceneResult.rows[0] as Record<string, any>;
   if (!scene.model_id) throw new Error('Long-form scene has no selected model');
 
+  let governed: GovernedGeneration | null = null;
+  try {
+    const operation = scene.source_image_url ? 'image_to_video' : 'text_to_video';
+    governed = await beginGovernedGeneration({
+      organizationId: data.organizationId,
+      userId: scene.owner_id,
+      campaignId: sceneMetadataCampaignId(scene.project_metadata),
+      generationJobId: String(scene.id),
+      modelId: String(scene.model_id),
+      operation,
+      quantity: Math.max(1, Number(scene.duration_seconds || 1)),
+      idempotencyKey: `longform-scene:${scene.id}:attempt:${Number(scene.retry_count || 0) + 1}`,
+      title: `Generate long-form scene ${Number(scene.scene_number || 0)}`,
+      summary: String(scene.visual_prompt || '').slice(0, 500),
+      requestedBy: 'system',
+      payload: { project_id: data.projectId, scene_id: data.sceneId },
+    });
+
   await query(
     `UPDATE video_scenes
      SET status = 'generating', worker_id = $1, error_message = NULL, updated_at = NOW()
@@ -402,6 +488,8 @@ async function processLongformScene(job: Job): Promise<void> {
     webhook_url: process.env.GENX_WEBHOOK_URL,
   } as any);
 
+  await markGovernedGenerationSubmitted(governed, providerJob.id);
+
   await query(
     `UPDATE video_scenes
      SET provider_job_id = $1, submitted_at = NOW(),
@@ -430,7 +518,7 @@ async function processLongformScene(job: Job): Promise<void> {
     }
   );
 
-  if (finalState.status === 'cancelled') return;
+  if (finalState.status === 'cancelled') throw new Error('Long-form scene generation cancelled');
   if (finalState.status === 'failed') throw new Error(finalState.error || 'GenX scene generation failed');
 
   let outputUrl = finalState.result_url;
@@ -467,32 +555,83 @@ async function processLongformScene(job: Job): Promise<void> {
     [scene.model_id]
   );
 
+  await completeGovernedGeneration(governed, providerJob.id, {
+    usage: finalState.usage || null,
+    project_id: data.projectId,
+    scene_id: data.sceneId,
+  });
+
   await ensureFinalFrameAsset(
     { ...scene, generated_clip_url: outputUrl, provider_result_url: outputUrl, final_frame_asset_id: null },
     data.organizationId,
     scene.owner_id
   ).catch((error) => logger.warn(`Final-frame extraction skipped for scene ${scene.id}: ${error}`));
+  } catch (error) {
+    if (governed) await failGovernedGeneration(governed, error);
+    throw error;
+  }
+}
+
+async function processCampaignText(job: Job): Promise<void> {
+  const data = job.data as any;
+  await query(
+    `UPDATE campaign_asset_runs SET status='processing',error_message=NULL,updated_at=NOW()
+     WHERE id=$1 AND organization_id=$2`,
+    [data.runId, data.organizationId]
+  );
+  const result = await contentEngine.generateContent(data.organizationId, data.request, data.userId);
+  await query(
+    `UPDATE campaign_asset_runs
+     SET status='completed',content_id=$1,completed_at=NOW(),updated_at=NOW()
+     WHERE id=$2 AND organization_id=$3`,
+    [result.content.id, data.runId, data.organizationId]
+  );
 }
 
 async function processJob(job: Job): Promise<void> {
   try {
-    if (job.name === 'longform-scene' || job.data?.kind === 'longform-scene') await processLongformScene(job);
+    if (job.name === 'campaign-text' || job.data?.kind === 'campaign-text') await processCampaignText(job);
+    else if (job.name === 'longform-scene' || job.data?.kind === 'longform-scene') await processLongformScene(job);
     else await processStudio(job);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    if (job.name === 'longform-scene' || job.data?.kind === 'longform-scene') {
+    const awaitingControl = error instanceof AppError && [
+      'RELAUNCH_APPROVAL_REQUIRED',
+      'RELAUNCH_ACTION_BLOCKED',
+      'RELAUNCH_DECISION_STALE',
+      'RELAUNCH_APPROVAL_EXPIRED',
+    ].includes(error.code);
+    if (job.name === 'campaign-text' || job.data?.kind === 'campaign-text') {
+      await query(
+        `UPDATE campaign_asset_runs SET status=$1,error_message=$2,updated_at=NOW()
+         WHERE id=$3 AND organization_id=$4`,
+        [awaitingControl ? 'pending_control' : 'failed', message, job.data.runId, job.data.organizationId]
+      );
+    } else if (job.name === 'longform-scene' || job.data?.kind === 'longform-scene') {
       await query(
         `UPDATE video_scenes
-         SET status = 'failed', error_message = $1, retry_count = retry_count + 1, updated_at = NOW()
-         WHERE id = $2`,
-        [message, job.data.sceneId]
+         SET status = $1, error_message = $2,
+             retry_count = retry_count + CASE WHEN $3 THEN 0 ELSE 1 END,
+             updated_at = NOW()
+         WHERE id = $4`,
+        [awaitingControl ? 'pending_control' : 'failed', message, awaitingControl, job.data.sceneId]
       );
     } else {
       await query(
         `UPDATE studio_generations
-         SET status = 'failed', error_code = 'WORKER_ERROR', error_message = $1, updated_at = NOW()
-         WHERE id = $2`,
-        [message, job.data.generationId]
+         SET status = $1, error_code = $2, error_message = $3, updated_at = NOW()
+         WHERE id = $4`,
+        [
+          awaitingControl ? 'pending_control' : 'failed',
+          awaitingControl ? error.code : 'WORKER_ERROR',
+          message,
+          job.data.generationId,
+        ]
+      );
+      await query(
+        `UPDATE campaign_asset_runs SET status=$1,error_message=$2,updated_at=NOW()
+         WHERE studio_generation_id=$3`,
+        [awaitingControl ? 'pending_control' : 'failed', message, job.data.generationId]
       );
     }
     throw error;

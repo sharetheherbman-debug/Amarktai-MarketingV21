@@ -4,7 +4,6 @@ import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import {
   FileText,
-  Plus,
   Search,
   Filter,
   Loader2,
@@ -110,7 +109,7 @@ export default function ContentStudioPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-white">Content Studio</h1>
-          <p className="mt-1 text-sm text-zinc-400">Create, manage, and publish AI-powered marketing content.</p>
+          <p className="mt-1 text-sm text-zinc-400">Create, review and govern campaign content from one workspace.</p>
         </div>
         <div className="flex items-center gap-3">
           <Link
@@ -118,14 +117,7 @@ export default function ContentStudioPage() {
             className="inline-flex items-center gap-2 rounded-lg bg-brand-500 px-4 py-2.5 text-sm font-semibold text-white transition-all hover:bg-brand-400"
           >
             <Sparkles className="h-4 w-4" />
-            AI Generate
-          </Link>
-          <Link
-            href="/content-studio/new"
-            className="inline-flex items-center gap-2 rounded-lg border border-white/[0.06] bg-white/[0.03] px-4 py-2.5 text-sm font-semibold text-white transition-all hover:bg-white/[0.06]"
-          >
-            <Plus className="h-4 w-4" />
-            New Content
+            Create content
           </Link>
         </div>
       </div>

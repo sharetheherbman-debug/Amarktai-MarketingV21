@@ -1,8 +1,7 @@
 import { query } from '../config/database';
 import { NotFoundError, AppError } from '../middleware/errorHandler';
-import { providerRouter } from '../providers/provider-router';
+import { generateGovernedText } from './governed-text-generation.service';
 import { contextEngine } from './context-engine.service';
-import { env } from '../config/env';
 import { safeFetch } from '../utils/safe-fetch';
 
 export interface SeoKeyword {
@@ -74,15 +73,17 @@ function parseAiJson<T>(content: string, label: string): T {
 }
 
 async function aiJson<T>(orgId: string, prompt: string, maxTokens: number, temperature: number, label: string): Promise<T> {
-  const result = await providerRouter.routeRequest(
-    [
+  const result = await generateGovernedText({
+    organizationId: orgId,
+    title: `Generate ${label}`,
+    messages: [
       { role: 'system', content: 'Return only strict JSON. Do not wrap it in Markdown. Do not claim live external metrics unless they were provided.' },
       { role: 'user', content: prompt },
     ],
-    env.DEFAULT_TEXT_MODEL,
-    { max_tokens: maxTokens, temperature },
-    { organizationId: orgId }
-  );
+    maxTokens,
+    temperature,
+    payload: { purpose: label },
+  });
   return parseAiJson<T>(result.content, label);
 }
 

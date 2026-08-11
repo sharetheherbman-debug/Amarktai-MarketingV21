@@ -1,8 +1,10 @@
 import { query } from '../config/database';
 import { AppError, NotFoundError } from '../middleware/errorHandler';
+import crypto from 'crypto';
 import { logger } from '../utils/logger';
 import {
   publishPost as deliverApprovedSocialPost,
+  schedulePost,
   type SocialPost,
 } from './social-publishing.service';
 import {
@@ -11,6 +13,51 @@ import {
   markExecutionRunning,
   requireExecutionApproval,
 } from './relaunch-execution-gate.service';
+
+export async function schedulePostThroughControlCentre(input: {
+  organizationId: string;
+  connectionId: string;
+  body: string;
+  userId?: string | null;
+  requestedBy?: 'system' | 'user' | 'application';
+  contentId?: string;
+  campaignId?: string;
+  mediaUrls?: string[];
+  hashtags?: string[];
+  scheduledAt: string;
+  idempotencyKey?: string;
+}): Promise<SocialPost> {
+  const fingerprint = crypto.createHash('sha256').update(JSON.stringify({
+    connectionId: input.connectionId, body: input.body, scheduledAt: input.scheduledAt,
+    campaignId: input.campaignId || null, mediaUrls: input.mediaUrls || [], hashtags: input.hashtags || [],
+  })).digest('hex');
+  const decision = await requireExecutionApproval(input.organizationId, {
+    action_type: 'social_schedule', channel: 'social', title: 'Schedule social content',
+    summary: input.body.slice(0, 500),
+    idempotency_key: input.idempotencyKey || `social-schedule:${fingerprint}`,
+    requested_by: input.requestedBy || 'user', requested_by_user_id: input.userId || null,
+    payload: {
+      connection_id: input.connectionId, campaign_id: input.campaignId || null,
+      content_id: input.contentId || null, scheduled_at: input.scheduledAt,
+      body_hash: crypto.createHash('sha256').update(input.body).digest('hex'),
+    },
+  });
+  try {
+    await markExecutionRunning(decision.id);
+    const post = await schedulePost(input.organizationId, input.connectionId, input.body, {
+      content_id: input.contentId,
+      campaign_id: input.campaignId,
+      media_urls: input.mediaUrls,
+      hashtags: input.hashtags,
+      scheduled_at: input.scheduledAt,
+    });
+    await markExecutionCompleted(decision.id);
+    return post;
+  } catch (error) {
+    await markExecutionFailed(decision.id, error);
+    throw error;
+  }
+}
 
 function isControlHold(error: unknown): boolean {
   return error instanceof AppError

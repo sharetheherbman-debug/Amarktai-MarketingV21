@@ -176,6 +176,17 @@ router.post('/generations/:id/cancel', async (req: AuthRequest, res: Response<Ap
   }
 });
 
+router.post('/generations/:id/retry', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction) => {
+  try {
+    const orgId = req.body.organization_id as string;
+    if (!orgId || !await verifyOrgMembership(orgId, req.user!.userId)) {
+      res.status(orgId ? 403 : 400).json({ success: false, error: { message: orgId ? 'Not a member of this organization' : 'organization_id required', code: orgId ? 'FORBIDDEN' : 'BAD_REQUEST' } });
+      return;
+    }
+    res.status(202).json({ success: true, data: await studioService.retryGeneration(req.params.id, orgId, req.user!.userId) });
+  } catch (error) { next(error); }
+});
+
 router.get('/history', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction) => {
   try {
     const orgId = req.query.organization_id as string;

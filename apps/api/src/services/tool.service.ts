@@ -1,13 +1,15 @@
 import { query } from '../config/database';
 import { logger } from '../utils/logger';
 import { AppError } from '../middleware/errorHandler';
-import { providerRouter } from '../providers/provider-router';
+import { generateGovernedText } from './governed-text-generation.service';
 import { v4 as uuidv4 } from 'uuid';
 import { ChatMessage } from '../types';
 import * as socialService from './social-publishing.service';
 import * as knowledgeService from './knowledge.service';
 import * as externalIntegrations from './external-integrations.service';
 import * as studioService from './studio.service';
+import { publishPostThroughControlCentre, schedulePostThroughControlCentre } from './controlled-social-publishing.service';
+import { deliverEmailBatchThroughControlCentre } from './controlled-email-delivery.service';
 
 export interface Tool {
   id: string;
@@ -68,10 +70,15 @@ async function generateText(input: Record<string, unknown>, orgId: string): Prom
   const prompt = String(input.prompt || '').trim();
   if (!prompt) throw new AppError(400, 'prompt is required', 'VALIDATION_ERROR');
   const messages: ChatMessage[] = [{ role: 'user', content: prompt }];
-  const result = await providerRouter.routeRequest(messages, String(input.model || 'gpt-4o-mini'), {
-    max_tokens: Number(input.max_tokens || 1000),
+  const result = await generateGovernedText({
+    organizationId: orgId,
+    idempotencyKey: input.idempotency_key ? String(input.idempotency_key) : undefined,
+    title: 'Generate agent draft',
+    messages,
+    maxTokens: Math.max(1, Math.min(Number(input.max_tokens || 1000), 8000)),
     temperature: Number(input.temperature ?? 0.7),
-  }, { organizationId: orgId });
+    payload: { purpose: 'agent_text_tool' },
+  });
   return { text: result.content, tokensIn: result.tokensIn, tokensOut: result.tokensOut };
 }
 
@@ -124,13 +131,23 @@ async function createSocialPost(input: Record<string, unknown>, orgId: string, r
   const scheduledAt = input.scheduled_at ? String(input.scheduled_at) : undefined;
   if (requireSchedule && !scheduledAt) throw new AppError(400, 'scheduled_at is required', 'VALIDATION_ERROR');
   const connectionId = await resolveSocialConnection(orgId, input);
-  const post = await socialService.schedulePost(orgId, connectionId, body, {
+  const options = {
     campaign_id: input.campaign_id ? String(input.campaign_id) : undefined,
     media_urls: Array.isArray(input.media_urls) ? input.media_urls.map(String) : [],
     hashtags: Array.isArray(input.hashtags) ? input.hashtags.map(String) : [],
     scheduled_at: scheduledAt,
-  });
-  return input.publish_now === true ? socialService.publishPost(post.id, orgId) : post;
+  };
+  const post = scheduledAt
+    ? await schedulePostThroughControlCentre({
+        organizationId: orgId, connectionId, body, requestedBy: 'system',
+        campaignId: options.campaign_id, mediaUrls: options.media_urls,
+        hashtags: options.hashtags, scheduledAt,
+        idempotencyKey: input.idempotency_key ? String(input.idempotency_key) : undefined,
+      })
+    : await socialService.schedulePost(orgId, connectionId, body, options);
+  return input.publish_now === true
+    ? publishPostThroughControlCentre(post.id, orgId, '')
+    : post;
 }
 
 async function sendEmail(input: Record<string, unknown>, orgId: string): Promise<unknown> {
@@ -138,46 +155,17 @@ async function sendEmail(input: Record<string, unknown>, orgId: string): Promise
   const subject = String(input.subject || '').trim();
   const body = String(input.body || '').trim();
   if (!to || !subject || !body) throw new AppError(400, 'to, subject, and body are required', 'VALIDATION_ERROR');
-  const providerResult = await query(
-    `SELECT * FROM email_providers WHERE organization_id = $1 AND is_active = TRUE ORDER BY is_default DESC, created_at ASC LIMIT 1`,
-    [orgId]
-  );
-  if (providerResult.rows.length === 0) throw new AppError(400, 'No active email provider is configured', 'EMAIL_PROVIDER_REQUIRED');
-  const provider = providerResult.rows[0];
-  const config = objectValue(provider.config);
-  const providerType = String(provider.provider_type || '');
-  let response: Response;
-
-  if (providerType === 'resend') {
-    const apiKey = String(config.api_key || '');
-    if (!apiKey) throw new AppError(400, 'Resend api_key is missing', 'EMAIL_PROVIDER_CONFIG_ERROR');
-    response = await fetch('https://api.resend.com/emails', {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ from: provider.from_email, to: [to], subject, html: body }),
-      signal: AbortSignal.timeout(30000),
-    });
-  } else if (providerType === 'sendgrid') {
-    const apiKey = String(config.api_key || '');
-    if (!apiKey) throw new AppError(400, 'SendGrid api_key is missing', 'EMAIL_PROVIDER_CONFIG_ERROR');
-    response = await fetch('https://api.sendgrid.com/v3/mail/send', {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ personalizations: [{ to: [{ email: to }] }], from: { email: provider.from_email, name: provider.from_name || undefined }, subject, content: [{ type: 'text/html', value: body }] }),
-      signal: AbortSignal.timeout(30000),
-    });
-  } else if (providerType === 'webhook') {
-    const url = String(config.url || '');
-    if (!url) throw new AppError(400, 'Email webhook URL is missing', 'EMAIL_PROVIDER_CONFIG_ERROR');
-    response = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json', ...(objectValue(config.headers) as Record<string, string>) }, body: JSON.stringify({ to, subject, body, from_email: provider.from_email, from_name: provider.from_name }), signal: AbortSignal.timeout(30000) });
-  } else {
-    throw new AppError(400, `Unsupported email provider type: ${providerType}`, 'EMAIL_PROVIDER_UNSUPPORTED');
-  }
-
-  const responseText = await response.text();
-  if (!response.ok) throw new AppError(response.status, `Email provider failed: ${responseText || response.statusText}`, 'EMAIL_SEND_FAILED');
-  await query('UPDATE email_providers SET sent_today = sent_today + 1, health_status = $1 WHERE id = $2', ['healthy', provider.id]);
-  return { delivered: true, provider: providerType, status: response.status, response: responseText ? responseText.slice(0, 2000) : null };
+  return deliverEmailBatchThroughControlCentre({
+    organizationId: orgId,
+    deliveries: [{ to, subject, html: body }],
+    actionTitle: `Send email: ${subject}`,
+    actionSummary: `Controlled delivery to one recipient`,
+    requestedBy: 'system',
+    idempotencyKey: input.idempotency_key
+      ? String(input.idempotency_key)
+      : `agent-email:${Buffer.from(`${to}|${subject}|${body}`).toString('base64url').slice(0, 180)}`,
+    payload: { source: 'agent_tool' },
+  });
 }
 
 async function getAnalytics(input: Record<string, unknown>, orgId: string): Promise<unknown> {

@@ -424,6 +424,7 @@ export interface CreateContentData {
   metadata?: Record<string, unknown>;
   scheduled_at?: string;
   assigned_to?: string;
+  parent_id?: string;
 }
 
 export interface UpdateContentData {
@@ -1040,6 +1041,7 @@ export interface ContentGenerationJob {
   created_by: string | null;
   created_at: string;
   updated_at: string;
+  attempt_count?: number;
 }
 
 export interface GenerateContentRequest {
@@ -1050,16 +1052,27 @@ export interface GenerateContentRequest {
   template_id?: string;
   variables?: Record<string, string>;
   campaign_id?: string;
+  campaign_plan_id?: string;
+  brief_id?: string;
   max_words?: number;
   tone?: string;
   language?: string;
+  audience?: string;
+  objective?: string;
+  offer?: string;
+  calls_to_action?: string[];
+  creative_direction?: string;
+  prohibited_claims?: string[];
+  required_terms?: string[];
+  alt_text?: string;
+  idempotency_key?: string;
 }
 
 export interface ContentQualityCheck {
   id: string;
   content_id: string;
   organization_id: string;
-  check_type: 'grammar' | 'readability' | 'seo' | 'brand_voice' | 'duplicate' | 'compliance' | 'cta';
+  check_type: 'grammar' | 'readability' | 'seo' | 'brand_voice' | 'duplicate' | 'compliance' | 'cta' | 'campaign_alignment' | 'platform' | 'originality' | 'accessibility';
   score: number;
   issues: QualityIssue[];
   suggestions: string[];

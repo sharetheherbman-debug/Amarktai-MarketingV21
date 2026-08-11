@@ -3,6 +3,7 @@ import { requireAuth, AuthRequest } from '../middleware/auth';
 import { ApiResponse } from '../types';
 import * as plannerService from '../services/campaign-planner.service';
 import * as optimizationService from '../services/campaign-optimization.service';
+import * as productionService from '../services/campaign-production.service';
 
 const router = Router();
 router.use(requireAuth);
@@ -28,10 +29,35 @@ router.get('/plans/:id', async (req: AuthRequest, res: Response<ApiResponse>, ne
 
 router.post('/plans/generate', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
   try {
-    const { organization_id, name, goal, target_audience, budget_cents, products, location, duration_weeks } = req.body;
+    const { organization_id, name, goal, target_audience } = req.body;
     if (!organization_id || !name || !goal) { res.status(400).json({ success: false, error: { message: 'organization_id, name, and goal required', code: 'BAD_REQUEST' } }); return; }
-    const plan = await plannerService.generatePlan(organization_id, { name, goal, target_audience, budget_cents: budget_cents || 0, products: products || '', location: location || '', duration_weeks }, req.user!.userId);
+    const plan = await plannerService.generatePlan(organization_id, {
+      ...req.body,
+      name,
+      goal,
+      target_audience: target_audience || '',
+      budget_cents: Number(req.body.budget_cents || 0),
+      products: String(req.body.products || ''),
+      location: String(req.body.location || ''),
+    }, req.user!.userId);
     res.status(201).json({ success: true, data: plan });
+  } catch (error) { next(error); }
+});
+
+router.put('/plans/:id', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
+  try {
+    const organizationId = String(req.body.organization_id || '');
+    if (!organizationId) { res.status(400).json({ success: false, error: { message: 'organization_id required', code: 'BAD_REQUEST' } }); return; }
+    const plan = await plannerService.updatePlan(req.params.id, organizationId, req.body, req.user!.userId);
+    res.json({ success: true, data: plan });
+  } catch (error) { next(error); }
+});
+
+router.get('/plans/:id/versions', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
+  try {
+    const organizationId = String(req.query.organization_id || '');
+    if (!organizationId) { res.status(400).json({ success: false, error: { message: 'organization_id required', code: 'BAD_REQUEST' } }); return; }
+    res.json({ success: true, data: await plannerService.listPlanVersions(req.params.id, organizationId) });
   } catch (error) { next(error); }
 });
 
@@ -39,8 +65,25 @@ router.put('/plans/:id/status', async (req: AuthRequest, res: Response<ApiRespon
   try {
     const { organization_id, status } = req.body;
     if (!organization_id || !status) { res.status(400).json({ success: false, error: { message: 'organization_id and status required', code: 'BAD_REQUEST' } }); return; }
-    await plannerService.updatePlanStatus(req.params.id, organization_id, status);
+    await plannerService.updatePlanStatus(req.params.id, organization_id, status, req.user!.userId);
     res.json({ success: true, data: { message: 'Status updated' } });
+  } catch (error) { next(error); }
+});
+
+router.post('/plans/:id/production', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
+  try {
+    const organizationId = String(req.body.organization_id || '');
+    if (!organizationId) { res.status(400).json({ success: false, error: { message: 'organization_id required', code: 'BAD_REQUEST' } }); return; }
+    const runs = await productionService.queueCampaignProduction(req.params.id, organizationId, req.user!.userId);
+    res.status(202).json({ success: true, data: runs });
+  } catch (error) { next(error); }
+});
+
+router.get('/plans/:id/production', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
+  try {
+    const organizationId = String(req.query.organization_id || '');
+    if (!organizationId) { res.status(400).json({ success: false, error: { message: 'organization_id required', code: 'BAD_REQUEST' } }); return; }
+    res.json({ success: true, data: await productionService.listCampaignProduction(req.params.id, organizationId) });
   } catch (error) { next(error); }
 });
 

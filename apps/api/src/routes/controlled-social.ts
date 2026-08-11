@@ -3,7 +3,7 @@ import type { AuthRequest } from '../middleware/auth';
 import { AppError } from '../middleware/errorHandler';
 import type { ApiResponse } from '../types';
 import * as socialService from '../services/social-publishing.service';
-import { publishPostThroughControlCentre } from '../services/controlled-social-publishing.service';
+import { publishPostThroughControlCentre, schedulePostThroughControlCentre } from '../services/controlled-social-publishing.service';
 
 const router = Router();
 
@@ -53,13 +53,23 @@ router.post('/social/posts', async (
       return;
     }
 
-    const post = await socialService.schedulePost(organizationId, connection_id, body, {
-      content_id,
-      campaign_id,
-      media_urls,
-      hashtags,
-      scheduled_at,
-    });
+    let post;
+    try {
+      post = scheduled_at
+        ? await schedulePostThroughControlCentre({
+            organizationId, connectionId: connection_id, body, userId: req.user!.userId,
+            contentId: content_id, campaignId: campaign_id, mediaUrls: media_urls,
+            hashtags, scheduledAt: scheduled_at,
+          })
+        : await socialService.schedulePost(organizationId, connection_id, body, {
+            content_id, campaign_id, media_urls, hashtags,
+          });
+    } catch (error) {
+      const hold = controlHold(error);
+      if (!hold) throw error;
+      res.status(202).json({ success: true, data: { status: hold.status, approval_required: hold.approvalRequired, control_message: hold.message } });
+      return;
+    }
     if (!publish_now) {
       res.status(201).json({ success: true, data: post });
       return;
