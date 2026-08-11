@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 
 const repositoryRoot = path.resolve(__dirname, '..', '..', '..', '..');
-const read = (relative: string) => fs.readFileSync(path.resolve(repositoryRoot, relative), 'utf8');
+const read = (relative: string) => fs.readFileSync(path.resolve(repositoryRoot, relative), 'utf8').replace(/\r\n/g, '\n');
 
 function walkTypeScript(relative: string): string[] {
   const root = path.resolve(repositoryRoot, relative);

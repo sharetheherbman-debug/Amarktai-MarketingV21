@@ -155,17 +155,21 @@ Committed on this branch:
 - atomic wallet/grant/reservation/settlement service
 - platform-admin free, at-cost, promotion and internal-funding credit API controls
 
-Still required before deployment:
+Code-level release completion on 11 August 2026:
 
-- run and fix TypeScript/tests/migrations
-- GenX live pricing synchronisation and quote service
-- Stripe one-time credit Checkout and webhook settlement
-- customer wallet/billing UI
-- platform-owner profitability UI
-- removal of provider-key settings surfaces
-- application connector and signed SSO
-- Relaunch Control Centre UI/workflow
-- migration of useful embedded EquiProfile marketing capabilities
-- production runtime verification
+- root/public product/signup routes redirect to secure owner login and public API registration is disabled;
+- one application provisions exactly one workspace owner through the signed connector;
+- password and connector SSO flows require independent Marketing TOTP before a full session or refresh token;
+- TOTP includes QR/manual enrollment, encrypted secrets, verification-before-enable, hashed one-use and regenerable recovery codes, replay counters, rate limits and audit events;
+- EquiProfile white-label metadata, auth/dashboard shells and `© 2026 Amarktai Network` attribution are applied;
+- the dashboard reads live Control Centre, Generation Credit, campaign, connection and GenX capability state and never invents missing data;
+- team, agency, marketplace, customer billing and other deferred surfaces are outside launch navigation while reusable structures remain intact;
+- customer Marketing checkout is absent from the Phase 1 UI; the internal wallet/ledger and promotional grants remain;
+- neutral `HOST_APP_*` connector variables work with backwards-compatible `EQUIPROFILE_*` aliases;
+- API/web builds, repository verification, 114 API regressions and unauthenticated desktop/mobile browser acceptance pass.
+
+Still required as controlled deployment acceptance: real GenX generation, social publication, email delivery, analytics synchronisation, VPS workers/queues, canonical DNS/TLS, backup/restore evidence, authenticated owner browser/PWA testing and the Management production connector.
+
+See `docs/PHASE_1_RELEASE_READINESS.md` for the consolidated truth matrix and release decision.
 
 This document is the binding Phase 1 implementation contract unless explicitly revised.

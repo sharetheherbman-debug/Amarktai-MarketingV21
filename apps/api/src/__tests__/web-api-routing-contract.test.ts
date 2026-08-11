@@ -41,8 +41,8 @@ describe('Web/API routing contract', () => {
     );
 
     expect(loginPage).toContain("import { useAuthStore } from '@/stores/auth.store';");
-    expect(loginPage).toContain('await login({ email, password });');
-    expect(loginPage).toContain("router.replace('/dashboard');");
+    expect(loginPage).toContain('await login({ email, password, mfa_code: mfaCode || undefined });');
+    expect(loginPage).toContain("router.replace(enrollmentRequired ? '/mfa/setup' : '/dashboard');");
     expect(loginPage).not.toContain("fetch('/api/auth/login'");
     expect(loginPage).not.toContain('Sign up');
 

@@ -92,7 +92,7 @@ describe('pre-deployment runtime regressions', () => {
     expect(service).toContain('GENERATION_CREDITS_INSUFFICIENT');
   });
 
-  test('credit checkout is GBP, one-time and funded only by verified webhooks', () => {
+  test('legacy credit checkout remains GBP and webhook-funded while Phase 1 hides customer payment UI', () => {
     const checkout = read('apps/api/src/services/generation-credit-stripe.service.ts');
     const webhook = read('apps/api/src/services/stripe-webhook.service.ts');
     const page = read('apps/web/app/(dashboard)/billing/page.tsx');
@@ -104,7 +104,8 @@ describe('pre-deployment runtime regressions', () => {
     expect(checkout).toContain('stripe-credit-session:${sessionId}');
     expect(webhook).toContain('processGenerationCreditStripeEvent');
     expect(page).toContain('Generation Credits');
-    expect(page).toContain("currency: 'GBP'");
+    expect(page).toContain('Public purchases are disabled for Phase 1');
+    expect(page).not.toContain('Continue to Stripe');
   });
 
   test('GenX models require verified GBP price snapshots before retail use', () => {
