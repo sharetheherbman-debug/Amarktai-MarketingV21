@@ -3,6 +3,7 @@ import { logger } from '../utils/logger';
 import { NotFoundError } from '../middleware/errorHandler';
 import * as brandDnaService from './brand-dna.service';
 import * as knowledgeService from './knowledge.service';
+import { getPlatformIntelligenceContext } from './platform-intelligence.service';
 
 export interface ContextOptions {
   orgId: string;
@@ -10,14 +11,17 @@ export interface ContextOptions {
   includeBrandDna?: boolean;
   includeKnowledge?: boolean;
   includeHistory?: boolean;
+  includePlatformIntelligence?: boolean;
   historyLimit?: number;
   knowledgeQuery?: string;
+  platforms?: string[];
 }
 
 export interface AssembledContext {
   systemPrompt: string;
   brandDna: string;
   knowledge: string;
+  platformIntelligence: string;
   recentHistory: string;
   fullContext: string;
 }
@@ -126,24 +130,30 @@ export async function assemble(options: ContextOptions): Promise<AssembledContex
     includeBrandDna = true,
     includeKnowledge = true,
     includeHistory = true,
+    includePlatformIntelligence = true,
     historyLimit = 10,
     knowledgeQuery = '',
+    platforms,
   } = options;
 
   const agent = await loadAgent(agentId, orgId);
   const config = agent?.config || {};
-  const [brandDna, knowledge, recentHistory] = await Promise.all([
+  const [brandDna, businessKnowledge, recentHistory] = await Promise.all([
     includeBrandDna && config.include_brand_dna !== false ? getBrandDna(orgId) : Promise.resolve(''),
     includeKnowledge && config.include_knowledge !== false ? getRelevantKnowledge(orgId, knowledgeQuery, 5) : Promise.resolve(''),
     includeHistory && config.include_history !== false ? getRecentHistory(agentId, orgId, historyLimit) : Promise.resolve(''),
   ]);
-
+  const platformIntelligence = includePlatformIntelligence && config.include_platform_intelligence !== false
+    ? getPlatformIntelligenceContext(platforms)
+    : '';
+  const knowledge = [businessKnowledge, platformIntelligence].filter(Boolean).join('\n\n---\n\n');
   const fullContext = [brandDna, knowledge, recentHistory].filter(Boolean).join('\n\n---\n\n');
   logger.debug(`Context assembled for ${agentId || 'unscoped generation'}: ${fullContext.length} chars`);
   return {
     systemPrompt: agent?.system_prompt || '',
     brandDna,
     knowledge,
+    platformIntelligence,
     recentHistory,
     fullContext,
   };
