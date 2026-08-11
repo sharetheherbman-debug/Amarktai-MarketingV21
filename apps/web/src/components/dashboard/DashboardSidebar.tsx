@@ -10,7 +10,6 @@ import {
   ChevronLeft,
   ChevronRight,
   Coins,
-  CreditCard,
   FileText,
   Image,
   LayoutDashboard,
@@ -72,7 +71,6 @@ const workspaceNav: NavSection[] = [
     items: [
       { label: 'Connections', href: '/integrations', icon: Puzzle },
       { label: 'Generation Credits', href: '/billing', icon: Coins },
-      { label: 'Billing', href: '/billing', icon: CreditCard },
       { label: 'Settings', href: '/settings', icon: Settings },
     ],
   },

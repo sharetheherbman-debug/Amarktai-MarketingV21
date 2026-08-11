@@ -12,6 +12,7 @@ interface RedeemResponse {
     organization: Organization;
     accessToken: string;
     target_path: string;
+    mfa_enrollment_required?: boolean;
   };
   error?: { message?: string };
 }
@@ -56,7 +57,7 @@ function ConnectorSsoContent() {
         setStatus('success');
         setMessage('Secure sign-in complete. Opening the EquiProfile Marketing workspace…');
         window.history.replaceState({}, '', '/connector/sso');
-        router.replace(payload.data.target_path || '/dashboard');
+        router.replace(payload.data.mfa_enrollment_required ? '/mfa/setup' : (payload.data.target_path || '/dashboard'));
       } catch (error) {
         if (cancelled) return;
         setStatus('error');

@@ -14,6 +14,7 @@ export default function LoginPage() {
   const authLoading = useAuthStore((state) => state.isLoading);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [mfaCode, setMfaCode] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [errors, setErrors] = useState<{ email?: string; password?: string }>({});
 
@@ -36,9 +37,9 @@ export default function LoginPage() {
     if (!validate() || authLoading) return;
 
     try {
-      await login({ email, password });
+      const enrollmentRequired = await login({ email, password, mfa_code: mfaCode || undefined });
       toast.success('Signed in successfully');
-      router.replace('/dashboard');
+      router.replace(enrollmentRequired ? '/mfa/setup' : '/dashboard');
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Unable to sign in');
     }
@@ -74,6 +75,11 @@ export default function LoginPage() {
           {errors.email && (
             <p className="mt-1.5 text-xs text-red-400">{errors.email}</p>
           )}
+        </div>
+
+        <div>
+          <label htmlFor="mfaCode" className="block text-sm font-medium text-zinc-300">Authenticator or recovery code</label>
+          <input id="mfaCode" inputMode="numeric" autoComplete="one-time-code" value={mfaCode} onChange={(e) => setMfaCode(e.target.value)} placeholder="Required after enrollment" className="mt-1 w-full rounded-lg border border-white/[0.08] bg-[var(--color-surface-2)] px-3 py-2.5 text-sm text-white placeholder-zinc-500 focus:border-brand-500 focus:outline-none" />
         </div>
 
         <div>

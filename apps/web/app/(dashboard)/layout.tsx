@@ -57,6 +57,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         <DashboardHeader />
         <main className="flex-1 overflow-y-auto p-6">
           {children}
+          <footer className="mt-10 border-t border-white/[0.06] py-6 text-center text-xs text-zinc-600">
+            © 2026 Amarktai Network
+          </footer>
         </main>
       </div>
     </div>

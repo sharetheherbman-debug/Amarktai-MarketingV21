@@ -27,6 +27,7 @@ export interface User {
 interface LoginCredentials {
   email: string;
   password: string;
+  mfa_code?: string;
 }
 
 interface RegisterData {
@@ -57,7 +58,7 @@ interface AuthState {
   error: string | null;
   organizations: Organization[];
   currentOrganization: Organization | null;
-  login: (credentials: LoginCredentials) => Promise<void>;
+  login: (credentials: LoginCredentials) => Promise<boolean>;
   register: (data: RegisterData) => Promise<void>;
   logout: () => Promise<void>;
   refreshToken: () => Promise<void>;
@@ -129,9 +130,14 @@ export const useAuthStore = create<AuthState>()(
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(credentials),
           });
-          const data = await parseEnvelope<{ user: User; accessToken: string }>(response);
+          const data = await parseEnvelope<{ user: User; accessToken: string; mfa_enrollment_required?: boolean }>(response);
+          if (data.mfa_enrollment_required) {
+            persistSession(set, { ...data, organizations: [] });
+            return true;
+          }
           const organizations = await fetchOrganizations(data.accessToken);
           persistSession(set, { ...data, organizations });
+          return false;
         } catch (error) {
           set({ error: error instanceof Error ? error.message : 'Login failed', isLoading: false });
           throw error;
