@@ -1,4 +1,10 @@
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api/v1';
+function normalizeApiBaseUrl(value: string | undefined): string {
+  const trimmed = String(value || '').trim().replace(/\/+$/, '');
+  if (!trimmed || trimmed === '/api') return '/api/v1';
+  return trimmed;
+}
+
+const API_BASE_URL = normalizeApiBaseUrl(process.env.NEXT_PUBLIC_API_URL);
 
 interface RequestConfig extends Omit<RequestInit, 'body'> {
   params?: Record<string, string>;
@@ -27,14 +33,18 @@ class ApiClient {
   }
 
   private buildURL(endpoint: string, params?: Record<string, string>): string {
-    const url = new URL(`${this.baseURL}${endpoint}`);
+    const joined = `${this.baseURL.replace(/\/+$/, '')}/${endpoint.replace(/^\/+/, '')}`;
+    const isAbsolute = /^https?:\/\//i.test(joined);
+    const origin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost';
+    const url = new URL(joined, origin);
     const merged = { ...(params || {}) };
     const organizationId = this.getOrganizationId();
     if (organizationId && !merged.organization_id) merged.organization_id = organizationId;
     for (const [key, value] of Object.entries(merged)) {
       if (value !== undefined && value !== null && value !== '') url.searchParams.append(key, String(value));
     }
-    return url.toString();
+    if (isAbsolute) return url.toString();
+    return `${url.pathname}${url.search}${url.hash}`;
   }
 
   private prepareBody(body: unknown): unknown {
