@@ -46,14 +46,6 @@ x-api-environment: &api-environment
   GENERATION_RESERVATION_TTL_MINUTES: ${GENERATION_RESERVATION_TTL_MINUTES:-60}
   BILLING_CURRENCY: ${BILLING_CURRENCY:-GBP}
   GENERATION_CREDITS_PER_GBP: ${GENERATION_CREDITS_PER_GBP:-100}
-  TOGETHER_API_KEY: ${TOGETHER_API_KEY:-}
-  TOGETHER_BASE_URL: ${TOGETHER_BASE_URL:-https://api.together.xyz/v1}
-  TOGETHER_DEFAULT_TEXT_MODEL: ${TOGETHER_DEFAULT_TEXT_MODEL:-meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo}
-  TOGETHER_EMBEDDING_MODEL: ${TOGETHER_EMBEDDING_MODEL:-}
-  DEEPINFRA_API_KEY: ${DEEPINFRA_API_KEY:-}
-  DEEPINFRA_BASE_URL: ${DEEPINFRA_BASE_URL:-https://api.deepinfra.com/v1/openai}
-  DEEPINFRA_DEFAULT_TEXT_MODEL: ${DEEPINFRA_DEFAULT_TEXT_MODEL:-meta-llama/Meta-Llama-3.1-70B-Instruct}
-  DEEPINFRA_EMBEDDING_MODEL: ${DEEPINFRA_EMBEDDING_MODEL:-}
   LOCAL_EMBEDDINGS_ENABLED: ${LOCAL_EMBEDDINGS_ENABLED:-true}
   EMBEDDING_DIMENSIONS: ${EMBEDDING_DIMENSIONS:-1536}
   STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
@@ -62,17 +54,21 @@ x-api-environment: &api-environment
   SMTP_PORT: ${SMTP_PORT:-587}
   SMTP_USER: ${SMTP_USER:-}
   SMTP_PASS: ${SMTP_PASS:-}
-  SMTP_FROM: ${SMTP_FROM:-noreply@amarktai.co.za}
+  SMTP_FROM: ${SMTP_FROM:-noreply@equiprofile.online}
   APPLICATION_CONNECTOR_SIGNING_SECRET: ${APPLICATION_CONNECTOR_SIGNING_SECRET:?APPLICATION_CONNECTOR_SIGNING_SECRET required}
+  HOST_APP_CONNECTOR_KEY: ${HOST_APP_CONNECTOR_KEY:-}
+  HOST_APP_ID: ${HOST_APP_ID:-equiprofile}
+  HOST_APP_NAME: ${HOST_APP_NAME:-EquiProfile}
+  HOST_APP_URL: ${HOST_APP_URL:-https://equiprofile.online}
   EQUIPROFILE_CONNECTOR_KEY: ${EQUIPROFILE_CONNECTOR_KEY:?EQUIPROFILE_CONNECTOR_KEY required}
   EQUIPROFILE_APP_ID: ${EQUIPROFILE_APP_ID:-equiprofile}
   EQUIPROFILE_APP_NAME: ${EQUIPROFILE_APP_NAME:-EquiProfile}
   EQUIPROFILE_APP_URL: ${EQUIPROFILE_APP_URL:-https://equiprofile.online}
   APPLICATION_CONNECTOR_MAX_CLOCK_SKEW_SECONDS: ${APPLICATION_CONNECTOR_MAX_CLOCK_SKEW_SECONDS:-300}
   APPLICATION_SSO_CODE_TTL_SECONDS: ${APPLICATION_SSO_CODE_TTL_SECONDS:-120}
-  APP_URL: ${APP_URL:-https://marketing.amarktai.co.za}
-  API_URL: ${API_URL:-https://marketing.amarktai.co.za/api}
-  CORS_ORIGIN: ${CORS_ORIGIN:-https://marketing.amarktai.co.za}
+  APP_URL: ${APP_URL:-https://marketing.equiprofile.online}
+  API_URL: ${API_URL:-https://marketing.equiprofile.online/api}
+  CORS_ORIGIN: ${CORS_ORIGIN:-https://marketing.equiprofile.online}
   TRUST_PROXY_HOPS: ${TRUST_PROXY_HOPS:-2}
   HEALTHCHECK_TIMEOUT_MS: ${HEALTHCHECK_TIMEOUT_MS:-3000}
   RATE_LIMIT_WINDOW_MS: ${RATE_LIMIT_WINDOW_MS:-900000}
@@ -182,6 +178,37 @@ services:
       start_period: 20s
     stop_grace_period: 35s
 
+  longform-still-worker:
+    <<: *service-defaults
+    build:
+      context: ..
+      dockerfile: apps/api/Dockerfile
+    container_name: amarktai-longform-still-worker
+    command: ["node", "dist/workers/longform-still-worker.js"]
+    environment:
+      <<: *api-environment
+      LONGFORM_STILL_WORKER_CONCURRENCY: ${LONGFORM_STILL_WORKER_CONCURRENCY:-1}
+      GENX_REQUESTS_PER_MINUTE: ${GENX_REQUESTS_PER_MINUTE:-10}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    volumes:
+      - studio_uploads:/app/uploads
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          found=0; for cmd in /proc/[0-9]*/cmdline; do grep -aq 'longform-still-worker.js' "$$cmd" && found=1 && break; done;
+          [ "$$found" -eq 1 ] &&
+          node -e "const Redis=require('ioredis');const r=new Redis(process.env.REDIS_URL,{connectTimeout:2000,maxRetriesPerRequest:1});r.ping().then(v=>{r.disconnect();process.exit(v==='PONG'?0:1)}).catch(()=>process.exit(1))"
+      interval: 20s
+      timeout: 8s
+      retries: 5
+      start_period: 20s
+    stop_grace_period: 60s
+
   render-worker:
     <<: *service-defaults
     build:
@@ -222,6 +249,7 @@ services:
     environment:
       NODE_ENV: production
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-/api}
+      NEXT_PUBLIC_APP_NAME: ${NEXT_PUBLIC_APP_NAME:-EquiProfile Marketing}
     depends_on:
       api:
         condition: service_healthy
