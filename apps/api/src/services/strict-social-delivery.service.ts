@@ -9,6 +9,10 @@ import {
   isExtendedSocialPlatform,
   publishExtendedSocialPost,
 } from './extended-social-platform.service';
+import {
+  isNativeEnhancedPlatform,
+  publishNativeEnhancedPost,
+} from './native-social-platform.service';
 
 function preparePlatformInput(platform: string, input: SocialPublishInput): SocialPublishInput {
   if (platform !== 'bluesky') return input;
@@ -30,7 +34,9 @@ export async function deliverSocialPost(
   const preparedInput = preparePlatformInput(platform, input);
   const result = isExtendedSocialPlatform(platform)
     ? await publishExtendedSocialPost(platform, credentials, config, preparedInput)
-    : await publishSocialPost(platform, credentials, config, preparedInput);
+    : isNativeEnhancedPlatform(platform)
+      ? await publishNativeEnhancedPost(platform, credentials, config, preparedInput)
+      : await publishSocialPost(platform, credentials, config, preparedInput);
 
   if (!result.externalId || result.externalId.startsWith('reddit-') || result.externalId.startsWith('linkedin-')) {
     throw new AppError(502, `${platform} returned no verifiable provider post identifier`, 'SOCIAL_PROVIDER_ID_MISSING');
