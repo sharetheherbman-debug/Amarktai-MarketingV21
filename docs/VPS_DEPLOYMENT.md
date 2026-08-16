@@ -1,69 +1,38 @@
-# EquiProfile Marketing VPS Deployment
+# EquiProfile Marketing — Controlled VPS Deployment
 
-This runbook deploys the complete CPU-only Docker stack to the production domain `marketing.equiprofile.online`.
+Canonical production host: `https://marketing.equiprofile.online`
 
-## Required VPS
+This is the production runbook for the standalone Marketing service on the existing EquiProfile VPS. Management remains independently healthy and must not be restarted or modified until standalone Marketing acceptance passes.
+
+## Release rules
+
+- Deploy the exact reviewed `DEPLOY_SHA`, never an unreviewed branch head.
+- PR #3 may remain draft/unmerged during deployment acceptance.
+- Preserve the existing Marketing database, workspace and owner. Do not rerun owner bootstrap.
+- `FIRST_RUN=false` on the existing production workspace.
+- Shared host Nginx owns public ports 80/443. Marketing listens only on `127.0.0.1:8080`.
+- Start core services first. Generation/render workers stay OFF until direct GenX acceptance succeeds.
+- Start workers in order: generation → long-form still-motion → render.
+- Default Control Centre state for acceptance: Manual with Emergency Stop ON.
+- No paid-ad spend mutation.
+
+## Minimum VPS
 
 - Ubuntu 22.04 or 24.04
-- At least 4 CPU cores
-- At least 8 GB RAM
-- At least 20 GB free disk, with more space recommended for generated media
 - Docker Engine 24+
 - Docker Compose v2.20+
-- Public inbound TCP ports 80 and 443
-- DNS `A` record for `marketing.equiprofile.online` pointing to the VPS
+- 4 CPU cores
+- 8 GB RAM
+- 20 GB free disk minimum; substantially more recommended for generated media
+- public DNS `marketing.equiprofile.online` → VPS IP
 
-PostgreSQL, Redis, the API, the web app, both BullMQ workers, Nginx, Caddy and FFmpeg all run in Docker. No GPU is required.
+PostgreSQL and Redis are private Docker services. API/web are private containers. Internal Nginx binds only to loopback port 8080.
 
-## 1. Install Docker
+## Production environment
 
-Use Docker's official Ubuntu repository, then confirm:
+Use `.env.production.example` as the reference, but preserve existing production secrets rather than replacing them casually.
 
-```bash
-docker version
-docker compose version
-```
-
-Add the deployment user to the Docker group and start a new login session:
-
-```bash
-sudo usermod -aG docker "$USER"
-```
-
-## 2. Clone the repository
-
-```bash
-sudo mkdir -p /opt/amarktai
-sudo chown "$USER":"$USER" /opt/amarktai
-git clone https://github.com/sharetheherbman-debug/Amarktai-MarketingV21.git /opt/amarktai/app
-cd /opt/amarktai/app
-git checkout phase-1/equiprofile-relaunch-genx-credits
-```
-
-Deploy the exact reviewed SHA from `phase-1/equiprofile-relaunch-genx-credits`; do not merge as part of deployment acceptance.
-
-## 3. Create production configuration
-
-```bash
-cp .env.production.example .env.production
-chmod 600 .env.production
-```
-
-Generate safe values without shell punctuation:
-
-```bash
-openssl rand -hex 32   # POSTGRES_PASSWORD
-openssl rand -hex 32   # REDIS_PASSWORD
-openssl rand -hex 48   # JWT_SECRET
-openssl rand -hex 48   # JWT_REFRESH_SECRET
-openssl rand -hex 32   # ENCRYPTION_KEY: exactly 64 hex characters
-openssl rand -hex 48   # GENX_WEBHOOK_SECRET
-openssl rand -hex 48   # BACKUP_ENCRYPTION_PASSPHRASE
-```
-
-Edit `.env.production` and provide the real GenX key, TLS email and SMTP credentials when email delivery is required. Do not leave any `replace-with-...` value.
-
-The required public values are:
+Required release-specific values include:
 
 ```dotenv
 DOMAIN=marketing.equiprofile.online
@@ -71,139 +40,257 @@ APP_URL=https://marketing.equiprofile.online
 API_URL=https://marketing.equiprofile.online/api
 CORS_ORIGIN=https://marketing.equiprofile.online
 GENX_WEBHOOK_URL=https://marketing.equiprofile.online/api/v1/webhooks/genx
+SHARED_HOST_NGINX=true
+FIRST_RUN=false
+DEPLOY_BRANCH=phase-1/equiprofile-relaunch-genx-credits
+DEPLOY_SHA=<exact reviewed green-CI SHA>
 ```
 
-## 4. Configure DNS and firewall
+Keep Stripe credit checkout secrets blank for Phase 1 proving unless paid checkout is deliberately enabled later. The 1,000 proving credits are an idempotent promotional grant, not a Stripe purchase.
 
-Point the DNS `A` record to the VPS before deployment. Caddy obtains and renews the TLS certificate automatically.
+Set `GENX_FX_RATES_TO_GBP` from a current verified rate immediately before release acceptance. Price snapshots record the conversion rate used.
 
-With UFW:
+## 1. Read-only preflight before changes
 
-```bash
-sudo ufw allow OpenSSH
-sudo ufw allow 80/tcp
-sudo ufw allow 443/tcp
-sudo ufw enable
-```
+Before updating source, inspect the existing install, exact deployed SHA, Git status, containers, disk/RAM, loopback health, DNS, Nginx and backup location without printing `.env.production` or provider secrets.
 
-PostgreSQL, Redis, API and web ports are not published publicly. The internal Nginx diagnostic port is bound only to `127.0.0.1:8080`.
-
-## 5. Run preflight
+The repository preflight performs environment/Compose/resource checks and live authenticated GenX catalogue/pricing checks:
 
 ```bash
 bash scripts/vps-preflight.sh
 ```
 
-Preflight rejects placeholder or weak secrets, invalid URLs, insufficient resources and invalid Compose configuration.
+Do not run deployment if preflight fails.
 
-## 6. Deploy
+## 2. Complete encrypted rollback bundle
 
-```bash
-bash scripts/vps-deploy.sh
-```
-
-The deployment command:
-
-1. Validates the VPS and production environment.
-2. Pulls pinned infrastructure images.
-3. Builds API, web and worker images.
-4. Starts PostgreSQL and Redis.
-5. Runs all migrations exactly once.
-6. Starts API, generation worker, render worker, web, Nginx and Caddy.
-7. Waits for PostgreSQL, Redis and both BullMQ workers to report ready.
-8. Runs the public HTTPS smoke test.
-
-Successful deployment ends with:
-
-```text
-Deployment completed successfully: https://marketing.equiprofile.online
-```
-
-## Health endpoints
-
-- `https://marketing.equiprofile.online/health` — edge liveness
-- `https://marketing.equiprofile.online/ready` — database, Redis and worker readiness
-- `https://marketing.equiprofile.online/api/v1/health` — API liveness
-- `https://marketing.equiprofile.online/api/v1/health/version` — release metadata
-
-Run the smoke test again at any time:
-
-```bash
-bash scripts/vps-smoke.sh
-```
-
-## Logs and status
-
-```bash
-docker compose \
-  --env-file .env.production \
-  -f docker/docker-compose.yml \
-  -f docker/docker-compose.production.yml ps
-
-docker compose \
-  --env-file .env.production \
-  -f docker/docker-compose.yml \
-  -f docker/docker-compose.production.yml logs -f --tail=200 api generation-worker render-worker
-```
-
-Container logs rotate at 20 MB with five retained files.
-
-## Encrypted backups
-
-Create a database and Studio-media backup:
+Before changing source:
 
 ```bash
 bash scripts/vps-backup.sh
 ```
 
-The backup contains:
+The encrypted bundle contains:
 
 - PostgreSQL custom-format dump
-- Uploaded and generated Studio media
-- Git commit and image inventory
-- Per-file SHA-256 checksums
-- AES-256-CBC encryption using PBKDF2 with 200,000 iterations
+- consistent Redis RDB snapshot
+- Studio uploads/generated media
+- `.env.production` inside the encrypted archive
+- exact git commit/branch/reviewed SHA metadata
+- Docker image/service inventory
+- host Nginx vhost when `HOST_NGINX_CONFIG_PATH` exists and is readable
+- Certbot certificate inventory when available
+- SHA-256 checksums for every bundled component
 
-Schedule nightly backups:
+Keep the `.enc` and `.sha256` files. Copy them off-server after launch acceptance.
 
-```cron
-0 2 * * * cd /opt/amarktai/app && /usr/bin/bash scripts/vps-backup.sh >> /var/log/amarktai-backup.log 2>&1
-```
+## 3. Update to the exact reviewed SHA
 
-Copy encrypted backup files off the VPS using the storage provider of your choice. Local retention defaults to 30 days.
-
-## Restore
-
-```bash
-bash scripts/vps-restore.sh /opt/amarktai/backups/amarktai-YYYYMMDDTHHMMSSZ.tar.gz.enc --yes
-```
-
-Restore verifies the encrypted archive checksum and internal file checksums before replacing the database or media volume. It then runs current migrations, restarts the stack and executes the public smoke test.
-
-## Safe updates and rollback
-
-After standalone Marketing acceptance and an explicit owner decision:
+Preferred safe update:
 
 ```bash
 bash scripts/vps-update.sh
 ```
 
-The update workflow creates an encrypted backup first, fast-forwards the configured branch, deploys it, and resets to the previous Git commit automatically if deployment fails.
+The update script:
 
-## First production login
+1. creates a rollback bundle;
+2. fetches `DEPLOY_BRANCH`;
+3. verifies `DEPLOY_SHA` is reachable from the branch;
+4. notices but ignores a newer branch head;
+5. checks out the exact reviewed SHA in detached release state;
+6. deploys **core only**;
+7. returns source to the previous commit if core deployment fails.
 
-Keep `FIRST_RUN=true` for initial deployment. Complete the onboarding wizard and create the production admin account. After onboarding has completed successfully, set:
+Never replace `DEPLOY_SHA` with “latest”.
 
-```dotenv
-FIRST_RUN=false
-```
+## 4. Core deployment
 
-Then apply the configuration:
+For a manual exact-SHA deployment after the source is already checked out:
 
 ```bash
-bash scripts/vps-deploy.sh
+bash scripts/vps-deploy.sh core
 ```
 
-## Final external acceptance
+Core stage:
 
-Repository readiness does not replace provider acceptance. Before public launch, run real GenX image, video, voice, audio and lip-sync jobs; verify the signed webhook; render the six-scene film of at least 60 seconds; record provider job IDs and costs; restart the workers during queued work; and rerun `scripts/vps-smoke.sh` after the restart.
+1. runs preflight and exact-SHA release gate;
+2. builds API, web, migrations and all worker images;
+3. starts PostgreSQL and Redis;
+4. runs all additive migrations, including 030/031/032;
+5. starts API, web and internal Nginx only;
+6. validates loopback readiness.
+
+It does **not** start any generation/render worker.
+
+## 5. Host Nginx, DNS and TLS
+
+With shared host Nginx:
+
+- internal Marketing edge: `http://127.0.0.1:8080`
+- public host: `marketing.equiprofile.online`
+
+Verify DNS from the VPS and a public resolver before certificate issuance. Configure a dedicated host vhost that proxies only this hostname to `127.0.0.1:8080` with correct forwarded protocol/host headers.
+
+Issue/renew a normal exact-host Let's Encrypt certificate. No wildcard certificate is required.
+
+Once canonical HTTPS is working:
+
+```bash
+bash scripts/vps-smoke.sh public
+```
+
+## 6. Owner authentication acceptance
+
+Preserve the existing owner/workspace. Do not create a second owner.
+
+Prove:
+
+- `/` → `/login` when unauthenticated
+- no public signup/landing/pricing access
+- owner password login
+- TOTP enrollment if required by migration/state
+- QR/manual TOTP
+- recovery codes
+- wrong/replayed TOTP rejection
+- recovery-code one-time use
+- session refresh
+- logout
+- protected-route rejection when logged out
+- Management SSO still requires Marketing MFA
+
+## 7. Promotional Generation Credits
+
+Grant exactly 1,000 promotional/internal proving credits through the authenticated platform-admin grant path with a fixed idempotency key.
+
+Verify:
+
+- wallet +1,000 once only
+- immutable ledger entry
+- repeat request does not double-credit
+- available/reserved/lifetime totals remain consistent
+
+## 8. Direct GenX acceptance — workers still OFF
+
+Before starting queue workers, prove the authenticated GenX catalogue/rate card and direct governed generation:
+
+1. text
+2. image
+3. voice/audio if retained
+4. video
+5. long-form planning
+6. hybrid still-image + local-motion route
+
+For each operation verify:
+
+quote → reserve → provider submission → result persistence → settle
+
+and intentionally test one controlled failure:
+
+failure → release/reversal
+
+Record provider/model, price snapshot, reservation/ledger evidence and output asset.
+
+## 9. Start workers one at a time
+
+After direct GenX passes:
+
+```bash
+bash scripts/vps-deploy.sh workers
+```
+
+The script gates each worker in order:
+
+1. `generation-worker`
+2. `longform-still-worker`
+3. `render-worker`
+
+Then verify queues, retries, idempotency, restart behavior and bounded concurrency.
+
+## 10. Social, email and analytics acceptance
+
+The code-side social network supports:
+
+- X
+- LinkedIn
+- Facebook
+- Instagram
+- Threads
+- Pinterest
+- Reddit
+- YouTube
+- TikTok
+- Bluesky
+- Mastodon
+- Telegram Channels
+
+TikTok public Direct Post remains dependent on TikTok's external app audit/permission state and creator consent. A code-ready connector does not override provider approval.
+
+Connect only real accounts with proper permissions. For every enabled/credentialed connector:
+
+1. provider connection test;
+2. owner-approved content version;
+3. controlled publish;
+4. provider post ID/URL;
+5. performance sync where the provider exposes reliable metrics.
+
+Telegram post-level analytics are truthfully unavailable through ordinary Bot API access and must not be represented as zero engagement.
+
+Email acceptance must prove consent basis, suppression, signed one-click unsubscribe, provider delivery, retries and exact content approval.
+
+Analytics/host conversion acceptance must prove idempotent privacy-safe events without raw customer PII.
+
+## 11. Autonomous campaign acceptance
+
+With real business knowledge and approved channels:
+
+1. website/connector knowledge refresh;
+2. Growth Director identifies an opportunity;
+3. creates/validates campaign internally;
+4. reuse-first content production;
+5. quality repair;
+6. owner requests changes on one asset;
+7. automatic targeted revision and re-review;
+8. owner rejects another asset;
+9. replacement or truthful retirement;
+10. owner approves exact versions;
+11. approved content schedules/distributes under Control Centre;
+12. performance/conversion events arrive;
+13. optimisation/learning completes;
+14. next cycle can begin.
+
+Prove Emergency Stop blocks external actions.
+
+## 12. Restore drill
+
+Restore is intentionally destructive and requires explicit `--yes`. It restores PostgreSQL, Redis and Studio media, then starts core only.
+
+```bash
+bash scripts/vps-restore.sh /opt/equiprofile-marketing/backups/equiprofile-marketing-YYYYMMDDTHHMMSSZ.tar.gz.enc --yes
+```
+
+Optional environment/Nginx restoration is disabled unless explicitly enabled with `RESTORE_PRODUCTION_ENV=1` or `RESTORE_HOST_NGINX=1`.
+
+Workers remain held after restore unless `RESTORE_WORKERS=1` is explicitly set.
+
+## 13. Management deployment only after Marketing passes
+
+Do not touch healthy Management until standalone Marketing acceptance is complete.
+
+Then deploy the separately reviewed Management SHA and verify Pro, Stable, auth, subscriptions, hidden owner admin, V2 dashboard and mobile/PWA before joining the systems.
+
+Final combined acceptance:
+
+Management hidden owner admin → signed one-use SSO → Marketing → MFA → owner dashboard
+
+Also prove:
+
+- normal customers cannot access Marketing
+- replay/expired/bad-signature SSO rejected
+- `account_registered` and `subscription_payment_recorded` are idempotent
+- Marketing outage never breaks Management
+- connector secrets never enter browser code
+
+## Release completion
+
+Record final deployed SHAs, migration set, backup path/checksum, certificate name, worker state, provider acceptance results and rollback procedure. Only then freeze Phase 1.
