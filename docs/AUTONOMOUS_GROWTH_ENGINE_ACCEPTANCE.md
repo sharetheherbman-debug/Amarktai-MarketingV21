@@ -11,9 +11,11 @@ This document describes the final code candidate on `phase-1/equiprofile-relaunc
 
 ## Autonomous lifecycle
 
-The scheduler provisions 19 durable specialist roles per organization, refreshes versioned business knowledge, observes material change events, and advances durable cycles through observing, planning, producing, quality review, owner approval, governed distribution, measurement, optimization, and completion. Claims prevent concurrent execution and retries are bounded. Approved social campaign assets are scheduled through the same Control Centre service used by the user-facing API; no separate publisher exists.
+The scheduler provisions 19 durable specialist roles per organization, refreshes versioned business knowledge, observes material change events, and advances durable cycles through observing, planning, producing, quality review, owner approval, governed distribution, measurement, optimization, and completion. A fresh scheduled cycle assembles the shared business brain, reuses a suitable current plan when one exists, or idempotently creates and internally validates its first campaign without waiting for a human-authored plan. Genuine factual, pricing, legal, or claim gaps pause at owner clarification. Claims prevent concurrent execution and retries are bounded. Approved social campaign assets are scheduled through the same Control Centre service used by the user-facing API; no separate publisher exists.
 
 The shared context combines signed host-application snapshots, website versions, Brand DNA, workspace knowledge, campaigns, content inventory, trends, competitors, conversions, and privacy-safe performance events. Content selection is reuse-first and records root/source lineage and transformation type. New generation performs bounded quality review and at most two governed revisions.
+
+Every required campaign asset has durable resolution state. Request Changes triggers a targeted revision of the existing content, preserves its lineage, increments its version, performs full quality checks plus at most two bounded repairs, and returns the new exact version to owner review. Rejection retires the rejected exact version when another asset resolves the brief; otherwise it creates a materially different checked replacement. A campaign advances only after every required asset is approved, scheduled, retired, replaced, bounded-failed, or truthfully awaiting owner clarification.
 
 ## Launch platform capability matrix
 
@@ -36,14 +38,14 @@ All enabled publication formats require exact owner-approved content. Provider-n
 
 ## Data and migrations
 
-Migration `030_autonomous_growth_engine.sql` is additive. It adds durable workforce identity, internal plan validation, approval hashes, social approval bindings, email suppression/delivery logs, versioned knowledge synchronization, business snapshots and change events, durable director cycles/events, privacy-safe performance attribution, bounded experiments, learned owner preferences, and consent-state social proof. Autonomous event and performance history reject update/delete mutations.
+Migrations `030_autonomous_growth_engine.sql` and `031_autonomous_campaign_feedback_closure.sql` are additive. Migration 030 adds durable workforce identity, internal plan validation, approval hashes, social approval bindings, email suppression/delivery logs, versioned knowledge synchronization, business snapshots and change events, durable director cycles/events, privacy-safe performance attribution, bounded experiments, learned owner preferences, and consent-state social proof. Migration 031 adds idempotent autonomous campaign creation, per-asset resolution state, exact-version resolution events, and bounded owner-feedback retry evidence. Autonomous event and performance history reject update/delete mutations.
 
-Run all migrations once using the existing migration container before workers start. Verify migration `030` in `schema_migrations`, inspect constraints/indexes, and take a database backup before proceeding. The local Windows environment used for code completion did not provide Docker or an isolated PostgreSQL instance, so this migration must be executed on the acceptance stack before the candidate can receive production traffic.
+Run all migrations once using the existing migration container before workers start. Verify migrations `030` and `031` in `schema_migrations`, inspect constraints/indexes, and take a database backup before proceeding. The local Windows environment used for code completion did not provide Docker or an isolated PostgreSQL instance, so these migrations must be executed on the acceptance stack before the candidate can receive production traffic.
 
 ## External acceptance gates
 
 1. Deploy Marketing's exact reviewed SHA first with external channels held and Emergency Stop enabled.
-2. Verify DNS/TLS, database/Redis/worker readiness, migration `030`, backup, and rollback.
+2. Verify DNS/TLS, database/Redis/worker readiness, migrations `030` and `031`, backup, and rollback.
 3. Provision the exact owner, enroll MFA, grant 1,000 promotional Generation Credits, and verify the ledger.
 4. Exercise GenX text, image, video, audio/voice, and long-form paths against the authenticated catalogue/rate card; reconcile holds and settlements.
 5. Complete one reuse/adapt/quality/revision/owner-approval flow and confirm any mutation invalidates approval.

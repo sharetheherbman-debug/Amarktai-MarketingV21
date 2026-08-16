@@ -71,7 +71,8 @@ export async function queueCampaignProduction(planId: string, orgId: string, use
       // same asset, while a deliberate retry gets a distinct durable attempt.
       const claimed = await query(
         `UPDATE campaign_asset_runs
-         SET status='queueing',attempt_count=attempt_count+1,error_message=NULL,updated_at=NOW()
+         SET status='queueing',resolution_status='pending_generation',
+             attempt_count=attempt_count+1,error_message=NULL,updated_at=NOW()
          WHERE id=$1 AND status IN ('planned','failed','cancelled')
          RETURNING *`,
         [existingRun.id]

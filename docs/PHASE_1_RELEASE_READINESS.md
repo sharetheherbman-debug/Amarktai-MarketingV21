@@ -34,7 +34,7 @@ Release surfaces use EquiProfile Marketing, `marketing.equiprofile.online` metad
 
 ## 6. Campaign intelligence, autonomous direction and Studio
 
-The owner supplies grounded business facts. Strategy is planned and internally validated; only missing factual inputs return to the owner. The durable Marketing Director provisions a 19-role workforce and advances observation, planning, production, quality review, owner content approval, governed distribution, measurement and optimization. Quality checks cover brief/brand alignment, factual and prohibited-claim risks, channel structure, CTA, originality and accessibility, with at most two safe automatic revisions. Exact content versions bind owner approval transactionally. See `AUTONOMOUS_GROWTH_ENGINE_ACCEPTANCE.md` and `CAMPAIGN_INTELLIGENCE_AND_STUDIO_ACCEPTANCE.md` for the capability and deployment-acceptance matrices.
+The owner supplies grounded business facts. Strategy is planned and internally validated; only missing factual inputs return to the owner. A fresh workspace's durable Marketing Director provisions a 19-role workforce, assembles the shared business brain, idempotently creates its first useful campaign when no suitable current plan exists, and advances observation, planning, production, quality review, owner content approval, governed distribution, measurement and optimization. Request Changes revises the existing asset, reruns bounded quality repair, and returns a new exact version to the owner. Rejection retires or materially replaces the asset, and the campaign waits on every required asset's truthful resolution rather than merely one approval. Exact content versions bind owner approval transactionally. See `AUTONOMOUS_GROWTH_ENGINE_ACCEPTANCE.md` and `CAMPAIGN_INTELLIGENCE_AND_STUDIO_ACCEPTANCE.md` for the capability and deployment-acceptance matrices.
 
 ## 7. GenX and Generation Credits
 
@@ -50,12 +50,12 @@ The HMAC/timestamp/nonce/replay/idempotency connector keeps separate databases, 
 
 ## 10. Security, data and migrations
 
-Migrations `027_owner_mfa.sql`, `029_campaign_intelligence_and_execution_integrity.sql`, and `030_autonomous_growth_engine.sql` are additive. Migration 030 adds durable director/workforce state, internal strategy validation, immutable knowledge and performance history, content lineage, exact outbound approval hashes, suppression/delivery evidence, bounded experiments and attribution. No production/historical row is deleted. Marketing's production dependency audit is clean. Management has no critical/high production advisory; two moderate spreadsheet-chain advisories remain documented.
+Migrations `027_owner_mfa.sql`, `029_campaign_intelligence_and_execution_integrity.sql`, `030_autonomous_growth_engine.sql`, and `031_autonomous_campaign_feedback_closure.sql` are additive. Migration 030 adds durable director/workforce state, internal strategy validation, immutable knowledge and performance history, content lineage, exact outbound approval hashes, suppression/delivery evidence, bounded experiments and attribution. Migration 031 adds idempotent autonomous plan creation and exact per-asset owner-feedback resolution. No production/historical row is deleted. Marketing's production dependency audit is clean. Management has no critical/high production advisory; two moderate spreadsheet-chain advisories remain documented.
 
 ## 11. Verification evidence
 
 - Management: TypeScript and Management production build pass; all 101 suites and 747 tests pass in the final uncongested run.
-- Marketing: API/web production builds pass; 18 suites and 129 tests pass; verification passes TypeScript, build, docs, routes, database, security, branding and version.
+- Marketing: API/web production builds pass; 21 suites and 147 tests pass; verification passes TypeScript, build, docs, routes, database, security, branding and version.
 - Campaign/Studio: five deterministic campaign types, governed provider-path scanning, exact payload binding, policy/expiry/Emergency Stop rechecks, organisation scoping and partial asset recovery are regression-covered.
 - Browser: upgrade-page desktop rendering is captured; authenticated Marketing workflow screenshots require an isolated owner/database runtime.
 

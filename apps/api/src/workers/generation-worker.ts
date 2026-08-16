@@ -217,7 +217,8 @@ async function processStudio(job: Job): Promise<void> {
       generation_id: generationId,
     });
     await query(
-      `UPDATE campaign_asset_runs SET status='completed',completed_at=NOW(),updated_at=NOW()
+      `UPDATE campaign_asset_runs SET status='completed',resolution_status='pending_review',
+           completed_at=NOW(),updated_at=NOW()
        WHERE studio_generation_id=$1`,
       [generationId]
     );
@@ -583,7 +584,8 @@ async function processCampaignText(job: Job): Promise<void> {
   const result = await contentEngine.generateContent(data.organizationId, data.request, data.userId);
   await query(
     `UPDATE campaign_asset_runs
-     SET status='completed',content_id=$1,completed_at=NOW(),updated_at=NOW()
+     SET status='completed',content_id=$1,resolution_status='pending_review',
+         completed_at=NOW(),updated_at=NOW()
      WHERE id=$2 AND organization_id=$3`,
     [result.content.id, data.runId, data.organizationId]
   );

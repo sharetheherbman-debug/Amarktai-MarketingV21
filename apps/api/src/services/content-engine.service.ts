@@ -308,6 +308,76 @@ ${selected || content.body || ''}`;
   return getById(revised.id, orgId);
 }
 
+export async function reviseContentFromOwnerFeedback(
+  id: string,
+  orgId: string,
+  userId: string,
+  input: {
+    instruction: string;
+    decision: 'changes_requested' | 'rejected';
+    approval_id: string;
+    idempotency_key: string;
+  }
+): Promise<ContentItem> {
+  const original = await getById(id, orgId);
+  let content = await reviseContent(id, orgId, userId, {
+    instruction: input.decision === 'rejected'
+      ? `Create a materially different replacement for this rejected asset. Do not merely paraphrase it. Address the owner's reason while preserving only grounded business facts and the campaign requirement. Owner reason: ${input.instruction}`
+      : input.instruction,
+    idempotency_key: `${input.idempotency_key}:targeted`,
+  });
+
+  await query(
+    `UPDATE content_items SET metadata=COALESCE(metadata,'{}'::jsonb) || $1::jsonb,
+       transformation_type=$2,updated_at=NOW()
+     WHERE id=$3 AND organization_id=$4`,
+    [JSON.stringify({ owner_feedback_revision: {
+      approval_id: input.approval_id,
+      decision: input.decision,
+      source_version: original.version,
+      instruction: input.instruction,
+    } }), input.decision === 'rejected' ? 'owner_rejection_replacement' : 'owner_requested_revision', id, orgId]
+  );
+  content = await getById(id, orgId);
+
+  let quality = await contentQuality.runQualityChecks(id, orgId);
+  for (let attempt = 1; !quality.passed && attempt <= 2; attempt += 1) {
+    const issues = quality.checks.flatMap((check) =>
+      check.issues.map((issue) => `${check.check_type}: ${issue.message}`)
+    );
+    const result = await generateGovernedText({
+      organizationId: orgId,
+      userId,
+      campaignId: content.campaign_id,
+      idempotencyKey: `${input.idempotency_key}:quality:${attempt}`,
+      title: `Owner-feedback quality revision ${attempt}: ${content.title}`,
+      summary: 'Bounded quality repair after owner feedback',
+      prompt: `Revise this asset to satisfy the owner's feedback and resolve every listed quality failure. Preserve grounded facts and campaign intent. Never invent claims, pricing, proof, testimonials or guarantees. Return only the complete revised asset.\n\nOWNER FEEDBACK:\n${input.instruction}\n\nQUALITY FAILURES:\n${issues.join('\n')}\n\nASSET:\n${content.body || ''}`,
+      maxTokens: getMaxTokens(content.type),
+      temperature: 0.4,
+      payload: { purpose: 'owner_feedback_quality_revision', content_id: id, approval_id: input.approval_id, attempt },
+    });
+    content = await update(id, orgId, {
+      body: result.content,
+      metadata: { ...content.metadata, owner_feedback_quality_revisions: attempt },
+    }, userId);
+    quality = await contentQuality.runQualityChecks(id, orgId);
+  }
+
+  if (!quality.passed) {
+    await query(
+      "UPDATE content_items SET status='draft',workflow_state='needs_revision',updated_at=NOW() WHERE id=$1 AND organization_id=$2",
+      [id, orgId]
+    );
+    throw new AppError(409, 'Owner-feedback revision failed bounded quality checks', 'CONTENT_OWNER_FEEDBACK_QUALITY_FAILED');
+  }
+  await query(
+    "UPDATE content_items SET status='draft',workflow_state='ready_for_review',updated_at=NOW() WHERE id=$1 AND organization_id=$2",
+    [id, orgId]
+  );
+  return getById(id, orgId);
+}
+
 async function saveVersion(orgId: string, content: ContentItem, userId: string): Promise<void> {
   await query(
     `INSERT INTO content_versions (content_id, organization_id, version, title, body, metadata, created_by)

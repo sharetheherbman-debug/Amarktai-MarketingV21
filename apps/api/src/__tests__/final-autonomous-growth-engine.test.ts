@@ -41,6 +41,11 @@ describe('final autonomous growth engine invariants', () => {
       'email_suppressions', 'email_delivery_log', 'root_content_id', 'source_content_id',
       'prevent_autonomous_history_mutation',
     ]) expect(migration).toContain(expected);
+    const feedbackMigration = read('apps/api/src/db/migrations/031_autonomous_campaign_feedback_closure.sql');
+    for (const expected of [
+      'planning_idempotency_key', 'resolution_status', 'campaign_asset_resolution_events',
+      'approved_and_scheduled', 'retired_by_owner', 'failed_after_bounded_retries',
+    ]) expect(feedbackMigration).toContain(expected);
   });
 
   test('enforces exact approved content both at preparation and delivery time', () => {
@@ -103,6 +108,8 @@ describe('final autonomous growth engine invariants', () => {
     expect(content).toContain('revision <= 2');
     expect(content).toContain('findReusableContent');
     expect(content).toContain("transformation_type='ai_adaptation'");
+    expect(content).toContain('reviseContentFromOwnerFeedback');
+    expect(content).toContain('owner_feedback_quality_revision');
   });
 
   test('advances approval through joined production assets and bounded experiments', () => {
@@ -113,6 +120,9 @@ describe('final autonomous growth engine invariants', () => {
     expect(director).toContain('performance_summary');
     expect(director).toContain('owner_marketing_preferences');
     expect(director).toContain("'performance_learning'");
+    expect(director).toContain('autonomous_strategy_created_and_validated');
+    expect(director).toContain('processOwnerFeedback');
+    expect(director).toContain('all_required_assets_resolved');
     expect(experiments).toContain("status='inconclusive'");
     expect(experiments).toContain('minimum_sample_size');
     expect(experiments).toContain('max_duration_days');

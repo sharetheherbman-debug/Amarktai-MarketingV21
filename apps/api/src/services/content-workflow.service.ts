@@ -32,6 +32,45 @@ async function recordOwnerFeedback(
   );
 }
 
+async function markCampaignAssetDecision(
+  client: PoolClient,
+  content: Record<string, unknown>,
+  orgId: string,
+  reviewerId: string,
+  approvalId: string,
+  decision: 'approved' | 'rejected' | 'changes_requested',
+  comments?: string
+): Promise<void> {
+  const resolution = decision === 'approved'
+    ? 'approved'
+    : decision === 'rejected' ? 'rejection_received' : 'revision_requested';
+  const feedback = JSON.stringify({
+    approval_id: approvalId,
+    decision,
+    comments: comments || '',
+    reviewer_id: reviewerId,
+    content_version: Number(content.version || 1),
+    received_at: new Date().toISOString(),
+  });
+  const runs = await client.query(
+    `UPDATE campaign_asset_runs SET resolution_status=$1,owner_feedback=$2,
+       resolved_content_version=$3,resolution_reason=$4,
+       resolved_at=CASE WHEN $1='approved' THEN NOW() ELSE NULL END,updated_at=NOW()
+     WHERE organization_id=$5 AND content_id=$6
+     RETURNING id,campaign_plan_id`,
+    [resolution, feedback, Number(content.version || 1), comments || null, orgId, content.id]
+  );
+  if (decision !== 'approved') return;
+  for (const run of runs.rows) {
+    await client.query(
+      `INSERT INTO campaign_asset_resolution_events
+         (organization_id,campaign_plan_id,campaign_asset_run_id,content_id,content_version,resolution_status,reason,detail)
+       VALUES ($1,$2,$3,$4,$5,'approved',$6,$7)`,
+      [orgId, run.campaign_plan_id, run.id, content.id, Number(content.version || 1), comments || null, feedback]
+    );
+  }
+}
+
 export async function submitForReview(contentId: string, orgId: string, assignedTo: string, userId: string): Promise<ContentApproval> {
   const content = await query(
     `SELECT id,version,quality_score FROM content_items
@@ -109,6 +148,7 @@ export async function approve(contentId: string, orgId: string, reviewerId: stri
       [reviewerId, contentId, orgId]
     );
     await recordOwnerFeedback(client, orgId, contentResult.rows[0], 'approved', comments);
+    await markCampaignAssetDecision(client, contentResult.rows[0], orgId, reviewerId, String(result.rows[0].id), 'approved', comments);
     return result.rows[0];
   });
 
@@ -148,6 +188,7 @@ export async function reject(contentId: string, orgId: string, reviewerId: strin
       [contentId, orgId]
     );
     await recordOwnerFeedback(client, orgId, contentResult.rows[0], 'rejected', comments);
+    await markCampaignAssetDecision(client, contentResult.rows[0], orgId, reviewerId, String(result.rows[0].id), 'rejected', comments);
     return result.rows[0];
   });
 
@@ -187,6 +228,7 @@ export async function requestChanges(contentId: string, orgId: string, reviewerI
       [contentId, orgId]
     );
     await recordOwnerFeedback(client, orgId, contentResult.rows[0], 'changes_requested', comments);
+    await markCampaignAssetDecision(client, contentResult.rows[0], orgId, reviewerId, String(result.rows[0].id), 'changes_requested', comments);
     return result.rows[0];
   });
 

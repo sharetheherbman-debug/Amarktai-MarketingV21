@@ -152,7 +152,7 @@ export async function generatePlan(orgId: string, input: CampaignPlanInput, user
     language: input.language || 'en-GB',
   };
 
-  const prompt = `You are EquiProfile Marketing's senior campaign strategist and creative director.
+  const prompt = `You are the connected Marketing workspace's senior campaign strategist and creative director.
 
 Create one coherent, professional, multi-channel campaign. Treat FACTUAL INPUTS and BRAND CONTEXT as the only source of business facts. Never invent statistics, testimonials, certifications, guarantees, prices, product capabilities or proof. Put any essential missing facts in constraints.missing_information and write copy that does not depend on them.
 
@@ -202,8 +202,12 @@ Return strict JSON only with this shape:
          (organization_id,name,goal,target_audience,budget_cents,brief,strategy,
           creative_concept,messaging_plan,channels,kpis,content_calendar,
           asset_requirements,optimization_plan,constraints,generation_credit_limit,
-          status,strategy_validation_status,owner_clarification,ai_generated,created_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,'draft',$17,$18,TRUE,$19)
+          status,strategy_validation_status,owner_clarification,ai_generated,created_by,
+          planning_idempotency_key)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,'draft',$17,$18,TRUE,$19,$20)
+       ON CONFLICT (organization_id,planning_idempotency_key)
+         WHERE planning_idempotency_key IS NOT NULL
+       DO UPDATE SET updated_at=campaign_plans.updated_at
        RETURNING *`,
       [
         orgId, input.name, input.goal,
@@ -218,6 +222,7 @@ Return strict JSON only with this shape:
         validationStatus,
         JSON.stringify(missingInformation.map((question: unknown) => ({ type: 'missing_information', question: String(question) }))),
         userId,
+        input.idempotency_key || null,
       ]
     );
 
