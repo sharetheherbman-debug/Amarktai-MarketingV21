@@ -140,16 +140,18 @@ function metricSummary(engagement?: Record<string, unknown>): string {
 
 function payloadHint(platform?: string): string {
   switch (platform) {
-    case 'instagram': return 'Requires exactly one approved image.';
-    case 'pinterest': return 'Requires exactly one approved image.';
-    case 'youtube': return 'Requires exactly one approved video.';
-    case 'tiktok': return 'Requires one approved video, or an approved photo set. Provider approval/creator permissions still apply.';
+    case 'x': return 'Text, up to four approved images, or one approved bounded video/GIF. Video/GIF cannot be mixed with other media.';
+    case 'facebook': return 'Text/link, one image/video, or an approved multi-image post of up to ten images.';
+    case 'instagram': return 'One approved image, an image carousel of up to ten items, or one approved Reel/video.';
+    case 'threads': return 'Text, one image/video, or an approved image carousel of up to ten items.';
+    case 'pinterest': return 'One approved image, or an approved video plus a separate approved cover image.';
+    case 'youtube': return 'Requires exactly one approved video. Vertical short-duration assets use the normal uploader and are Shorts-compatible.';
+    case 'tiktok': return 'Requires one approved video, or an approved photo set. Provider audit/permissions and creator consent still apply.';
     case 'bluesky': return 'Text or up to four approved images; final delivery is capped to the network post limit.';
     case 'mastodon': return 'Text or up to four approved media items.';
     case 'telegram': return 'Text, one photo/video, or an approved media group up to ten items.';
     case 'linkedin': return 'Text, one image/video, or a multi-image post. Large uploads remain bounded by the secure media-fetch policy.';
-    case 'x':
-    case 'threads': return 'Text-only in this release.';
+    case 'reddit': return 'Approved self-post text or one approved destination link.';
     default: return 'Only the exact owner-approved payload can be scheduled or published.';
   }
 }
