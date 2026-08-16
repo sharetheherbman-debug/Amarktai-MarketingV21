@@ -1,6 +1,6 @@
-# AmarktAI Marketing VPS Deployment
+# EquiProfile Marketing VPS Deployment
 
-This runbook deploys the complete CPU-only Docker stack to the production domain `marketing.amarktai.co.za`.
+This runbook deploys the complete CPU-only Docker stack to the production domain `marketing.equiprofile.online`.
 
 ## Required VPS
 
@@ -11,7 +11,7 @@ This runbook deploys the complete CPU-only Docker stack to the production domain
 - Docker Engine 24+
 - Docker Compose v2.20+
 - Public inbound TCP ports 80 and 443
-- DNS `A` record for `marketing.amarktai.co.za` pointing to the VPS
+- DNS `A` record for `marketing.equiprofile.online` pointing to the VPS
 
 PostgreSQL, Redis, the API, the web app, both BullMQ workers, Nginx, Caddy and FFmpeg all run in Docker. No GPU is required.
 
@@ -37,10 +37,10 @@ sudo mkdir -p /opt/amarktai
 sudo chown "$USER":"$USER" /opt/amarktai
 git clone https://github.com/sharetheherbman-debug/Amarktai-MarketingV21.git /opt/amarktai/app
 cd /opt/amarktai/app
-git checkout development
+git checkout phase-1/equiprofile-relaunch-genx-credits
 ```
 
-Until PR #2 is merged, use `feature/phase-5-finish-and-launch` for an acceptance deployment only.
+Deploy the exact reviewed SHA from `phase-1/equiprofile-relaunch-genx-credits`; do not merge as part of deployment acceptance.
 
 ## 3. Create production configuration
 
@@ -66,11 +66,11 @@ Edit `.env.production` and provide the real GenX key, TLS email and SMTP credent
 The required public values are:
 
 ```dotenv
-DOMAIN=marketing.amarktai.co.za
-APP_URL=https://marketing.amarktai.co.za
-API_URL=https://marketing.amarktai.co.za/api
-CORS_ORIGIN=https://marketing.amarktai.co.za
-GENX_WEBHOOK_URL=https://marketing.amarktai.co.za/api/v1/webhooks/genx
+DOMAIN=marketing.equiprofile.online
+APP_URL=https://marketing.equiprofile.online
+API_URL=https://marketing.equiprofile.online/api
+CORS_ORIGIN=https://marketing.equiprofile.online
+GENX_WEBHOOK_URL=https://marketing.equiprofile.online/api/v1/webhooks/genx
 ```
 
 ## 4. Configure DNS and firewall
@@ -116,15 +116,15 @@ The deployment command:
 Successful deployment ends with:
 
 ```text
-Deployment completed successfully: https://marketing.amarktai.co.za
+Deployment completed successfully: https://marketing.equiprofile.online
 ```
 
 ## Health endpoints
 
-- `https://marketing.amarktai.co.za/health` — edge liveness
-- `https://marketing.amarktai.co.za/ready` — database, Redis and worker readiness
-- `https://marketing.amarktai.co.za/api/v1/health` — API liveness
-- `https://marketing.amarktai.co.za/api/v1/health/version` — release metadata
+- `https://marketing.equiprofile.online/health` — edge liveness
+- `https://marketing.equiprofile.online/ready` — database, Redis and worker readiness
+- `https://marketing.equiprofile.online/api/v1/health` — API liveness
+- `https://marketing.equiprofile.online/api/v1/health/version` — release metadata
 
 Run the smoke test again at any time:
 
@@ -182,7 +182,7 @@ Restore verifies the encrypted archive checksum and internal file checksums befo
 
 ## Safe updates and rollback
 
-After PR #2 is merged into `development`:
+After standalone Marketing acceptance and an explicit owner decision:
 
 ```bash
 bash scripts/vps-update.sh

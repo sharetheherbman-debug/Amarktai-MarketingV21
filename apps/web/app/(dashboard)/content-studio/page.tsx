@@ -100,7 +100,8 @@ export default function ContentStudioPage() {
   const stats = {
     total: items.length,
     drafts: items.filter(i => i.status === 'draft').length,
-    published: items.filter(i => i.status === 'published').length,
+    review: items.filter(i => i.status === 'review').length,
+    approved: items.filter(i => i.status === 'approved').length,
     aiGenerated: items.filter(i => i.ai_generated).length,
   };
 
@@ -134,7 +135,8 @@ export default function ContentStudioPage() {
         {[
           { label: 'Total Content', value: stats.total, icon: FileText, color: 'text-blue-400', bg: 'bg-blue-500/10' },
           { label: 'Drafts', value: stats.drafts, icon: Edit3, color: 'text-amber-400', bg: 'bg-amber-500/10' },
-          { label: 'Published', value: stats.published, icon: CheckCircle2, color: 'text-emerald-400', bg: 'bg-emerald-500/10' },
+          { label: 'Owner review', value: stats.review, icon: Clock, color: 'text-amber-400', bg: 'bg-amber-500/10' },
+          { label: 'Approved', value: stats.approved, icon: CheckCircle2, color: 'text-emerald-400', bg: 'bg-emerald-500/10' },
           { label: 'AI Generated', value: stats.aiGenerated, icon: Sparkles, color: 'text-purple-400', bg: 'bg-purple-500/10' },
         ].map(stat => (
           <div key={stat.label} className="rounded-xl border border-white/[0.06] bg-surface-100 p-5">
@@ -157,7 +159,7 @@ export default function ContentStudioPage() {
         </div>
         <div className="flex items-center gap-2">
           <Filter className="h-4 w-4 text-zinc-500" />
-          {['all', 'draft', 'review', 'published'].map(s => (
+          {['all', 'draft', 'review', 'approved', 'published'].map(s => (
             <button key={s} onClick={() => setStatusFilter(s)}
               className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${statusFilter === s ? 'bg-brand-500/10 text-brand-400' : 'text-zinc-400 hover:bg-white/[0.04]'}`}>
               {s === 'all' ? 'All' : s.charAt(0).toUpperCase() + s.slice(1)}

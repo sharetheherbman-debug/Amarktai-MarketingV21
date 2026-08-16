@@ -32,9 +32,9 @@ Release surfaces use EquiProfile Marketing, `marketing.equiprofile.online` metad
 | Advertising | Read/sync only; spend mutation is intentionally unavailable |
 | Teams, agency, marketplace, developer workflows and customer billing | Preserved but hidden/deferred from launch navigation |
 
-## 6. Campaign intelligence and Studio
+## 6. Campaign intelligence, autonomous direction and Studio
 
-The owner supplies a grounded business brief, edits and approves the strategy before asset production, and receives durable format-specific runs linked to briefs, variants and revisions. Quality checks cover brief/brand alignment, factual and prohibited-claim risks, channel structure, CTA, originality and accessibility. The owner can edit, autosave, compare, restore, duplicate, comment, request changes and regenerate a selected section. Exact content versions bind approvals transactionally. See `CAMPAIGN_INTELLIGENCE_AND_STUDIO_ACCEPTANCE.md` for the capability matrix and human-review criteria.
+The owner supplies grounded business facts. Strategy is planned and internally validated; only missing factual inputs return to the owner. The durable Marketing Director provisions a 19-role workforce and advances observation, planning, production, quality review, owner content approval, governed distribution, measurement and optimization. Quality checks cover brief/brand alignment, factual and prohibited-claim risks, channel structure, CTA, originality and accessibility, with at most two safe automatic revisions. Exact content versions bind owner approval transactionally. See `AUTONOMOUS_GROWTH_ENGINE_ACCEPTANCE.md` and `CAMPAIGN_INTELLIGENCE_AND_STUDIO_ACCEPTANCE.md` for the capability and deployment-acceptance matrices.
 
 ## 7. GenX and Generation Credits
 
@@ -50,7 +50,7 @@ The HMAC/timestamp/nonce/replay/idempotency connector keeps separate databases, 
 
 ## 10. Security, data and migrations
 
-Migrations `027_owner_mfa.sql` and `029_campaign_intelligence_and_execution_integrity.sql` are additive. Migration 029 adds exact-payload/expiry fields, immutable plan versions and decision auditing, per-asset campaign runs, approval-version binding and generation retry identity. No production/historical row is deleted. Marketing's production dependency audit is clean. Management has no critical/high production advisory; two moderate spreadsheet-chain advisories remain documented.
+Migrations `027_owner_mfa.sql`, `029_campaign_intelligence_and_execution_integrity.sql`, and `030_autonomous_growth_engine.sql` are additive. Migration 030 adds durable director/workforce state, internal strategy validation, immutable knowledge and performance history, content lineage, exact outbound approval hashes, suppression/delivery evidence, bounded experiments and attribution. No production/historical row is deleted. Marketing's production dependency audit is clean. Management has no critical/high production advisory; two moderate spreadsheet-chain advisories remain documented.
 
 ## 11. Verification evidence
 

@@ -237,7 +237,7 @@ function AppearanceTab() {
 
       <div>
         <p className="mb-3 text-sm text-zinc-400">
-          Choose how AmarktAI looks on this device. Your preference is saved locally.
+          Choose how EquiProfile Marketing looks on this device. Your preference is saved locally.
         </p>
         <div className="grid gap-3 sm:grid-cols-3">
           {themeOptions.map((option) => (

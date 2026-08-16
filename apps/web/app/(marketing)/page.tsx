@@ -12,7 +12,7 @@ const benefits = [
     ),
     title: 'Autonomous AI Workforce',
     description:
-      'AI agents that work 24/7 on your marketing — creating content, optimizing campaigns, and driving growth while you sleep.',
+      'A governed AI workforce that plans, creates, reviews, and measures marketing while keeping external publication behind owner approval.',
   },
   {
     icon: (
@@ -22,7 +22,7 @@ const benefits = [
     ),
     title: 'Multi-Channel Mastery',
     description:
-      'Social media, email, SEO, content, ads — all automated and synchronized across every channel your audience uses.',
+      'Coordinate supported social channels, email, SEO, content, and advertising from one measurable workflow.',
   },
   {
     icon: (
@@ -93,36 +93,30 @@ const agents = [
 ];
 
 const channels = [
-  'Facebook', 'Instagram', 'Twitter/X', 'LinkedIn', 'TikTok',
-  'YouTube', 'Email', 'Blog', 'Google Ads', 'SEO',
+  'Facebook', 'Instagram', 'X', 'LinkedIn', 'Threads',
+  'Pinterest', 'Reddit', 'YouTube', 'Email', 'Blog', 'SEO',
 ];
 
-const testimonials = [
+const launchSafeguards = [
   {
-    quote: "AmarktAI Marketing transformed our content pipeline. We went from publishing 2 blog posts a month to 20 — all high quality, all on-brand. It's like having a full marketing team.",
-    name: 'Sarah Chen',
-    role: 'Head of Marketing',
-    company: 'TechForward Inc.',
+    name: 'Owner-approved publishing',
+    description: 'Final customer-facing copy is delivered only from the exact content version approved by the organization owner.',
   },
   {
-    quote: "As an agency owner, I was skeptical about AI marketing tools. AmarktAI proved me wrong. Our client results improved 3x and we handle twice the accounts with the same team.",
-    name: 'Marcus Johnson',
-    role: 'CEO',
-    company: 'GrowthLoop Agency',
+    name: 'Evidence before claims',
+    description: 'Business facts come from connected application data, approved knowledge, and configured brand context—not invented testimonials.',
   },
   {
-    quote: "The AI agents don't just automate — they think. The SEO agent alone increased our organic traffic by 180% in 3 months. This is the future of marketing.",
-    name: 'Priya Sharma',
-    role: 'Founder',
-    company: 'LaunchPad SaaS',
+    name: 'Control stays with you',
+    description: 'Emergency stop, operating windows, credit limits, channel policies, and immutable audit trails govern external actions.',
   },
 ];
 
 const faqs = [
   {
-    question: 'What is AmarktAI Marketing?',
+    question: 'What is EquiProfile Marketing?',
     answer:
-      'AmarktAI Marketing is an AI-powered marketing operating system that deploys autonomous AI agents to handle your content creation, SEO, social media, email marketing, and analytics — all from a single platform.',
+      'EquiProfile Marketing is an autonomous growth operating system for campaign planning, governed content creation, SEO, social distribution, email, and analytics.',
   },
   {
     question: 'How does the AI workforce work?',
@@ -132,7 +126,7 @@ const faqs = [
   {
     question: 'What AI providers do you support?',
     answer:
-      'We support multiple leading AI providers including GenX Router, Together AI, and DeepInfra. Our system automatically selects the best model for each task, with automatic failover if any provider experiences downtime.',
+      'GenX is the only supported AI generation provider for this release. Provider credentials are configured in the deployment environment, never entered in customer onboarding.',
   },
   {
     question: 'Is my data secure?',
@@ -147,7 +141,7 @@ const faqs = [
   {
     question: 'What happens if an AI provider goes down?',
     answer:
-      'Our system includes automatic failover. If one AI provider experiences downtime, requests are seamlessly routed to alternative providers. Your marketing operations continue uninterrupted.',
+      'Generation fails closed and records the failure for retry. The platform does not silently route customer data to an unapproved AI provider.',
   },
 ];
 
@@ -277,7 +271,7 @@ export default function LandingPage() {
               </Link>
             </div>
             <p className="mt-6 text-sm text-zinc-500">
-              Trusted by forward-thinking marketers worldwide
+              Owner-controlled automation with auditable approval boundaries
             </p>
           </div>
         </div>
@@ -288,7 +282,7 @@ export default function LandingPage() {
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
           <div className="mx-auto max-w-2xl text-center">
             <h2 className="text-3xl font-bold tracking-tight text-white sm:text-4xl">
-              Why marketers choose AmarktAI
+              Why marketers choose EquiProfile Marketing
             </h2>
             <p className="mt-4 text-lg text-zinc-400">
               Stop juggling tools. Start deploying agents.
@@ -418,11 +412,11 @@ export default function LandingPage() {
               Powered by leading AI providers
             </h2>
             <p className="mt-4 text-lg text-zinc-400">
-              Automatic failover, cost optimization, and intelligent model selection.
+              One approved AI route, consistent governance, and clear credit controls.
             </p>
           </div>
           <div className="mt-12 flex flex-col items-center justify-center gap-6 sm:flex-row">
-            {['GenX Router', 'Together AI', 'DeepInfra'].map((provider) => (
+            {['GenX'].map((provider) => (
               <div
                 key={provider}
                 className="rounded-2xl border border-white/[0.06] bg-surface-100 px-8 py-6 text-center"
@@ -433,46 +427,27 @@ export default function LandingPage() {
             ))}
           </div>
           <p className="mt-8 text-center text-sm text-zinc-500">
-            Automatic failover ensures your marketing never stops
+            Generation fails closed if GenX is unavailable; no hidden provider fallback.
           </p>
         </div>
       </section>
 
-      {/* Testimonials */}
+      {/* Verifiable launch safeguards */}
       <section className="border-t border-white/[0.06] py-20 sm:py-28">
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
           <div className="mx-auto max-w-2xl text-center">
             <h2 className="text-3xl font-bold tracking-tight text-white sm:text-4xl">
-              What marketers are saying
+              Built around verifiable safeguards
             </h2>
           </div>
           <div className="mt-16 grid gap-8 md:grid-cols-3">
-            {testimonials.map((t) => (
+            {launchSafeguards.map((t) => (
               <div
                 key={t.name}
                 className="rounded-2xl border border-white/[0.06] bg-surface-100 p-8"
               >
-                <div className="flex gap-1 text-brand-400">
-                  {[...Array(5)].map((_, i) => (
-                    <svg key={i} className="h-5 w-5" fill="currentColor" viewBox="0 0 20 20">
-                      <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
-                    </svg>
-                  ))}
-                </div>
-                <blockquote className="mt-4 text-sm leading-relaxed text-zinc-300">
-                  &ldquo;{t.quote}&rdquo;
-                </blockquote>
-                <div className="mt-6 flex items-center gap-3">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-full bg-brand-500/20 text-sm font-semibold text-brand-400">
-                    {t.name.split(' ').map((n) => n[0]).join('')}
-                  </div>
-                  <div>
-                    <div className="text-sm font-medium text-white">{t.name}</div>
-                    <div className="text-xs text-zinc-500">
-                      {t.role}, {t.company}
-                    </div>
-                  </div>
-                </div>
+                <div className="text-sm font-semibold text-brand-400">{t.name}</div>
+                <p className="mt-4 text-sm leading-relaxed text-zinc-300">{t.description}</p>
               </div>
             ))}
           </div>

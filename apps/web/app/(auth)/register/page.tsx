@@ -102,7 +102,7 @@ export default function RegisterPage() {
   return (
     <AuthCard
       title="Create your account"
-      subtitle="Start your free trial of AmarktAI Marketing"
+      subtitle="Create your EquiProfile Marketing workspace"
     >
       <form onSubmit={handleSubmit} className="space-y-5">
         <div>

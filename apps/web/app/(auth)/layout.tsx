@@ -40,7 +40,7 @@ export default function AuthLayout({
           </Link>
         </div>
         {children}
-        <p className="mt-6 text-center text-xs text-zinc-600">© 2026 Amarktai Network</p>
+        <p className="mt-6 text-center text-xs text-zinc-600">© 2026 EquiProfile Marketing</p>
       </div>
     </div>
   );

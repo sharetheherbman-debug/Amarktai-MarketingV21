@@ -21,7 +21,7 @@ export default function TermsPage() {
             <div>
               <p>
                 These Terms of Service (&quot;Terms&quot;) govern your access to
-                and use of the AmarktAI Marketing platform and services. By
+                and use of the EquiProfile Marketing platform and services. By
                 accessing or using our services, you agree to be bound by these
                 Terms.
               </p>
@@ -50,7 +50,7 @@ export default function TermsPage() {
                 2. Description of Service
               </h2>
               <p className="mt-4">
-                AmarktAI Marketing provides an AI-powered marketing operating
+                EquiProfile Marketing provides an AI-powered marketing operating
                 system that includes autonomous AI agents for content creation,
                 SEO optimization, social media management, email marketing,
                 analytics, and related marketing functions. Our services include:
@@ -147,7 +147,7 @@ export default function TermsPage() {
                     Our Intellectual Property
                   </h3>
                   <p className="mt-2">
-                    The AmarktAI Marketing platform, including its design,
+                    The EquiProfile Marketing platform, including its design,
                     features, algorithms, and documentation, is owned by us and
                     protected by intellectual property laws. You may not copy,
                     modify, or reverse-engineer any part of our platform.
@@ -184,7 +184,7 @@ export default function TermsPage() {
                 6. Limitation of Liability
               </h2>
               <p className="mt-4">
-                TO THE MAXIMUM EXTENT PERMITTED BY LAW, AMARKTAMARKETING AND ITS
+                TO THE MAXIMUM EXTENT PERMITTED BY LAW, EQUIPROFILE MARKETING AND ITS
                 AFFILIATES, OFFICERS, EMPLOYEES, AGENTS, AND PARTNERS SHALL NOT
                 BE LIABLE FOR ANY INDIRECT, INCIDENTAL, SPECIAL, CONSEQUENTIAL,
                 OR PUNITIVE DAMAGES, INCLUDING WITHOUT LIMITATION, LOSS OF

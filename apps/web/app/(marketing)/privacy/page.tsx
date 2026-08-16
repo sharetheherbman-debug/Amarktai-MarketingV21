@@ -21,7 +21,7 @@ export default function PrivacyPage() {
             <div className="space-y-12 text-sm leading-relaxed text-zinc-400">
               <div>
                 <p>
-                  AmarktAI Marketing (&quot;we,&quot; &quot;our,&quot; or
+                  EquiProfile Marketing (&quot;we,&quot; &quot;our,&quot; or
                   &quot;us&quot;) is committed to protecting your privacy. This
                   Privacy Policy explains how we collect, use, disclose, and
                   safeguard your information when you use our platform and
@@ -157,10 +157,10 @@ export default function PrivacyPage() {
                     </h3>
                     <p className="mt-2">
                       To provide AI-powered marketing services, we process
-                      certain data through our AI provider partners (GenX Router,
-                      Together AI, DeepInfra). Data sent to AI providers is
-                      processed in accordance with their respective privacy
-                      policies and our data processing agreements.
+                      certain data through GenX, the sole supported AI generation
+                      provider for this release. Data sent to GenX is processed
+                      in accordance with the applicable privacy terms and data
+                      processing agreement.
                     </p>
                   </div>
                   <div>

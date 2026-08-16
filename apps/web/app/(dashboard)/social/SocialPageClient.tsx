@@ -28,6 +28,15 @@ interface SocialPost {
   created_at: string;
 }
 
+interface ApprovedSocialContent {
+  id: string;
+  title: string;
+  body: string | null;
+  platform: string | null;
+  version: number;
+  metadata: Record<string, unknown>;
+}
+
 const PLATFORMS = ['facebook', 'instagram', 'linkedin', 'x', 'threads', 'pinterest', 'reddit', 'youtube'];
 
 function configLabel(platform: string): string | null {
@@ -52,6 +61,7 @@ function configKey(platform: string): string | null {
 export default function SocialPageClient() {
   const [connections, setConnections] = useState<SocialConnection[]>([]);
   const [posts, setPosts] = useState<SocialPost[]>([]);
+  const [approvedContent, setApprovedContent] = useState<ApprovedSocialContent[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -62,6 +72,7 @@ export default function SocialPageClient() {
   const [accessToken, setAccessToken] = useState('');
   const [platformValue, setPlatformValue] = useState('');
   const [connectionId, setConnectionId] = useState('');
+  const [contentId, setContentId] = useState('');
   const [body, setBody] = useState('');
   const [mediaUrls, setMediaUrls] = useState('');
   const [hashtags, setHashtags] = useState('');
@@ -78,12 +89,14 @@ export default function SocialPageClient() {
     setLoading(true);
     setError(null);
     try {
-      const [connectionResponse, postResponse] = await Promise.all([
+      const [connectionResponse, postResponse, contentResponse] = await Promise.all([
         api.get<ApiResponse<SocialConnection[]>>('/amai/social/connections'),
         api.get<ApiResponse<SocialPost[]>>('/amai/social/posts'),
+        api.get<ApiResponse<ApprovedSocialContent[]>>('/content-studio', { params: { status: 'approved', type: 'social' } }),
       ]);
       setConnections(connectionResponse.data || []);
       setPosts(postResponse.data || []);
+      setApprovedContent(contentResponse.data || []);
       setConnectionId((current) => current || connectionResponse.data?.[0]?.id || '');
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Failed to load social publishing data.');
@@ -95,13 +108,27 @@ export default function SocialPageClient() {
   useEffect(() => { void load(); }, [load]);
 
   const selectedConnection = useMemo(() => connections.find((connection) => connection.id === connectionId), [connections, connectionId]);
+  const eligibleContent = useMemo(() => approvedContent.filter((item) => !selectedConnection || !item.platform || item.platform === selectedConnection.platform), [approvedContent, selectedConnection]);
+
+  const selectApprovedContent = (id: string) => {
+    setContentId(id);
+    const item = approvedContent.find((content) => content.id === id);
+    if (!item) { setBody(''); setMediaUrls(''); setHashtags(''); return; }
+    const delivery = item.metadata?.delivery && typeof item.metadata.delivery === 'object' ? item.metadata.delivery as Record<string, unknown> : {};
+    const social = delivery.social && typeof delivery.social === 'object' ? delivery.social as Record<string, unknown> : {};
+    setBody(String(social.body ?? item.body ?? ''));
+    const media = Array.isArray(social.media_urls) ? social.media_urls : Array.isArray(item.metadata.media_urls) ? item.metadata.media_urls : [];
+    const tags = Array.isArray(social.hashtags) ? social.hashtags : Array.isArray(item.metadata.hashtags) ? item.metadata.hashtags : [];
+    setMediaUrls(media.map(String).join('\n'));
+    setHashtags(tags.map(String).join(' '));
+  };
 
   const connectAccount = async () => {
     if (!organizationId || !accountName.trim() || !accessToken.trim()) return;
     const key = configKey(platform);
     const config: Record<string, unknown> = {};
     if (key && platformValue.trim()) config[key] = platformValue.trim();
-    if (platform === 'reddit') config.user_agent = 'AmarktAI/1.0';
+    if (platform === 'reddit') config.user_agent = 'EquiProfileMarketing/1.0';
     setSaving(true);
     setError(null);
     try {
@@ -137,13 +164,14 @@ export default function SocialPageClient() {
   };
 
   const createPost = async (publishNow: boolean) => {
-    if (!connectionId || !body.trim()) return;
+    if (!connectionId || !contentId || !body.trim()) return;
     setSaving(true);
     setError(null);
     try {
       await api.post('/amai/social/posts', {
         body: {
           connection_id: connectionId,
+          content_id: contentId,
           body: body.trim(),
           media_urls: mediaUrls.split(/[\n,]/).map((value) => value.trim()).filter(Boolean),
           hashtags: hashtags.split(/[\s,]/).map((value) => value.trim()).filter(Boolean).map((value) => value.startsWith('#') ? value : `#${value}`),
@@ -152,6 +180,7 @@ export default function SocialPageClient() {
         },
       });
       setBody('');
+      setContentId('');
       setMediaUrls('');
       setHashtags('');
       setScheduledAt('');
@@ -175,7 +204,7 @@ export default function SocialPageClient() {
       <header className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-white">Social Publishing</h1>
-          <p className="mt-1 text-sm text-zinc-400">Connect real platform APIs, compose posts, schedule delivery and inspect provider failures.</p>
+          <p className="mt-1 text-sm text-zinc-400">Connect supported platform APIs and deliver exact owner-approved Content Library versions.</p>
         </div>
         <div className="flex gap-2">
           <button type="button" onClick={() => void load()} className="inline-flex items-center gap-2 rounded-lg border border-white/10 px-4 py-2.5 text-sm text-zinc-200 hover:bg-white/5"><RefreshCw className="h-4 w-4" /> Refresh</button>
@@ -209,16 +238,17 @@ export default function SocialPageClient() {
       </section>
 
       <section className="rounded-xl border border-white/[0.06] bg-surface-100 p-6">
-        <h2 className="text-lg font-semibold text-white">Compose and publish</h2>
+        <h2 className="text-lg font-semibold text-white">Prepare approved content for publishing</h2>
         <div className="mt-4 grid gap-4 md:grid-cols-2">
           <label className="space-y-1.5 text-sm text-zinc-300"><span>Connection</span><select value={connectionId} onChange={(event) => setConnectionId(event.target.value)} className="h-10 w-full rounded-lg border border-white/10 bg-black/30 px-3 text-white"><option value="">Select an active account</option>{connections.filter((connection) => connection.status === 'active').map((connection) => <option key={connection.id} value={connection.id}>{connection.platform} — {connection.account_name}</option>)}</select></label>
           <label className="space-y-1.5 text-sm text-zinc-300"><span>Schedule time</span><input type="datetime-local" value={scheduledAt} onChange={(event) => setScheduledAt(event.target.value)} className="h-10 w-full rounded-lg border border-white/10 bg-black/30 px-3 text-white" /></label>
-          <label className="space-y-1.5 text-sm text-zinc-300 md:col-span-2"><span>Post body</span><textarea rows={5} value={body} onChange={(event) => setBody(event.target.value)} placeholder="Write the post that will be sent to the selected platform." className="w-full rounded-lg border border-white/10 bg-black/30 p-3 text-white" /></label>
-          <label className="space-y-1.5 text-sm text-zinc-300"><span>Public media URLs</span><textarea rows={3} value={mediaUrls} onChange={(event) => setMediaUrls(event.target.value)} placeholder="One image or video URL per line" className="w-full rounded-lg border border-white/10 bg-black/30 p-3 text-white" /></label>
-          <label className="space-y-1.5 text-sm text-zinc-300"><span>Hashtags</span><textarea rows={3} value={hashtags} onChange={(event) => setHashtags(event.target.value)} placeholder="#marketing #launch" className="w-full rounded-lg border border-white/10 bg-black/30 p-3 text-white" /></label>
+          <label className="space-y-1.5 text-sm text-zinc-300 md:col-span-2"><span>Owner-approved Content Library version</span><select value={contentId} onChange={(event) => selectApprovedContent(event.target.value)} className="h-10 w-full rounded-lg border border-white/10 bg-black/30 px-3 text-white"><option value="">Select approved social content</option>{eligibleContent.map((item) => <option key={item.id} value={item.id}>{item.title} · v{item.version}{item.platform ? ` · ${item.platform}` : ''}</option>)}</select></label>
+          <label className="space-y-1.5 text-sm text-zinc-300 md:col-span-2"><span>Approved post body</span><textarea rows={5} value={body} readOnly placeholder="Select an approved content version." className="w-full rounded-lg border border-white/10 bg-black/30 p-3 text-zinc-300" /></label>
+          <label className="space-y-1.5 text-sm text-zinc-300"><span>Approved media URLs</span><textarea rows={3} value={mediaUrls} readOnly className="w-full rounded-lg border border-white/10 bg-black/30 p-3 text-zinc-300" /></label>
+          <label className="space-y-1.5 text-sm text-zinc-300"><span>Approved hashtags</span><textarea rows={3} value={hashtags} readOnly className="w-full rounded-lg border border-white/10 bg-black/30 p-3 text-zinc-300" /></label>
         </div>
         <p className="mt-3 text-xs text-zinc-500">Selected: {selectedConnection ? `${selectedConnection.platform} / ${selectedConnection.account_name}` : 'none'}. Instagram, Pinterest and YouTube require a media URL.</p>
-        <div className="mt-4 flex gap-2"><button type="button" disabled={saving || !connectionId || !body.trim()} onClick={() => void createPost(true)} className="inline-flex items-center gap-2 rounded-lg bg-brand-500 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"><Send className="h-4 w-4" /> Publish now</button><button type="button" disabled={saving || !connectionId || !body.trim() || !scheduledAt} onClick={() => void createPost(false)} className="rounded-lg border border-white/10 px-4 py-2 text-sm text-white disabled:opacity-50">Schedule</button></div>
+        <div className="mt-4 flex gap-2"><button type="button" disabled={saving || !connectionId || !contentId || !body.trim()} onClick={() => void createPost(true)} className="inline-flex items-center gap-2 rounded-lg bg-brand-500 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"><Send className="h-4 w-4" /> Publish approved version</button><button type="button" disabled={saving || !connectionId || !contentId || !body.trim() || !scheduledAt} onClick={() => void createPost(false)} className="rounded-lg border border-white/10 px-4 py-2 text-sm text-white disabled:opacity-50">Schedule approved version</button></div>
       </section>
 
       <section className="overflow-hidden rounded-xl border border-white/[0.06] bg-surface-100">

@@ -6,7 +6,7 @@ export const metadata: Metadata = {
   description:
     'Transform your marketing with AI-powered automation, analytics, and campaign management. The complete marketing operating system for modern businesses.',
   keywords: ['AI marketing', 'marketing automation', 'campaign management', 'analytics'],
-  authors: [{ name: 'Amarktai Network' }],
+  authors: [{ name: 'EquiProfile' }],
   openGraph: {
     type: 'website',
     locale: 'en_US',

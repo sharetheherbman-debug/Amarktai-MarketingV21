@@ -279,7 +279,7 @@ export default function DeveloperPortalPage() {
         <div className="space-y-4">
           <div className="rounded-xl border border-white/[0.06] bg-surface-100 p-6">
             <h2 className="text-lg font-semibold text-white">TypeScript SDK</h2>
-            <p className="mt-2 text-sm text-zinc-400">Official SDK for integrating with AmarktAI Marketing API.</p>
+            <p className="mt-2 text-sm text-zinc-400">Official SDK for integrating with the EquiProfile Marketing API.</p>
             <div className="mt-4 rounded-lg bg-white/[0.02] p-4">
               <code className="text-sm text-brand-400">npm install @amarktai/sdk</code>
             </div>

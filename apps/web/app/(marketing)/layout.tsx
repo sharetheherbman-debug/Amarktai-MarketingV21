@@ -4,15 +4,15 @@ import { MarketingFooter } from '@/components/marketing/MarketingFooter';
 
 export const metadata: Metadata = {
   title: {
-    default: 'AmarktAI Marketing - AI Marketing Operating System',
-    template: '%s | AmarktAI Marketing',
+    default: 'EquiProfile Marketing - Autonomous Growth Operating System',
+    template: '%s | EquiProfile Marketing',
   },
   description:
     'Deploy an autonomous AI workforce that creates content, manages campaigns, optimizes SEO, and grows your business — all from one platform.',
   openGraph: {
     type: 'website',
     locale: 'en_US',
-    siteName: 'AmarktAI Marketing',
+    siteName: 'EquiProfile Marketing',
   },
 };
 

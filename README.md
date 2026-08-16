@@ -2,7 +2,7 @@
 
 **AmarktAI Marketing** is a multi-tenant AI marketing operating system with campaign automation, content workflows, provider routing, Creative Studio generation, and a persistent long-form video production pipeline.
 
-Production domain: `https://marketing.amarktai.co.za`
+Production domain: `https://marketing.equiprofile.online`
 
 ## Current runtime
 

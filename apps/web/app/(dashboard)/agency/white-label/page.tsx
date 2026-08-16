@@ -273,8 +273,8 @@ export default function WhiteLabelPage() {
         <div className="mt-4 space-y-4">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm font-medium text-white">Remove AmarktAI Branding</p>
-              <p className="text-xs text-zinc-500">Hide &quot;Powered by AmarktAI&quot; from client-facing pages</p>
+              <p className="text-sm font-medium text-white">Remove EquiProfile Marketing branding</p>
+              <p className="text-xs text-zinc-500">Hide &quot;Powered by EquiProfile Marketing&quot; from client-facing pages</p>
             </div>
             <button
               onClick={() => updateConfig('removed_branding', !config?.removed_branding)}

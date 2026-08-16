@@ -20,7 +20,7 @@ export default function CookiesPage() {
           <div className="space-y-12 text-sm leading-relaxed text-zinc-400">
             <div>
               <p>
-                This Cookie Policy explains how AmarktAI Marketing
+                This Cookie Policy explains how EquiProfile Marketing
                 (&quot;we,&quot; &quot;our,&quot; or &quot;us&quot;) uses cookies
                 and similar technologies when you visit our website and use our
                 platform.
