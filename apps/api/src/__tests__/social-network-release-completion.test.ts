@@ -44,13 +44,18 @@ describe('social network and release completion invariants', () => {
 
   test('synchronizes provider performance into autonomous attribution', () => {
     const performance = read('apps/api/src/services/social-performance.service.ts');
+    const extended = read('apps/api/src/services/extended-social-platform.service.ts');
     const scheduler = read('apps/api/src/services/scheduler.service.ts');
-    for (const platform of ['x','linkedin','facebook','instagram','threads','pinterest','reddit','youtube','tiktok','bluesky','mastodon','telegram']) {
+    for (const platform of ['x','linkedin','facebook','instagram','threads','pinterest','reddit','youtube']) {
       expect(performance).toContain(`platform === '${platform}'`);
+    }
+    expect(performance).toContain('fetchExtendedSocialMetrics');
+    for (const platform of ['tiktok','bluesky','mastodon','telegram']) {
+      expect(extended).toContain(`platform === '${platform}'`);
     }
     expect(performance).toContain('marketing_performance_events');
     expect(performance).toContain("'social_performance_snapshot'");
-    expect(performance).toContain("if (platform === 'telegram') return null");
+    expect(extended).toContain("if (platform === 'telegram') return null");
     expect(scheduler).toContain('sync-organic-social-performance');
     expect(scheduler).toContain('syncPublishedSocialPerformance');
   });
