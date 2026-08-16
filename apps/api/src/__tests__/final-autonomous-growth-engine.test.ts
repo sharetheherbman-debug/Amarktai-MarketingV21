@@ -46,6 +46,11 @@ describe('final autonomous growth engine invariants', () => {
       'planning_idempotency_key', 'resolution_status', 'campaign_asset_resolution_events',
       'approved_and_scheduled', 'retired_by_owner', 'failed_after_bounded_retries',
     ]) expect(feedbackMigration).toContain(expected);
+    const socialMigration = read('apps/api/src/db/migrations/032_social_network_completion.sql');
+    for (const expected of [
+      'provider_submission_id', 'last_metrics_sync_at', 'provider_capability_state',
+      'social_performance_sync_events',
+    ]) expect(socialMigration).toContain(expected);
   });
 
   test('enforces exact approved content both at preparation and delivery time', () => {
@@ -63,18 +68,24 @@ describe('final autonomous growth engine invariants', () => {
     expect(read('apps/api/src/services/growth-director.service.ts')).toContain('schedulePostThroughControlCentre');
   });
 
-  test('truthfully gates platform formats and deferred networks', () => {
+  test('truthfully exposes the completed organic network and native format matrix', () => {
     const social = read('apps/api/src/services/social-publishing.service.ts');
-    expect(social).toContain("tiktok: { enabled: false");
-    expect(social).toContain("bluesky: { enabled: false");
-    expect(social).toContain("youtube: { enabled: true, formats: ['single_video']");
+    for (const platform of [
+      'x', 'linkedin', 'facebook', 'instagram', 'threads', 'pinterest',
+      'reddit', 'youtube', 'tiktok', 'bluesky', 'mastodon', 'telegram',
+    ]) expect(social).toContain(`${platform}: { enabled: true`);
+    expect(social).toContain("instagram: { enabled: true, formats: ['single_image','multi_image','reel']");
+    expect(social).toContain("pinterest: { enabled: true, formats: ['single_image','video_with_cover']");
+    expect(social).toContain("youtube: { enabled: true, formats: ['single_video','shorts_compatible']");
     expect(social).toContain('assertSupportedSocialPayload');
+    expect(social).not.toContain('#equiprofile');
   });
 
   test('keeps dynamic outbound URLs behind the safe fetch boundary', () => {
     expect(read('apps/api/src/services/tool.service.ts')).toContain('safeFetch(url');
     expect(read('apps/api/src/services/developer-portal.service.ts')).toContain('safeFetch(url');
     expect(read('apps/api/src/services/external-platform.service.ts')).toContain('safeFetch(url');
+    expect(read('apps/api/src/services/native-social-platform.service.ts')).toContain('safeFetch(url');
     expect(read('apps/api/src/workers/render-worker.ts')).toContain('safeFetch(source');
     expect(read('apps/api/src/workers/generation-worker.ts')).toContain('safeFetch(sourceUrl');
   });
@@ -99,6 +110,7 @@ describe('final autonomous growth engine invariants', () => {
     expect(ingestion).toContain('knowledge_page_versions');
     expect(scheduler).toContain('refresh-business-knowledge');
     expect(scheduler).toContain('autonomous-growth-director');
+    expect(scheduler).toContain('sync-organic-social-performance');
   });
 
   test('uses internal strategy validation and bounded quality revision', () => {
