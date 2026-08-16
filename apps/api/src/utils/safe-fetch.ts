@@ -57,7 +57,9 @@ export async function validatePublicHttpUrl(value: string): Promise<URL> {
   if (url.username || url.password) {
     throw new AppError(400, 'Credentials in external URLs are not allowed', 'UNSAFE_EXTERNAL_URL');
   }
-  const hostname = url.hostname.toLowerCase().replace(/\.$/, '');
+  // WHATWG URL implementations retain brackets around IPv6 literals in
+  // `hostname`, so normalize them before applying IP safety checks.
+  const hostname = url.hostname.toLowerCase().replace(/\.$/, '').replace(/^\[|\]$/g, '');
   if (!hostname || hostname === 'localhost' || hostname.endsWith('.localhost') || hostname.endsWith('.local')) {
     throw new AppError(400, 'Local network URLs are not allowed', 'UNSAFE_EXTERNAL_URL');
   }
