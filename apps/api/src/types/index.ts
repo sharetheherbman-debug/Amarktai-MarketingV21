@@ -174,7 +174,7 @@ export interface AIProvider {
   updated_at: Date;
 }
 
-export type ProviderType = 'genx' | 'together' | 'deepinfra' | 'openai' | 'custom';
+export type ProviderType = 'genx';
 export type HealthStatus = 'healthy' | 'degraded' | 'unhealthy' | 'unknown';
 
 export interface Memory {
@@ -900,6 +900,11 @@ export interface ContentItem {
   ai_context: Record<string, unknown>;
   template_id: string | null;
   parent_id: string | null;
+  root_content_id: string | null;
+  source_content_id: string | null;
+  transformation_type: string | null;
+  reuse_score: number;
+  performance_summary: Record<string, unknown>;
   version: number;
   scheduled_at: string | null;
   published_at: string | null;

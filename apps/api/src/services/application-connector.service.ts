@@ -34,6 +34,20 @@ export interface ConversionEventPayload {
   properties?: Record<string, unknown>;
 }
 
+export interface BusinessSnapshotPayload {
+  snapshot_id: string;
+  occurred_at: string;
+  app: { id: string; name: string; domain: string; description?: string; status?: string };
+  products?: Array<Record<string, unknown>>;
+  plans?: Array<Record<string, unknown>>;
+  pricing?: Array<Record<string, unknown>>;
+  features?: Array<Record<string, unknown>>;
+  offers?: Array<Record<string, unknown>>;
+  promotions?: Array<Record<string, unknown>>;
+  status_changes?: Array<Record<string, unknown>>;
+  authoritative_fields?: string[];
+}
+
 function requiredConnectorValue(key: string, developmentDefault = ''): string {
   const value = process.env[key] || developmentDefault;
   if (env.NODE_ENV === 'production' && (!value || value.startsWith('replace-with') || value.length < 32)) {
@@ -363,5 +377,82 @@ export async function recordConversionEvent(application: TrustedApplication, pay
       JSON.stringify(payload.properties || {}),
     ]
   );
+  const connector = await query('SELECT default_organization_id FROM application_connectors WHERE id=$1', [application.connectorId]);
+  const organizationId = connector.rows[0]?.default_organization_id;
+  if (organizationId && result.rows.length > 0) {
+    const properties = payload.properties || {};
+    const uuid = (value: unknown) => /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value || '')) ? String(value) : null;
+    await query(
+      `INSERT INTO marketing_performance_events
+         (organization_id,event_id,event_type,occurred_at,campaign_id,campaign_plan_id,
+          content_id,platform,source,medium,variation_id,pseudonymous_subject,value_pence,metrics)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+       ON CONFLICT (organization_id,event_id) DO NOTHING`,
+      [
+        organizationId, crypto.createHash('sha256').update(`${application.applicationId}:${payload.event_id}`).digest('hex'), payload.event_type, occurredAt,
+        uuid(properties.campaign_id), uuid(properties.campaign_plan_id), uuid(properties.content_id),
+        properties.platform ? String(properties.platform) : null,
+        properties.source ? String(properties.source) : 'host_application',
+        properties.medium ? String(properties.medium) : 'organic',
+        properties.variation_id ? String(properties.variation_id) : null,
+        payload.external_user_id ? hashOpaqueValue(`${application.applicationId}:${payload.external_user_id}`) : null,
+        payload.value_pence || 0,
+        JSON.stringify({ event_type: payload.event_type, consent_basis: payload.consent_basis }),
+      ]
+    );
+  }
   return { accepted: true, duplicate: result.rows.length === 0 };
+}
+
+export async function recordBusinessSnapshot(
+  application: TrustedApplication,
+  payload: BusinessSnapshotPayload
+): Promise<{ accepted: boolean; duplicate: boolean; version: number; material_change: boolean }> {
+  if (!payload.snapshot_id || !payload.occurred_at || !payload.app?.id || !payload.app?.name || !payload.app?.domain) {
+    throw new AppError(400, 'snapshot_id, occurred_at and app identity are required', 'BUSINESS_SNAPSHOT_INVALID');
+  }
+  if (payload.app.id !== application.applicationId) {
+    throw new AppError(400, 'Business snapshot app ID does not match the authenticated connector', 'BUSINESS_SNAPSHOT_APP_MISMATCH');
+  }
+  const serialized = canonicalize(payload);
+  if (Buffer.byteLength(serialized, 'utf8') > 1024 * 1024) {
+    throw new AppError(413, 'Business snapshot exceeds the 1 MB limit', 'BUSINESS_SNAPSHOT_TOO_LARGE');
+  }
+  const occurredAt = new Date(payload.occurred_at);
+  if (Number.isNaN(occurredAt.getTime())) throw new AppError(400, 'occurred_at must be an ISO date', 'BUSINESS_SNAPSHOT_INVALID');
+  const connector = await query('SELECT default_organization_id FROM application_connectors WHERE id=$1', [application.connectorId]);
+  const organizationId = connector.rows[0]?.default_organization_id;
+  if (!organizationId) throw new AppError(409, 'Provision the Marketing owner before sending business knowledge', 'MARKETING_WORKSPACE_REQUIRED');
+  const fingerprint = hashOpaqueValue(serialized);
+
+  return transaction(async (client) => {
+    const current = await client.query(
+      `SELECT id,version,fingerprint FROM business_knowledge_snapshots
+       WHERE organization_id=$1 AND application_id=$2 AND source_type='connector' AND is_current=TRUE
+       FOR UPDATE`,
+      [organizationId, application.applicationId]
+    );
+    if (current.rows[0]?.fingerprint === fingerprint) {
+      return { accepted: true, duplicate: true, version: Number(current.rows[0].version), material_change: false };
+    }
+    const version = Number(current.rows[0]?.version || 0) + 1;
+    await client.query(
+      `UPDATE business_knowledge_snapshots SET is_current=FALSE
+       WHERE organization_id=$1 AND application_id=$2 AND source_type='connector' AND is_current=TRUE`,
+      [organizationId, application.applicationId]
+    );
+    await client.query(
+      `INSERT INTO business_knowledge_snapshots
+         (organization_id,application_id,source_type,version,fingerprint,payload,authoritative_fields,is_current)
+       VALUES ($1,$2,'connector',$3,$4,$5,$6,TRUE)`,
+      [organizationId, application.applicationId, version, fingerprint, JSON.stringify(payload), JSON.stringify(payload.authoritative_fields || ['pricing','plans','offers','status_changes'])]
+    );
+    await client.query(
+      `INSERT INTO marketing_change_events
+         (organization_id,source_type,event_type,materiality,summary,payload)
+       VALUES ($1,'connector','structured_business_change','material',$2,$3)`,
+      [organizationId, `${application.name} business knowledge advanced to version ${version}`, JSON.stringify({ application_id: application.applicationId, version, snapshot_id: payload.snapshot_id, occurred_at: occurredAt.toISOString() })]
+    );
+    return { accepted: true, duplicate: false, version, material_change: true };
+  });
 }

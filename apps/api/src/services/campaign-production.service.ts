@@ -28,10 +28,10 @@ function contentType(format: string, platform: string): ContentType {
 }
 
 function assetPrompt(plan: Record<string, any>, brief: Record<string, any>, variant: number): string {
-  return `Create variation ${variant} of this approved campaign asset brief.
-Use the approved strategy and business facts as the only source of claims. Preserve the offer, central concept and CTA while adapting structure and length to the specified channel. Never invent facts, statistics, testimonials, guarantees, certifications or prices.
+  return `Create variation ${variant} of this internally validated campaign asset brief.
+Use the validated strategy and business facts as the only source of claims. Preserve the offer, central concept and CTA while adapting structure and length to the specified channel. Never invent facts, statistics, testimonials, guarantees, certifications or prices.
 
-APPROVED CAMPAIGN:
+VALIDATED CAMPAIGN:
 ${JSON.stringify({ brief: asObject(plan.brief), creative_concept: asObject(plan.creative_concept), messaging_plan: asObject(plan.messaging_plan), constraints: asObject(plan.constraints) }, null, 2)}
 
 ASSET BRIEF:
@@ -42,8 +42,8 @@ export async function queueCampaignProduction(planId: string, orgId: string, use
   const result = await query('SELECT * FROM campaign_plans WHERE id=$1 AND organization_id=$2', [planId, orgId]);
   if (result.rows.length === 0) throw new NotFoundError('Campaign plan');
   const plan = result.rows[0] as Record<string, any>;
-  if (String(plan.status) !== 'approved') {
-    throw new AppError(409, 'Approve the campaign strategy before generating assets', 'CAMPAIGN_PLAN_APPROVAL_REQUIRED');
+  if (String(plan.strategy_validation_status || 'pending') !== 'valid') {
+    throw new AppError(409, 'Resolve campaign strategy validation exceptions before generating assets', 'CAMPAIGN_PLAN_VALIDATION_REQUIRED');
   }
   const requirements = Array.isArray(plan.asset_requirements)
     ? plan.asset_requirements : JSON.parse(String(plan.asset_requirements || '[]'));

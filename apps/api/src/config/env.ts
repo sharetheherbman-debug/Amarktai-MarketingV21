@@ -124,16 +124,6 @@ export const env = {
   // Legacy provider variables remain temporarily readable only to avoid breaking
   // old migrations and diagnostics while their code paths are removed. The
   // ProviderRouter never loads or routes to them in GenX-only mode.
-  TOGETHER_API_KEY: getEnv('TOGETHER_API_KEY'),
-  TOGETHER_BASE_URL: getEnv('TOGETHER_BASE_URL', 'https://api.together.xyz/v1'),
-  TOGETHER_DEFAULT_TEXT_MODEL: getEnv('TOGETHER_DEFAULT_TEXT_MODEL', 'meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo'),
-  TOGETHER_EMBEDDING_MODEL: getEnv('TOGETHER_EMBEDDING_MODEL'),
-
-  DEEPINFRA_API_KEY: getEnv('DEEPINFRA_API_KEY'),
-  DEEPINFRA_BASE_URL: getEnv('DEEPINFRA_BASE_URL', 'https://api.deepinfra.com/v1/openai'),
-  DEEPINFRA_DEFAULT_TEXT_MODEL: getEnv('DEEPINFRA_DEFAULT_TEXT_MODEL', 'meta-llama/Meta-Llama-3.1-70B-Instruct'),
-  DEEPINFRA_EMBEDDING_MODEL: getEnv('DEEPINFRA_EMBEDDING_MODEL'),
-
   LOCAL_EMBEDDINGS_ENABLED: getEnvBoolean('LOCAL_EMBEDDINGS_ENABLED', true),
   EMBEDDING_DIMENSIONS: getEnvNumber('EMBEDDING_DIMENSIONS', 1536),
 

@@ -20,10 +20,16 @@ export async function getById(id: string, orgId: string): Promise<KnowledgeSourc
 }
 
 export async function create(orgId: string, data: CreateKnowledgeSourceData, userId: string): Promise<KnowledgeSource> {
+  const config = data.config || {};
+  const refreshInterval = Math.max(15, Math.min(Number((config as Record<string, unknown>).refresh_interval_minutes || 1440), 43200));
   const result = await query(
-    `INSERT INTO knowledge_sources (organization_id, name, type, url, config, created_by)
-     VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
-    [orgId, data.name, data.type, data.url || null, JSON.stringify(data.config || {}), userId]
+    `INSERT INTO knowledge_sources
+       (organization_id,name,type,url,config,created_by,refresh_interval_minutes,next_refresh_at,stale_after)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,
+       CASE WHEN $3 IN ('website','api','rss') THEN NOW() ELSE NULL END,
+       CASE WHEN $3 IN ('website','api','rss') THEN NOW() + ($7 || ' minutes')::interval ELSE NULL END)
+     RETURNING *`,
+    [orgId, data.name, data.type, data.url || null, JSON.stringify(config), userId, refreshInterval]
   );
   logger.info(`Knowledge source created: ${data.name} for org: ${orgId}`);
   return mapSourceRow(result.rows[0]);
@@ -96,8 +102,29 @@ export async function deleteItem(itemId: string, orgId: string): Promise<void> {
   }
 }
 
-export async function syncSource(id: string, orgId: string): Promise<{ documents: number; items: number; tokens: number; embeddings: number }> {
-  return ingestSource(id, orgId);
+export async function syncSource(id: string, orgId: string, trigger: 'manual' | 'scheduled' | 'connector' | 'director' = 'manual') {
+  return ingestSource(id, orgId, trigger);
+}
+
+export async function refreshDueSources(limit = 10): Promise<number> {
+  const due = await query(
+    `SELECT id,organization_id FROM knowledge_sources
+     WHERE type IN ('website','api','rss') AND deleted_at IS NULL
+       AND status NOT IN ('syncing','crawling')
+       AND COALESCE(next_refresh_at,NOW()) <= NOW()
+     ORDER BY next_refresh_at NULLS FIRST LIMIT $1`,
+    [Math.max(1, Math.min(limit, 50))]
+  );
+  let refreshed = 0;
+  for (const source of due.rows) {
+    try {
+      await ingestSource(String(source.id), String(source.organization_id), 'scheduled');
+      refreshed++;
+    } catch (error) {
+      logger.warn(`Scheduled knowledge refresh failed for ${source.id}: ${error}`);
+    }
+  }
+  return refreshed;
 }
 
 export async function updateSourceStatus(id: string, status: string, errorMessage?: string): Promise<void> {

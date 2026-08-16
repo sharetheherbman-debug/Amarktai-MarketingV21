@@ -7,6 +7,7 @@ import { agentOrchestrator } from '../services/agent-orchestrator.service';
 import { taskPlanner } from '../services/task-planner.service';
 import { toolService } from '../services/tool.service';
 import { ApiResponse } from '../types';
+import { ensureMarketingWorkforce } from '../services/marketing-workforce.service';
 
 const router = Router();
 router.use(requireAuth);
@@ -42,6 +43,7 @@ router.get('/tools', async (req: AuthRequest, res: Response<ApiResponse>, next: 
   try {
     const organizationId = orgId(req);
     if (!organizationId) throw new AppError(400, 'Organization ID required', 'BAD_REQUEST');
+    await ensureMarketingWorkforce(organizationId);
     const tools = await toolService.list(organizationId, req.query.category as string);
     res.json({ success: true, data: tools });
   } catch (error) { next(error); }
@@ -95,6 +97,7 @@ router.get('/', async (req: AuthRequest, res: Response, next: NextFunction): Pro
   try {
     const organizationId = orgId(req);
     if (!organizationId) throw new AppError(400, 'Organization ID required', 'BAD_REQUEST');
+    await ensureMarketingWorkforce(organizationId);
     const page = Math.max(1, parseInt(req.query.page as string) || 1);
     const limit = Math.max(1, Math.min(parseInt(req.query.limit as string) || 50, 100));
     const offset = (page - 1) * limit;

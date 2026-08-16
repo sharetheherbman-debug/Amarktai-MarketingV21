@@ -5,8 +5,10 @@ import {
   issueSsoCode,
   redeemSsoCode,
   recordConversionEvent,
+  recordBusinessSnapshot,
   type SsoIssuePayload,
   type ConversionEventPayload,
+  type BusinessSnapshotPayload,
 } from '../services/application-connector.service';
 
 const router = Router();
@@ -66,6 +68,14 @@ router.post('/events/conversion', async (req: Request, res: Response<ApiResponse
   } catch (error) {
     next(error);
   }
+});
+
+router.post('/business-snapshot', async (req: Request, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
+  try {
+    const application = await authenticateApplicationRequest(req, req.body);
+    const result = await recordBusinessSnapshot(application, req.body as BusinessSnapshotPayload);
+    res.status(result.duplicate ? 200 : 201).json({ success: true, data: result });
+  } catch (error) { next(error); }
 });
 
 export default router;

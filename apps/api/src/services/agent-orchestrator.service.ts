@@ -7,6 +7,7 @@ import { generateGovernedText } from './governed-text-generation.service';
 import * as usageService from './usage.service';
 import { v4 as uuidv4 } from 'uuid';
 import { ChatMessage, ToolCallResult } from '../types';
+import { env } from '../config/env';
 
 export interface ExecuteOptions {
   agentId: string;
@@ -215,7 +216,7 @@ export async function execute(options: ExecuteOptions): Promise<AgentResponse> {
     const result = await runTurn(agent, messages, tools, orgId, userId);
     totalTokensIn += result.tokensIn;
     totalTokensOut += result.tokensOut;
-    totalCostCents += usageService.estimateCost(agent.provider || 'default', agent.model || 'gpt-4o-mini', result.tokensIn, result.tokensOut);
+    totalCostCents += usageService.estimateCost('genx', agent.model || env.DEFAULT_TEXT_MODEL, result.tokensIn, result.tokensOut);
     finalResponse = result.response;
 
     await storeMessage(

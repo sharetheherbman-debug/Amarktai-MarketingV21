@@ -56,7 +56,7 @@ async function getEmbeddingConfig(orgId: string): Promise<{ model: string }> {
     ? settings.embedding as Record<string, unknown>
     : {};
   return {
-    model: String(embedding.model || env.TOGETHER_EMBEDDING_MODEL || env.DEEPINFRA_EMBEDDING_MODEL || ''),
+    model: String(embedding.model || 'local-hash-embedding-v1'),
   };
 }
 

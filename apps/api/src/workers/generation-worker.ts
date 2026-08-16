@@ -14,6 +14,7 @@ import {
   type GovernedGeneration,
 } from '../services/governed-generation.service';
 import * as contentEngine from '../services/content-engine.service';
+import { safeFetch } from '../utils/safe-fetch';
 
 const connection = {
   host: process.env.REDIS_HOST || 'localhost',
@@ -286,9 +287,9 @@ async function materializeVideo(
     await fs.copyFile(String(asset.rows[0].storage_path), destination);
     return destination;
   }
-  const response = await fetch(sourceUrl);
+  const response = await safeFetch(sourceUrl, { timeoutMs: 120000, maxResponseBytes: 25 * 1024 * 1024 });
   if (!response.ok) throw new Error(`Continuity source download failed: ${response.status}`);
-  await fs.writeFile(destination, Buffer.from(await response.arrayBuffer()));
+  await fs.writeFile(destination, Buffer.from(await response.bytes()));
   return destination;
 }
 

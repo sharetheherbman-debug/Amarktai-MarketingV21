@@ -1,7 +1,7 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import * as onboardingService from '../services/onboarding.service';
 import { validateBody } from '../middleware/validator';
-import { onboardingAdminSchema, appConfigureSchema, providerConfigSchema } from '../utils/validation';
+import { onboardingAdminSchema, appConfigureSchema } from '../utils/validation';
 import { z } from 'zod';
 import { ApiResponse } from '../types';
 
@@ -48,15 +48,6 @@ router.post('/configure', validateBody(appConfigureSchema), async (req: Request,
   try {
     await onboardingService.configureApp(req.body);
     res.json({ success: true, data: { message: 'App configured' } });
-  } catch (error) {
-    next(error);
-  }
-});
-
-router.post('/providers', validateBody(z.object({ providers: z.array(providerConfigSchema) })), async (req: Request, res: Response<ApiResponse>, next: NextFunction) => {
-  try {
-    await onboardingService.configureProviders(req.body.providers);
-    res.json({ success: true, data: { message: 'Providers configured' } });
   } catch (error) {
     next(error);
   }

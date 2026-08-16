@@ -28,6 +28,8 @@ export interface CampaignPlan {
   version: number;
   approved_at: string | null;
   approved_by: string | null;
+  strategy_validation_status: 'pending' | 'valid' | 'needs_revision' | 'owner_clarification';
+  owner_clarification: Array<Record<string, unknown>>;
   status: string;
   ai_generated: boolean;
   created_by: string | null;
@@ -160,7 +162,7 @@ ${JSON.stringify(factualInputs, null, 2)}
 ${context.brandDna ? `BRAND CONTEXT:\n${context.brandDna.substring(0, 4000)}` : 'BRAND CONTEXT: Not configured. Use a neutral professional voice and flag this limitation.'}
 ${context.knowledge ? `APPROVED BUSINESS KNOWLEDGE:\n${context.knowledge.substring(0, 4000)}` : 'APPROVED BUSINESS KNOWLEDGE: Not configured.'}
 
-Adapt each asset to its platform rather than duplicating identical copy. Connect the campaign idea, audience needs, objections, offer, proof, call to action, schedule and measurement plan. The strategy must be editable and approved before asset generation.
+Adapt each asset to its platform rather than duplicating identical copy. Connect the campaign idea, audience needs, objections, offer, proof, call to action, schedule and measurement plan. This is an internal planning artifact: validate and revise it autonomously. Put only genuinely owner-dependent factual, legal, claim or pricing decisions in constraints.missing_information.
 
 Return strict JSON only with this shape:
 {
@@ -190,14 +192,18 @@ Return strict JSON only with this shape:
     });
 
     const parsed = parseGeneratedPlan(result.content);
+    const missingInformation = Array.isArray(parsed.constraints?.missing_information)
+      ? parsed.constraints.missing_information.filter((item: unknown) => String(item || '').trim())
+      : [];
+    const validationStatus = missingInformation.length > 0 ? 'owner_clarification' : 'valid';
 
     const dbResult = await query(
       `INSERT INTO campaign_plans
          (organization_id,name,goal,target_audience,budget_cents,brief,strategy,
           creative_concept,messaging_plan,channels,kpis,content_calendar,
           asset_requirements,optimization_plan,constraints,generation_credit_limit,
-          status,ai_generated,created_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,'draft',TRUE,$17)
+          status,strategy_validation_status,owner_clarification,ai_generated,created_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,'draft',$17,$18,TRUE,$19)
        RETURNING *`,
       [
         orgId, input.name, input.goal,
@@ -209,6 +215,8 @@ Return strict JSON only with this shape:
         JSON.stringify(parsed.content_calendar), JSON.stringify(parsed.asset_requirements),
         JSON.stringify(parsed.optimization_plan), JSON.stringify(parsed.constraints),
         input.generation_credit_limit || 0,
+        validationStatus,
+        JSON.stringify(missingInformation.map((question: unknown) => ({ type: 'missing_information', question: String(question) }))),
         userId,
       ]
     );
@@ -311,7 +319,16 @@ export async function updatePlan(
     values
   );
   if (result.rows.length === 0) throw new NotFoundError('Campaign plan');
-  const plan = mapPlanRow(result.rows[0]);
+  let plan = mapPlanRow(result.rows[0]);
+  const missingInformation = Array.isArray((plan.constraints as Record<string, unknown>).missing_information)
+    ? ((plan.constraints as Record<string, unknown>).missing_information as unknown[]).filter((item) => String(item || '').trim())
+    : [];
+  const validationStatus = missingInformation.length > 0 ? 'owner_clarification' : 'valid';
+  const validation = await query(
+    `UPDATE campaign_plans SET strategy_validation_status=$1,owner_clarification=$2 WHERE id=$3 AND organization_id=$4 RETURNING *`,
+    [validationStatus, JSON.stringify(missingInformation.map((question) => ({ type: 'missing_information', question: String(question) }))), id, orgId]
+  );
+  plan = mapPlanRow(validation.rows[0]);
   await savePlanVersion(plan, userId, input.change_summary || 'Campaign strategy edited');
   return plan;
 }
@@ -350,6 +367,8 @@ function mapPlanRow(row: Record<string, unknown>): CampaignPlan {
     version: Number(row.version || 1),
     approved_at: row.approved_at as string | null,
     approved_by: row.approved_by as string | null,
+    strategy_validation_status: String(row.strategy_validation_status || 'pending') as CampaignPlan['strategy_validation_status'],
+    owner_clarification: typeof row.owner_clarification === 'string' ? JSON.parse(row.owner_clarification) : (row.owner_clarification as Array<Record<string, unknown>>) || [],
     status: row.status as string,
     ai_generated: row.ai_generated as boolean,
     created_by: row.created_by as string | null,

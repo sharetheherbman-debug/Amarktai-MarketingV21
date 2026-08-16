@@ -20,6 +20,7 @@ import * as memoryService from '../memory/memory.service';
 import { contextEngine } from './context-engine.service';
 import * as contentQuality from './content-quality.service';
 import { generateGovernedText } from './governed-text-generation.service';
+import { env } from '../config/env';
 
 // ─── Content CRUD ────────────────────────────────────────────────────────────
 
@@ -108,6 +109,9 @@ export async function update(id: string, orgId: string, data: UpdateContentData,
   const updates: string[] = [];
   const values: unknown[] = [];
   let paramIdx = 1;
+  const materiallyEdited = [
+    data.title, data.body, data.excerpt, data.type, data.format, data.platform, data.metadata,
+  ].some((value) => value !== undefined);
 
   if (data.title !== undefined) { updates.push(`title = $${paramIdx++}`); values.push(data.title); }
   if (data.body !== undefined) {
@@ -129,6 +133,10 @@ export async function update(id: string, orgId: string, data: UpdateContentData,
   if (data.assigned_to !== undefined) { updates.push(`assigned_to = $${paramIdx++}`); values.push(data.assigned_to); }
 
   if (updates.length === 0) return existing;
+
+  if (materiallyEdited) {
+    updates.push("status = 'draft'", "workflow_state = 'draft'", 'approved_by = NULL', 'scheduled_at = NULL');
+  }
 
   updates.push(`version = version + 1`);
   updates.push('updated_at = NOW()');
@@ -195,12 +203,69 @@ export async function restoreVersion(
 
 export async function duplicateContent(id: string, orgId: string, userId: string): Promise<ContentItem> {
   const source = await getById(id, orgId);
-  return create(orgId, {
+  const duplicate = await create(orgId, {
     title: `${source.title} copy`, body: source.body || '', excerpt: source.excerpt || undefined,
     type: source.type, format: source.format, platform: source.platform || undefined,
     campaign_id: source.campaign_id || undefined, template_id: source.template_id || undefined,
     metadata: { ...source.metadata, duplicated_from: source.id }, parent_id: source.id,
   }, userId);
+  const result = await query(
+    `UPDATE content_items SET root_content_id=$1,source_content_id=$2,
+       transformation_type='duplicate',reuse_score=100,updated_at=NOW()
+     WHERE id=$3 AND organization_id=$4 RETURNING *`,
+    [source.root_content_id || source.id, source.id, duplicate.id, orgId]
+  );
+  return mapContentRow(result.rows[0]);
+}
+
+export async function findReusableContent(
+  orgId: string,
+  input: { query?: string; type?: string; platform?: string; limit?: number }
+): Promise<Array<Record<string, unknown>>> {
+  const search = String(input.query || '').trim();
+  const result = await query(
+    `SELECT id,title,type,platform,version,quality_score,performance_summary,root_content_id,source_content_id,
+            LEAST(100,
+              (CASE WHEN $2::text IS NULL OR type=$2 THEN 35 ELSE 0 END) +
+              (CASE WHEN $3::text IS NULL OR platform=$3 THEN 25 ELSE 0 END) +
+              LEAST(25,quality_score/4) +
+              (CASE WHEN $4::text IS NULL THEN 10 ELSE
+                15*ts_rank(to_tsvector('simple',COALESCE(title,'')||' '||COALESCE(body,'')),plainto_tsquery('simple',$4)) END)
+            )::numeric(6,3) AS reuse_score
+     FROM content_items
+     WHERE organization_id=$1 AND deleted_at IS NULL AND status IN ('approved','published')
+       AND ($2::text IS NULL OR type=$2)
+       AND ($3::text IS NULL OR platform=$3 OR platform IS NULL)
+     ORDER BY reuse_score DESC,updated_at DESC LIMIT $5`,
+    [orgId, input.type || null, input.platform || null, search || null, Math.max(1, Math.min(input.limit || 10, 25))]
+  );
+  return result.rows;
+}
+
+export async function adaptContent(
+  sourceId: string,
+  orgId: string,
+  userId: string,
+  input: { title?: string; type?: ContentType; platform?: ContentPlatform; transformation_type?: string }
+): Promise<ContentItem> {
+  const source = await getById(sourceId, orgId);
+  if (!['approved','published'].includes(source.status)) {
+    throw new AppError(409, 'Only approved or published content can be reused', 'CONTENT_REUSE_SOURCE_UNAPPROVED');
+  }
+  const adapted = await create(orgId, {
+    title: input.title || `${source.title} — adapted`, body: source.body || '', excerpt: source.excerpt || undefined,
+    type: input.type || source.type, format: source.format, platform: input.platform || source.platform || undefined,
+    campaign_id: source.campaign_id || undefined,
+    metadata: { ...source.metadata, reuse: { source_content_id: source.id, source_version: source.version } },
+    parent_id: source.id,
+  }, userId);
+  const result = await query(
+    `UPDATE content_items SET root_content_id=$1,source_content_id=$2,
+       transformation_type=$3,reuse_score=100,status='draft',workflow_state='draft',updated_at=NOW()
+     WHERE id=$4 AND organization_id=$5 RETURNING *`,
+    [source.root_content_id || source.id, source.id, String(input.transformation_type || 'adaptation').slice(0, 80), adapted.id, orgId]
+  );
+  return mapContentRow(result.rows[0]);
 }
 
 export async function reviseContent(
@@ -268,11 +333,11 @@ export async function generateContent(
     );
     if (planResult.rows.length === 0) throw new NotFoundError('Campaign plan');
     campaignPlan = planResult.rows[0] as Record<string, any>;
-    if (String(campaignPlan.status) !== 'approved') {
+    if (String(campaignPlan.strategy_validation_status || 'pending') !== 'valid') {
       throw new AppError(
         409,
-        'Approve the campaign strategy before generating its assets',
-        'CAMPAIGN_PLAN_APPROVAL_REQUIRED'
+        'Resolve campaign strategy validation exceptions before generating its assets',
+        'CAMPAIGN_PLAN_VALIDATION_REQUIRED'
       );
     }
   }
@@ -312,8 +377,20 @@ export async function generateContent(
       }
     }
 
-    // 5. Build full prompt with context
-    const fullPrompt = buildGenerationPrompt(prompt, context, request, campaignPlan);
+    // 5. Prefer an approved high-quality asset as adaptation context before
+    // asking for net-new ideation. Approval is never inherited by the output.
+    const reusable = await findReusableContent(orgId, {
+      query: `${request.title || ''} ${request.prompt}`,
+      type: request.type,
+      platform: request.platform,
+      limit: 1,
+    });
+    const reuseSource = reusable[0] && Number(reusable[0].reuse_score || 0) >= 55
+      ? await getById(String(reusable[0].id), orgId)
+      : null;
+    const fullPrompt = `${buildGenerationPrompt(prompt, context, request, campaignPlan)}${reuseSource
+      ? `\n\nAPPROVED REUSE SOURCE (adapt; do not copy blindly):\n${reuseSource.body || ''}`
+      : ''}`;
 
     // 6. Update job status to generating
     await updateJobStatus(job.id, 'generating');
@@ -345,7 +422,7 @@ export async function generateContent(
     const generatedText = aiResponse.content;
 
     // 8. Create content item
-    const content = await create(orgId, {
+    let content = await create(orgId, {
       title: request.title || generateTitle(request.type, request.platform),
       body: generatedText,
       type: request.type,
@@ -374,16 +451,47 @@ export async function generateContent(
           brand_dna: !!context.brandDna,
           knowledge: !!context.knowledge,
         },
+        reuse_source: reuseSource ? { content_id: reuseSource.id, version: reuseSource.version } : null,
       },
     }, userId);
+
+    if (reuseSource) {
+      const linked = await query(
+        `UPDATE content_items SET root_content_id=$1,source_content_id=$2,
+           transformation_type='ai_adaptation',reuse_score=$3 WHERE id=$4 RETURNING *`,
+        [reuseSource.root_content_id || reuseSource.id, reuseSource.id, reusable[0].reuse_score, content.id]
+      );
+      content = mapContentRow(linked.rows[0]);
+    }
 
     // 9. Mark as AI generated
     await query(
       `UPDATE content_items SET ai_generated = TRUE, ai_model = $1, ai_prompt = $2, ai_context = $3 WHERE id = $4`,
-      ['gpt-4o', prompt, JSON.stringify({ brandDna: context.brandDna?.substring(0, 200), knowledge: context.knowledge?.substring(0, 200) }), content.id]
+      [env.DEFAULT_TEXT_MODEL, prompt, JSON.stringify({ brandDna: context.brandDna?.substring(0, 200), knowledge: context.knowledge?.substring(0, 200) }), content.id]
     );
 
-    const quality = await contentQuality.runQualityChecks(content.id, orgId);
+    let quality = await contentQuality.runQualityChecks(content.id, orgId);
+    for (let revision = 1; !quality.passed && revision <= 2; revision += 1) {
+      const issues = quality.checks.flatMap((check) => check.issues.map((issue) => `${check.check_type}: ${issue.message}`));
+      const revised = await generateGovernedText({
+        organizationId: orgId,
+        userId,
+        campaignId: request.campaign_id,
+        generationJobId: job.id,
+        idempotencyKey: `${request.idempotency_key || `content:${job.id}`}:quality-revision:${revision}`,
+        title: `Quality revision ${revision}: ${content.title}`,
+        summary: 'Bounded automatic revision before owner review',
+        prompt: `Revise this customer-facing asset to resolve the listed quality failures. Preserve supported facts, offer, brand constraints, intended audience, and CTA. Never invent claims or proof. Return only the complete revised asset.\n\nFAILURES:\n${issues.join('\n')}\n\nASSET:\n${content.body || ''}`,
+        maxTokens: getMaxTokens(request.type),
+        temperature: 0.4,
+        payload: { purpose: 'bounded_quality_revision', content_id: content.id, revision },
+      });
+      content = await update(content.id, orgId, {
+        body: revised.content,
+        metadata: { ...content.metadata, automatic_quality_revisions: revision },
+      }, userId);
+      quality = await contentQuality.runQualityChecks(content.id, orgId);
+    }
     await query(
       `UPDATE content_items SET workflow_state=$1,status='draft',updated_at=NOW() WHERE id=$2`,
       [quality.passed ? 'ready_for_review' : 'needs_revision', content.id]
@@ -393,7 +501,7 @@ export async function generateContent(
     const latency = Date.now() - startTime;
     await query(
       `UPDATE content_generation_jobs SET status = 'completed', content_id = $1, output = $2, latency_ms = $3, completed_at = NOW() WHERE id = $4`,
-      [content.id, JSON.stringify({ text: generatedText }), latency, job.id]
+      [content.id, JSON.stringify({ text: content.body, quality_passed: quality.passed }), latency, job.id]
     );
 
     logger.info(`Content generated: ${content.id} in ${latency}ms`);
@@ -460,9 +568,9 @@ function buildGenerationPrompt(
       creative_concept: typeof campaignPlan.creative_concept === 'string' ? JSON.parse(campaignPlan.creative_concept) : campaignPlan.creative_concept,
       messaging_plan: typeof campaignPlan.messaging_plan === 'string' ? JSON.parse(campaignPlan.messaging_plan) : campaignPlan.messaging_plan,
       constraints: typeof campaignPlan.constraints === 'string' ? JSON.parse(campaignPlan.constraints) : campaignPlan.constraints,
-      approved_at: campaignPlan.approved_at,
+      strategy_validation_status: campaignPlan.strategy_validation_status,
     };
-    parts.push(`\nAPPROVED CAMPAIGN STRATEGY:\n${JSON.stringify(campaignContext, null, 2)}`);
+    parts.push(`\nINTERNALLY VALIDATED CAMPAIGN STRATEGY:\n${JSON.stringify(campaignContext, null, 2)}`);
   }
 
   parts.push(`\nTASK: ${prompt}`);
@@ -560,6 +668,11 @@ function mapContentRow(row: Record<string, unknown>): ContentItem {
     ai_context: typeof row.ai_context === 'string' ? JSON.parse(row.ai_context) : (row.ai_context as Record<string, unknown>) || {},
     template_id: row.template_id as string | null,
     parent_id: row.parent_id as string | null,
+    root_content_id: row.root_content_id as string | null,
+    source_content_id: row.source_content_id as string | null,
+    transformation_type: row.transformation_type as string | null,
+    reuse_score: Number(row.reuse_score || 0),
+    performance_summary: typeof row.performance_summary === 'string' ? JSON.parse(row.performance_summary) : (row.performance_summary as Record<string, unknown>) || {},
     version: parseInt(row.version as string) || 1,
     scheduled_at: row.scheduled_at as string | null,
     published_at: row.published_at as string | null,

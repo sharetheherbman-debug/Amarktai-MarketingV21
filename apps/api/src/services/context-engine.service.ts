@@ -85,6 +85,46 @@ async function getRelevantKnowledge(orgId: string, searchText: string, limit = 5
   }
 }
 
+async function getLivingBusinessBrain(orgId: string): Promise<string> {
+  try {
+    const [snapshots, campaigns, content, performance, intelligence] = await Promise.all([
+      query(
+        `SELECT application_id,source_type,version,payload,authoritative_fields,received_at
+         FROM business_knowledge_snapshots
+         WHERE organization_id=$1 AND is_current=TRUE
+         ORDER BY CASE source_type WHEN 'connector' THEN 1 WHEN 'owner' THEN 2 ELSE 3 END,received_at DESC`,
+        [orgId]
+      ),
+      query(`SELECT id,name,goal,status,strategy_validation_status,updated_at FROM campaign_plans WHERE organization_id=$1 ORDER BY updated_at DESC LIMIT 10`, [orgId]),
+      query(`SELECT id,title,type,platform,status,version,performance_summary,updated_at FROM content_items WHERE organization_id=$1 AND deleted_at IS NULL ORDER BY updated_at DESC LIMIT 20`, [orgId]),
+      query(
+        `SELECT event_type,source,medium,platform,content_id,campaign_id,value_pence,metrics,occurred_at
+         FROM marketing_performance_events WHERE organization_id=$1 ORDER BY occurred_at DESC LIMIT 50`,
+        [orgId]
+      ),
+      query(
+        `SELECT
+           (SELECT COUNT(*) FROM competitors WHERE organization_id=$1 AND status='active' AND deleted_at IS NULL) AS competitors,
+           (SELECT COUNT(*) FROM trend_items WHERE organization_id=$1 AND created_at > NOW()-INTERVAL '30 days') AS recent_trends,
+           (SELECT COUNT(*) FROM application_conversion_events event JOIN application_connectors connector ON connector.application_id=event.application_id WHERE connector.default_organization_id=$1) AS conversions,
+           (SELECT MAX(last_success_at) FROM knowledge_sources WHERE organization_id=$1 AND deleted_at IS NULL) AS knowledge_refreshed_at`,
+        [orgId]
+      ),
+    ]);
+    return `SHARED LIVING BUSINESS BRAIN (organization scoped):\n${JSON.stringify({
+      structured_business_sources: snapshots.rows,
+      active_campaign_context: campaigns.rows,
+      content_inventory: content.rows,
+      recent_performance_and_sales_signals: performance.rows,
+      intelligence_health: intelligence.rows[0] || {},
+      authority_rule: 'Structured connector values take precedence for pricing, plans, offers and product status; owner-approved Brand DNA and claims remain binding.',
+    }, null, 2)}`;
+  } catch (error) {
+    logger.warn(`Failed to load living business brain for ${orgId}: ${error}`);
+    return '';
+  }
+}
+
 async function getRecentHistory(agentId: string | undefined, orgId: string, limit = 10): Promise<string> {
   if (!agentId) return '';
   try {
@@ -138,15 +178,16 @@ export async function assemble(options: ContextOptions): Promise<AssembledContex
 
   const agent = await loadAgent(agentId, orgId);
   const config = agent?.config || {};
-  const [brandDna, businessKnowledge, recentHistory] = await Promise.all([
+  const [brandDna, businessKnowledge, livingBrain, recentHistory] = await Promise.all([
     includeBrandDna && config.include_brand_dna !== false ? getBrandDna(orgId) : Promise.resolve(''),
     includeKnowledge && config.include_knowledge !== false ? getRelevantKnowledge(orgId, knowledgeQuery, 5) : Promise.resolve(''),
+    includeKnowledge && config.include_knowledge !== false ? getLivingBusinessBrain(orgId) : Promise.resolve(''),
     includeHistory && config.include_history !== false ? getRecentHistory(agentId, orgId, historyLimit) : Promise.resolve(''),
   ]);
   const platformIntelligence = includePlatformIntelligence && config.include_platform_intelligence !== false
     ? getPlatformIntelligenceContext(platforms)
     : '';
-  const knowledge = [businessKnowledge, platformIntelligence].filter(Boolean).join('\n\n---\n\n');
+  const knowledge = [livingBrain, businessKnowledge, platformIntelligence].filter(Boolean).join('\n\n---\n\n');
   const fullContext = [brandDna, knowledge, recentHistory].filter(Boolean).join('\n\n---\n\n');
   logger.debug(`Context assembled for ${agentId || 'unscoped generation'}: ${fullContext.length} chars`);
   return {

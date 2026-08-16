@@ -4,6 +4,8 @@ import { healthCheck as providerHealthCheck } from './provider.service';
 import { publishDuePostsThroughControlCentre } from './controlled-social-publishing.service';
 import { checkCompetitor } from './competitor.service';
 import { checkMonitor } from './trend.service';
+import { refreshDueSources } from './knowledge.service';
+import { runGrowthDirector } from './growth-director.service';
 
 interface ScheduledTask {
   name: string;
@@ -108,6 +110,16 @@ class SchedulerService {
         try { await checkCompetitor(String(row.id), String(row.organization_id)); }
         catch (error) { logger.warn(`Scheduled competitor check failed for ${row.id}: ${error}`); }
       }
+    });
+
+    this.scheduleTask('refresh-business-knowledge', 5 * 60 * 1000, async () => {
+      const refreshed = await refreshDueSources(10);
+      if (refreshed > 0) logger.info(`Refreshed ${refreshed} scheduled business knowledge source(s)`);
+    });
+
+    this.scheduleTask('autonomous-growth-director', 10 * 60 * 1000, async () => {
+      const result = await runGrowthDirector(25);
+      if (result.advanced > 0) logger.info(`Advanced ${result.advanced} durable autonomous growth cycle(s)`);
     });
 
     this.scheduleTask('health-check', 5 * 60 * 1000, async () => {

@@ -3,6 +3,7 @@ import { AppError } from '../middleware/errorHandler';
 import { logger } from '../utils/logger';
 import * as vectorService from './vector.service';
 import { safeFetch } from '../utils/safe-fetch';
+import crypto from 'crypto';
 
 interface SourceRow extends Record<string, unknown> {
   id: string;
@@ -95,7 +96,7 @@ function chunkText(text: string, maxChars = 6000, overlap = 500): string[] {
 async function fetchText(url: string, headers: Record<string, string> = {}): Promise<{ finalUrl: string; contentType: string; text: string }> {
   const response = await safeFetch(url, {
     headers: {
-      'User-Agent': 'AmarktAI-KnowledgeBot/1.0',
+      'User-Agent': 'EquiProfile-Marketing-KnowledgeBot/1.0',
       Accept: 'text/html,application/json,text/plain,application/xml;q=0.9,*/*;q=0.8',
       ...headers,
     },
@@ -187,14 +188,52 @@ async function collectDocuments(source: SourceRow): Promise<DocumentInput[]> {
   throw new AppError(400, `Unsupported knowledge source type: ${source.type}`, 'KNOWLEDGE_TYPE_UNSUPPORTED');
 }
 
-export async function ingestSource(sourceId: string, orgId: string): Promise<{ documents: number; items: number; tokens: number; embeddings: number }> {
+export async function ingestSource(
+  sourceId: string,
+  orgId: string,
+  triggerType: 'manual' | 'scheduled' | 'connector' | 'director' = 'manual'
+): Promise<{ documents: number; items: number; tokens: number; embeddings: number; version: number; changes: number }> {
   const sourceResult = await query('SELECT * FROM knowledge_sources WHERE id=$1 AND organization_id=$2', [sourceId, orgId]);
   if (sourceResult.rows.length === 0) throw new AppError(404, 'Knowledge source not found', 'NOT_FOUND');
   const source = sourceResult.rows[0] as SourceRow;
+  const previousVersion = Number(sourceResult.rows[0].knowledge_version || 0);
+  const syncRun = await query(
+    `INSERT INTO knowledge_sync_runs (organization_id,source_id,trigger_type,previous_version,resulting_version)
+     VALUES ($1,$2,$3,$4,$4) RETURNING id`,
+    [orgId, sourceId, triggerType, previousVersion]
+  );
   await query("UPDATE knowledge_sources SET status='syncing',error_message=NULL,updated_at=NOW() WHERE id=$1 AND organization_id=$2", [sourceId, orgId]);
 
   try {
     const documents = await collectDocuments(source);
+    const pageInputs = documents.map((document, index) => ({
+      ...document,
+      url: document.url || `source://${sourceId}/document/${index + 1}`,
+      fingerprint: crypto.createHash('sha256').update(`${document.title}\n${document.content}`).digest('hex'),
+    }));
+    const currentPages = await query(
+      `SELECT * FROM knowledge_page_versions
+       WHERE source_id=$1 AND organization_id=$2 AND is_current=TRUE AND change_type<>'deleted'`,
+      [sourceId, orgId]
+    );
+    const previousByUrl = new Map(currentPages.rows.map((row) => [String(row.url), row]));
+    const currentUrls = new Set(pageInputs.map((page) => page.url));
+    const pageChanges = pageInputs.map((page) => ({
+      page,
+      previous: previousByUrl.get(page.url),
+      changeType: !previousByUrl.has(page.url)
+        ? 'added'
+        : String(previousByUrl.get(page.url)?.fingerprint) === page.fingerprint ? 'unchanged' : 'changed',
+    }));
+    const deletedPages = currentPages.rows.filter((row) => !currentUrls.has(String(row.url)));
+    const added = pageChanges.filter((change) => change.changeType === 'added').length;
+    const changed = pageChanges.filter((change) => change.changeType === 'changed').length;
+    const deleted = deletedPages.length;
+    const totalChanges = added + changed + deleted;
+    const sourceVersion = previousVersion + (totalChanges > 0 ? 1 : 0);
+    const sourceFingerprint = crypto.createHash('sha256').update(
+      pageInputs.map((page) => `${page.url}:${page.fingerprint}`).sort().join('\n')
+    ).digest('hex');
     const prepared = documents.flatMap((document) => chunkText(document.content).map((content, index) => ({
       title: document.title, content, url: document.url || null,
       metadata: { ...(document.metadata || {}), document_title: document.title, chunk_index: index },
@@ -204,6 +243,30 @@ export async function ingestSource(sourceId: string, orgId: string): Promise<{ d
 
     const totalTokens = prepared.reduce((sum, item) => sum + item.tokens, 0);
     const itemIds = await transaction(async (client) => {
+      for (const change of pageChanges.filter((entry) => entry.changeType !== 'unchanged')) {
+        if (change.previous) {
+          await client.query('UPDATE knowledge_page_versions SET is_current=FALSE WHERE id=$1', [change.previous.id]);
+        }
+        await client.query(
+          `INSERT INTO knowledge_page_versions
+             (organization_id,source_id,url,page_version,source_version,fingerprint,title,content,metadata,change_type,is_current)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,TRUE)`,
+          [
+            orgId, sourceId, change.page.url, Number(change.previous?.page_version || 0) + 1,
+            sourceVersion, change.page.fingerprint, change.page.title, change.page.content,
+            JSON.stringify(change.page.metadata || {}), change.changeType,
+          ]
+        );
+      }
+      for (const previous of deletedPages) {
+        await client.query('UPDATE knowledge_page_versions SET is_current=FALSE WHERE id=$1', [previous.id]);
+        await client.query(
+          `INSERT INTO knowledge_page_versions
+             (organization_id,source_id,url,page_version,source_version,fingerprint,title,content,metadata,change_type,is_current)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,NULL,$8,'deleted',TRUE)`,
+          [orgId, sourceId, previous.url, Number(previous.page_version || 0) + 1, sourceVersion, previous.fingerprint, previous.title, JSON.stringify({ deleted_at: new Date().toISOString() })]
+        );
+      }
       await client.query('DELETE FROM knowledge_items WHERE source_id=$1 AND organization_id=$2', [sourceId, orgId]);
       const ids: string[] = [];
       for (const item of prepared) {
@@ -216,10 +279,27 @@ export async function ingestSource(sourceId: string, orgId: string): Promise<{ d
         ids.push(String(inserted.rows[0].id));
       }
       await client.query(
-        `UPDATE knowledge_sources SET status='active',item_count=$1,total_tokens=$2,last_synced_at=NOW(),error_message=NULL,updated_at=NOW()
-         WHERE id=$3 AND organization_id=$4`,
-        [prepared.length, totalTokens, sourceId, orgId]
+        `UPDATE knowledge_sources SET status='active',item_count=$1,total_tokens=$2,last_synced_at=NOW(),
+           last_success_at=NOW(),consecutive_failures=0,content_fingerprint=$3,knowledge_version=$4,
+           stale_after=NOW() + (refresh_interval_minutes || ' minutes')::interval,
+           next_refresh_at=NOW() + (refresh_interval_minutes || ' minutes')::interval,
+           error_message=NULL,updated_at=NOW()
+         WHERE id=$5 AND organization_id=$6`,
+        [prepared.length, totalTokens, sourceFingerprint, sourceVersion, sourceId, orgId]
       );
+      await client.query(
+        `UPDATE knowledge_sync_runs SET status=$1,resulting_version=$2,pages_seen=$3,pages_added=$4,
+           pages_changed=$5,pages_deleted=$6,completed_at=NOW() WHERE id=$7`,
+        [totalChanges > 0 ? 'completed' : 'unchanged', sourceVersion, pageInputs.length, added, changed, deleted, syncRun.rows[0].id]
+      );
+      if (totalChanges > 0) {
+        await client.query(
+          `INSERT INTO marketing_change_events
+             (organization_id,source_type,source_id,event_type,materiality,summary,payload)
+           VALUES ($1,'website',$2,'website_knowledge_changed','material',$3,$4)`,
+          [orgId, sourceId, `Knowledge changed: ${added} added, ${changed} changed, ${deleted} deleted page(s)`, JSON.stringify({ source_version: sourceVersion, pages_added: added, pages_changed: changed, pages_deleted: deleted })]
+        );
+      }
       return ids;
     });
 
@@ -237,10 +317,16 @@ export async function ingestSource(sourceId: string, orgId: string): Promise<{ d
       logger.warn(`Knowledge source ${sourceId} indexed without embeddings`, error);
     }
 
-    return { documents: documents.length, items: prepared.length, tokens: totalTokens, embeddings: embeddingCount };
+    return { documents: documents.length, items: prepared.length, tokens: totalTokens, embeddings: embeddingCount, version: sourceVersion, changes: totalChanges };
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Knowledge ingestion failed';
-    await query("UPDATE knowledge_sources SET status='error',error_message=$1,updated_at=NOW() WHERE id=$2 AND organization_id=$3", [message, sourceId, orgId]);
+    await query(
+      `UPDATE knowledge_sources SET status='error',error_message=$1,consecutive_failures=consecutive_failures+1,
+         next_refresh_at=NOW() + (LEAST(1440,POWER(2,LEAST(consecutive_failures+1,8))::int * 15) || ' minutes')::interval,
+         updated_at=NOW() WHERE id=$2 AND organization_id=$3`,
+      [message, sourceId, orgId]
+    );
+    await query("UPDATE knowledge_sync_runs SET status='failed',error_message=$1,completed_at=NOW() WHERE id=$2", [message.slice(0, 2000), syncRun.rows[0].id]);
     throw error;
   }
 }
