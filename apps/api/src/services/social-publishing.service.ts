@@ -45,14 +45,14 @@ export interface SocialPost {
 }
 
 export const SOCIAL_PLATFORM_CAPABILITIES = {
-  x: { enabled: true, formats: ['text'], notes: 'Text posts are production-enabled.' },
+  x: { enabled: true, formats: ['text','single_image','multi_image','single_video','animated_gif'], notes: 'X API v2 posts with up to four approved images, or one bounded video/GIF.' },
   linkedin: { enabled: true, formats: ['text','single_image','multi_image','single_video'], notes: 'Organic Posts API with image, multi-image and bounded video upload support.' },
-  facebook: { enabled: true, formats: ['text','link'], notes: 'Page feed text and link posts.' },
-  instagram: { enabled: true, formats: ['single_image'], notes: 'Instagram Business single-image publishing.' },
-  threads: { enabled: true, formats: ['text'], notes: 'Text posts.' },
-  pinterest: { enabled: true, formats: ['single_image'], notes: 'One approved image URL to a configured board.' },
+  facebook: { enabled: true, formats: ['text','link','single_image','multi_image','single_video'], notes: 'Page feed, native image/multi-image and bounded video publishing.' },
+  instagram: { enabled: true, formats: ['single_image','multi_image','reel'], notes: 'Instagram Business/Creator image, image carousel and Reel/video publishing.' },
+  threads: { enabled: true, formats: ['text','single_image','multi_image','single_video'], notes: 'Threads text, image, image carousel and bounded video publishing.' },
+  pinterest: { enabled: true, formats: ['single_image','video_with_cover'], notes: 'Organic image Pins and video Pins using an approved video plus approved cover image.' },
   reddit: { enabled: true, formats: ['text','link'], notes: 'Self or link post to a configured subreddit.' },
-  youtube: { enabled: true, formats: ['single_video'], notes: 'One bounded video upload; privacy defaults to private unless configured.' },
+  youtube: { enabled: true, formats: ['single_video','shorts_compatible'], notes: 'Bounded native video upload; vertical/short-duration assets are Shorts-compatible without a separate upload API.' },
   tiktok: { enabled: true, formats: ['single_video','photo_carousel'], notes: 'Direct Post code-ready. Public visibility remains provider-gated by TikTok app audit, video.publish authorization and creator consent.' },
   bluesky: { enabled: true, formats: ['text','single_image','multi_image'], notes: 'AT Protocol posts with up to four approved images.' },
   mastodon: { enabled: true, formats: ['text','single_image','multi_image','single_video'], notes: 'Instance-scoped statuses with up to four approved media attachments.' },
@@ -62,14 +62,26 @@ export const SOCIAL_PLATFORM_CAPABILITIES = {
 function assertSupportedSocialPayload(platform: string, mediaUrls: string[]): void {
   const capability = SOCIAL_PLATFORM_CAPABILITIES[platform as keyof typeof SOCIAL_PLATFORM_CAPABILITIES];
   if (!capability?.enabled) throw new AppError(400, `${platform} publishing is disabled for this release`, 'UNSUPPORTED_SOCIAL_PLATFORM');
-  if (['x','threads'].includes(platform) && mediaUrls.length > 0) {
-    throw new AppError(400, `${platform} media publishing is not enabled; use an approved text-only asset`, 'SOCIAL_FORMAT_UNSUPPORTED');
+  if (platform === 'x' && mediaUrls.length > 4) {
+    throw new AppError(400, 'X supports at most four approved media items; video/GIF mixing rules are enforced at delivery', 'SOCIAL_FORMAT_UNSUPPORTED');
   }
-  if (['instagram','pinterest','youtube'].includes(platform) && mediaUrls.length !== 1) {
-    throw new AppError(400, `${platform} requires exactly one approved media URL`, 'SOCIAL_MEDIA_REQUIRED');
+  if (platform === 'threads' && mediaUrls.length > 10) {
+    throw new AppError(400, 'Threads supports at most ten approved media items in this connector', 'SOCIAL_FORMAT_UNSUPPORTED');
   }
-  if (['facebook','reddit'].includes(platform) && mediaUrls.length > 1) {
-    throw new AppError(400, `${platform} supports at most one approved link in this release`, 'SOCIAL_FORMAT_UNSUPPORTED');
+  if (platform === 'instagram' && (mediaUrls.length < 1 || mediaUrls.length > 10)) {
+    throw new AppError(400, 'Instagram requires one approved image/video or an image carousel of up to ten approved items', 'SOCIAL_MEDIA_REQUIRED');
+  }
+  if (platform === 'pinterest' && ![1, 2].includes(mediaUrls.length)) {
+    throw new AppError(400, 'Pinterest requires one approved image, or an approved video plus approved cover image', 'SOCIAL_MEDIA_REQUIRED');
+  }
+  if (platform === 'youtube' && mediaUrls.length !== 1) {
+    throw new AppError(400, 'YouTube requires exactly one approved video URL', 'SOCIAL_MEDIA_REQUIRED');
+  }
+  if (platform === 'facebook' && mediaUrls.length > 10) {
+    throw new AppError(400, 'Facebook supports at most ten approved media items in this connector', 'SOCIAL_FORMAT_UNSUPPORTED');
+  }
+  if (platform === 'reddit' && mediaUrls.length > 1) {
+    throw new AppError(400, 'Reddit supports at most one approved link in this release', 'SOCIAL_FORMAT_UNSUPPORTED');
   }
   if (platform === 'linkedin' && mediaUrls.length > 20) {
     throw new AppError(400, 'LinkedIn supports at most 20 approved images, or one approved video', 'SOCIAL_FORMAT_UNSUPPORTED');
@@ -226,7 +238,12 @@ export async function testConnection(id: string, orgId: string): Promise<{ healt
     throw error;
   }
 
-  await query("UPDATE social_connections SET status = 'active', last_sync_at = NOW(), updated_at = NOW() WHERE id = $1 AND organization_id = $2", [id, orgId]);
+  await query(
+    `UPDATE social_connections SET status='active',last_sync_at=NOW(),
+       provider_capability_state=$1,last_capability_check_at=NOW(),updated_at=NOW()
+     WHERE id=$2 AND organization_id=$3`,
+    [JSON.stringify({ provider_tested: true, tested_at: new Date().toISOString(), platform }), id, orgId]
+  );
   return { healthy: true, account };
 }
 
@@ -324,14 +341,16 @@ export async function publishPost(postId: string, orgId: string): Promise<Social
       mediaUrls,
       hashtags,
     });
+    const submissionPending = Boolean((result.raw as Record<string, unknown>)?.submission_pending);
 
     const updated = await query(
       `UPDATE social_posts
        SET status = 'published', published_at = NOW(), external_id = $1, external_url = $2,
-           provider_response = $3, error = NULL, updated_at = NOW()
-       WHERE id = $4 AND organization_id = $5
+           provider_submission_id=CASE WHEN $3 THEN $1 ELSE provider_submission_id END,
+           provider_response = $4, error = NULL, updated_at = NOW()
+       WHERE id = $5 AND organization_id = $6
        RETURNING *`,
-      [result.externalId, result.externalUrl || null, JSON.stringify(result.raw), postId, orgId]
+      [result.externalId, result.externalUrl || null, submissionPending, JSON.stringify(result.raw), postId, orgId]
     );
     await query('UPDATE social_connections SET last_sync_at = NOW(), updated_at = NOW() WHERE id = $1', [row.connection_id]);
     logger.info(`Social post ${postId} published to ${row.platform} as ${result.externalId}`);
