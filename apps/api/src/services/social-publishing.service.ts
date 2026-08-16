@@ -3,6 +3,11 @@ import { logger } from '../utils/logger';
 import { NotFoundError, AppError } from '../middleware/errorHandler';
 import { openSecrets, sealSecrets } from './external-platform.service';
 import { deliverSocialPost } from './strict-social-delivery.service';
+import {
+  connectionCredentialSatisfied,
+  isExtendedSocialPlatform,
+  testExtendedSocialConnection,
+} from './extended-social-platform.service';
 import { assertApprovedContentVersion } from './approved-content.service';
 import { validatePublicHttpUrl } from '../utils/safe-fetch';
 
@@ -40,24 +45,24 @@ export interface SocialPost {
 }
 
 export const SOCIAL_PLATFORM_CAPABILITIES = {
-  x: { enabled: true, formats: ['text'], notes: 'Text posts only in this release.' },
-  linkedin: { enabled: true, formats: ['text'], notes: 'Text posts only; media registration is not exposed.' },
+  x: { enabled: true, formats: ['text'], notes: 'Text posts are production-enabled.' },
+  linkedin: { enabled: true, formats: ['text','single_image','multi_image','single_video'], notes: 'Organic Posts API with image, multi-image and bounded video upload support.' },
   facebook: { enabled: true, formats: ['text','link'], notes: 'Page feed text and link posts.' },
   instagram: { enabled: true, formats: ['single_image'], notes: 'Instagram Business single-image publishing.' },
-  threads: { enabled: true, formats: ['text'], notes: 'Text posts only.' },
-  pinterest: { enabled: true, formats: ['single_image'], notes: 'One image URL to a configured board.' },
+  threads: { enabled: true, formats: ['text'], notes: 'Text posts.' },
+  pinterest: { enabled: true, formats: ['single_image'], notes: 'One approved image URL to a configured board.' },
   reddit: { enabled: true, formats: ['text','link'], notes: 'Self or link post to a configured subreddit.' },
-  youtube: { enabled: true, formats: ['single_video'], notes: 'One video upload; defaults to private unless configured.' },
-  tiktok: { enabled: false, formats: [], notes: 'Hidden until TikTok app audit, video.publish approval, creator consent UX, and status polling are configured.' },
-  bluesky: { enabled: false, formats: [], notes: 'Deferred and hidden.' },
-  mastodon: { enabled: false, formats: [], notes: 'Deferred and hidden.' },
-  telegram: { enabled: false, formats: [], notes: 'Deferred and hidden.' },
+  youtube: { enabled: true, formats: ['single_video'], notes: 'One bounded video upload; privacy defaults to private unless configured.' },
+  tiktok: { enabled: true, formats: ['single_video','photo_carousel'], notes: 'Direct Post code-ready. Public visibility remains provider-gated by TikTok app audit, video.publish authorization and creator consent.' },
+  bluesky: { enabled: true, formats: ['text','single_image','multi_image'], notes: 'AT Protocol posts with up to four approved images.' },
+  mastodon: { enabled: true, formats: ['text','single_image','multi_image','single_video'], notes: 'Instance-scoped statuses with up to four approved media attachments.' },
+  telegram: { enabled: true, formats: ['text','single_image','multi_image','single_video','media_group'], notes: 'Bot API channel publishing with up to ten approved media items.' },
 } as const;
 
 function assertSupportedSocialPayload(platform: string, mediaUrls: string[]): void {
   const capability = SOCIAL_PLATFORM_CAPABILITIES[platform as keyof typeof SOCIAL_PLATFORM_CAPABILITIES];
   if (!capability?.enabled) throw new AppError(400, `${platform} publishing is disabled for this release`, 'UNSUPPORTED_SOCIAL_PLATFORM');
-  if (['x','linkedin','threads'].includes(platform) && mediaUrls.length > 0) {
+  if (['x','threads'].includes(platform) && mediaUrls.length > 0) {
     throw new AppError(400, `${platform} media publishing is not enabled; use an approved text-only asset`, 'SOCIAL_FORMAT_UNSUPPORTED');
   }
   if (['instagram','pinterest','youtube'].includes(platform) && mediaUrls.length !== 1) {
@@ -65,6 +70,21 @@ function assertSupportedSocialPayload(platform: string, mediaUrls: string[]): vo
   }
   if (['facebook','reddit'].includes(platform) && mediaUrls.length > 1) {
     throw new AppError(400, `${platform} supports at most one approved link in this release`, 'SOCIAL_FORMAT_UNSUPPORTED');
+  }
+  if (platform === 'linkedin' && mediaUrls.length > 20) {
+    throw new AppError(400, 'LinkedIn supports at most 20 approved images, or one approved video', 'SOCIAL_FORMAT_UNSUPPORTED');
+  }
+  if (platform === 'tiktok' && (mediaUrls.length < 1 || mediaUrls.length > 35)) {
+    throw new AppError(400, 'TikTok Direct Post requires 1-35 approved media URLs', 'SOCIAL_MEDIA_REQUIRED');
+  }
+  if (platform === 'bluesky' && mediaUrls.length > 4) {
+    throw new AppError(400, 'Bluesky supports at most four approved images', 'SOCIAL_FORMAT_UNSUPPORTED');
+  }
+  if (platform === 'mastodon' && mediaUrls.length > 4) {
+    throw new AppError(400, 'Mastodon supports at most four approved media attachments', 'SOCIAL_FORMAT_UNSUPPORTED');
+  }
+  if (platform === 'telegram' && mediaUrls.length > 10) {
+    throw new AppError(400, 'Telegram media groups support at most ten approved media items', 'SOCIAL_FORMAT_UNSUPPORTED');
   }
 }
 
@@ -96,8 +116,8 @@ export async function addConnection(
 ): Promise<SocialConnection> {
   const capability = SOCIAL_PLATFORM_CAPABILITIES[platform as keyof typeof SOCIAL_PLATFORM_CAPABILITIES];
   if (!capability?.enabled) throw new AppError(400, `${platform} is disabled or deferred for this release`, 'UNSUPPORTED_SOCIAL_PLATFORM');
-  if (!credentials.access_token) {
-    throw new AppError(400, 'A platform access token is required', 'SOCIAL_CREDENTIALS_REQUIRED');
+  if (!connectionCredentialSatisfied(platform, credentials)) {
+    throw new AppError(400, `Required ${platform} credentials are missing`, 'SOCIAL_CREDENTIALS_REQUIRED');
   }
 
   const storedConfig = {
@@ -108,7 +128,7 @@ export async function addConnection(
   const result = await query(
     `INSERT INTO social_connections (organization_id, platform, account_name, account_id, config, status)
      VALUES ($1, $2, $3, $4, $5, 'active') RETURNING *`,
-    [orgId, platform, accountName, config.account_id || config.page_id || config.user_id || null, JSON.stringify(storedConfig)]
+    [orgId, platform, accountName, config.account_id || config.page_id || config.user_id || config.did || config.chat_id || null, JSON.stringify(storedConfig)]
   );
   logger.info(`Social connection added: ${platform} (${accountName}) for org: ${orgId}`);
   return mapConnectionRow(result.rows[0]);
@@ -145,7 +165,7 @@ export async function updateConnection(
      RETURNING *`,
     [
       data.account_name || null,
-      data.config?.account_id || data.config?.page_id || data.config?.user_id || null,
+      data.config?.account_id || data.config?.page_id || data.config?.user_id || data.config?.did || data.config?.chat_id || null,
       JSON.stringify(nextConfig),
       data.status || null,
       id,
@@ -174,33 +194,39 @@ export async function testConnection(id: string, orgId: string): Promise<{ healt
   const platform = String(row.platform);
   const config = configFromRow(row);
   const credentials = openSecrets(config.credentials);
-  const token = String(credentials.access_token || '');
-  if (!token) throw new AppError(400, 'Connection has no access token', 'SOCIAL_CREDENTIALS_REQUIRED');
-
-  const headers = { Authorization: `Bearer ${token}` };
-  let url: string;
-  switch (platform) {
-    case 'x': url = 'https://api.x.com/2/users/me'; break;
-    case 'linkedin': url = 'https://api.linkedin.com/v2/userinfo'; break;
-    case 'facebook':
-    case 'instagram': url = `https://graph.facebook.com/${String(config.api_version || 'v25.0')}/me?fields=id,name&access_token=${encodeURIComponent(token)}`; break;
-    case 'threads': url = `https://graph.threads.net/${String(config.api_version || 'v1.0')}/me?fields=id,username&access_token=${encodeURIComponent(token)}`; break;
-    case 'pinterest': url = 'https://api.pinterest.com/v5/user_account'; break;
-    case 'reddit': url = 'https://oauth.reddit.com/api/v1/me'; break;
-    case 'youtube': url = 'https://www.googleapis.com/youtube/v3/channels?part=id,snippet&mine=true'; break;
-    default: throw new AppError(400, `Unsupported social platform: ${platform}`, 'UNSUPPORTED_SOCIAL_PLATFORM');
+  if (!connectionCredentialSatisfied(platform, credentials)) {
+    throw new AppError(400, 'Connection has no valid provider credential', 'SOCIAL_CREDENTIALS_REQUIRED');
   }
 
-  const response = await fetch(url, { headers, signal: AbortSignal.timeout(15000) });
-  const text = await response.text();
-  let account: Record<string, unknown> = {};
-  try { account = text ? JSON.parse(text) as Record<string, unknown> : {}; } catch { account = { text }; }
-  if (!response.ok) {
-    await query("UPDATE social_connections SET status = 'error', updated_at = NOW() WHERE id = $1", [id]);
-    throw new AppError(response.status, `Social connection test failed: ${text || response.statusText}`, 'SOCIAL_CONNECTION_FAILED');
+  let account: Record<string, unknown>;
+  try {
+    if (isExtendedSocialPlatform(platform)) {
+      account = await testExtendedSocialConnection(platform, credentials, config);
+    } else {
+      const token = String(credentials.access_token || '');
+      const headers = { Authorization: `Bearer ${token}` };
+      let url: string;
+      switch (platform) {
+        case 'x': url = 'https://api.x.com/2/users/me'; break;
+        case 'facebook':
+        case 'instagram': url = `https://graph.facebook.com/${String(config.api_version || 'v25.0')}/me?fields=id,name&access_token=${encodeURIComponent(token)}`; break;
+        case 'threads': url = `https://graph.threads.net/${String(config.api_version || 'v1.0')}/me?fields=id,username&access_token=${encodeURIComponent(token)}`; break;
+        case 'pinterest': url = 'https://api.pinterest.com/v5/user_account'; break;
+        case 'reddit': url = 'https://oauth.reddit.com/api/v1/me'; break;
+        case 'youtube': url = 'https://www.googleapis.com/youtube/v3/channels?part=id,snippet&mine=true'; break;
+        default: throw new AppError(400, `Unsupported social platform: ${platform}`, 'UNSUPPORTED_SOCIAL_PLATFORM');
+      }
+      const response = await fetch(url, { headers, signal: AbortSignal.timeout(15000) });
+      const text = await response.text();
+      try { account = text ? JSON.parse(text) as Record<string, unknown> : {}; } catch { account = { text }; }
+      if (!response.ok) throw new AppError(response.status, `Social connection test failed: ${text || response.statusText}`, 'SOCIAL_CONNECTION_FAILED');
+    }
+  } catch (error) {
+    await query("UPDATE social_connections SET status = 'error', updated_at = NOW() WHERE id = $1 AND organization_id = $2", [id, orgId]);
+    throw error;
   }
 
-  await query("UPDATE social_connections SET status = 'active', last_sync_at = NOW(), updated_at = NOW() WHERE id = $1", [id]);
+  await query("UPDATE social_connections SET status = 'active', last_sync_at = NOW(), updated_at = NOW() WHERE id = $1 AND organization_id = $2", [id, orgId]);
   return { healthy: true, account };
 }
 
@@ -373,7 +399,8 @@ export async function getUpcomingPosts(orgId: string, days = 7): Promise<SocialP
 export function formatForPlatform(platform: string, body: string, maxLength?: number): string {
   const limits: Record<string, number> = {
     x: 280, threads: 500, facebook: 63206, instagram: 2200, linkedin: 3000,
-    pinterest: 500, reddit: 40000, youtube: 5000,
+    pinterest: 500, reddit: 40000, youtube: 5000, tiktok: 2200,
+    bluesky: 300, mastodon: 500, telegram: 4096,
   };
   const limit = maxLength || limits[platform] || 2000;
   if (body.length <= limit) return body;
@@ -382,7 +409,7 @@ export function formatForPlatform(platform: string, body: string, maxLength?: nu
 
 export function getHashtagsForPlatform(_platform: string, topic: string): string[] {
   const base = topic.toLowerCase().replace(/[^a-z0-9]+/g, '');
-  return [`#${base}`, '#marketing', '#equiprofile'].filter((tag) => tag !== '#');
+  return [`#${base}`, '#marketing'].filter((tag) => tag !== '#');
 }
 
 function mapConnectionRow(row: Record<string, unknown>): SocialConnection {
