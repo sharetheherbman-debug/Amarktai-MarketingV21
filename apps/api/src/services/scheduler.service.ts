@@ -6,6 +6,7 @@ import { checkCompetitor } from './competitor.service';
 import { checkMonitor } from './trend.service';
 import { refreshDueSources } from './knowledge.service';
 import { runGrowthDirector } from './growth-director.service';
+import { syncPublishedSocialPerformance } from './social-performance.service';
 
 interface ScheduledTask {
   name: string;
@@ -85,6 +86,13 @@ class SchedulerService {
     this.scheduleTask('publish-due-social-posts', 60 * 1000, async () => {
       const published = await publishDuePostsThroughControlCentre(25);
       if (published > 0) logger.info(`Published ${published} approved scheduled social posts`);
+    });
+
+    this.scheduleTask('sync-organic-social-performance', 30 * 60 * 1000, async () => {
+      const result = await syncPublishedSocialPerformance(50);
+      if (result.attempted > 0) {
+        logger.info(`Organic social performance: ${result.synced} synced, ${result.pending} pending, ${result.unsupported} unsupported, ${result.failed} failed`);
+      }
     });
 
     this.scheduleTask('check-trend-monitors', 15 * 60 * 1000, async () => {
