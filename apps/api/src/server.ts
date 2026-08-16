@@ -58,10 +58,13 @@ import genxAdminRoutes from './routes/genx-admin';
 import longformVideoRoutes from './routes/longform-video';
 import longformProductionRoutes from './routes/longform-production';
 import longformSceneProductionRoutes from './routes/longform-scene-production';
+import growthDirectorRoutes from './routes/growth-director';
+import emailUnsubscribeRoutes from './routes/email-unsubscribe';
 import scheduler from './services/scheduler.service';
 import { verifyStripeWebhook } from './services/stripe-client.service';
 import { processStripeEvent } from './services/stripe-webhook.service';
 import { ensureConfiguredEquiProfileConnector } from './services/application-connector.service';
+import { hardenLegacyEmailProviderConfigs } from './services/integration.service';
 
 const app = express();
 app.set('trust proxy', env.TRUST_PROXY_HOPS);
@@ -117,6 +120,7 @@ const stripeWebhookHandler = async (req: Request, res: Response, next: NextFunct
 
 app.post('/api/v1/stripe/webhook', express.raw({ type: 'application/json', limit: '1mb' }), stripeWebhookHandler);
 app.post('/api/v1/marketplace/stripe/webhook', express.raw({ type: 'application/json', limit: '1mb' }), stripeWebhookHandler);
+app.use('/api/v1/email/unsubscribe', generalLimiter, express.json({ limit: '16kb' }), express.urlencoded({ extended: false, limit: '16kb' }), emailUnsubscribeRoutes);
 
 app.use(cookieParser());
 app.use(csrfProtection);
@@ -174,6 +178,7 @@ app.use('/api/v1/admin/genx', genxAdminRoutes);
 app.use('/api/v1/longform-video', longformSceneProductionRoutes);
 app.use('/api/v1/longform-video', longformVideoRoutes);
 app.use('/api/v1/longform-video', longformProductionRoutes);
+app.use('/api/v1/growth-director', ...tenant, growthDirectorRoutes);
 
 app.use((_req: Request, res: Response) => res.status(404).json({ success: false, error: { message: 'Route not found', code: 'NOT_FOUND' } }));
 app.use(errorHandler);
@@ -183,6 +188,7 @@ async function startServer() {
     if (!await testConnection()) { logger.error('Failed to connect to database'); process.exit(1); }
     if (!await testRedisConnection()) { logger.error('Redis connection failed; queue-backed features cannot start'); process.exit(1); }
     await ensureConfiguredEquiProfileConnector();
+    await hardenLegacyEmailProviderConfigs();
     await providerRouter.loadProviders();
 
     const server = app.listen(env.PORT, () => {

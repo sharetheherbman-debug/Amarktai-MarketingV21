@@ -4,14 +4,16 @@ import { query } from '../config/database';
 import { ApiResponse } from '../types';
 
 export function getRequestedOrganizationId(req: AuthRequest): string {
-  return String(
-    req.body?.organization_id ||
-    req.query.organization_id ||
-    req.params.organizationId ||
-    req.params.orgId ||
-    req.header('x-organization-id') ||
-    ''
-  ).trim();
+  const candidates = [
+    req.body?.organization_id,
+    req.query.organization_id,
+    req.params.organizationId,
+    req.params.orgId,
+    req.header('x-organization-id'),
+  ].map((value) => String(value || '').trim()).filter(Boolean);
+  const unique = [...new Set(candidates)];
+  if (unique.length > 1) return '';
+  return unique[0] || '';
 }
 
 async function hasMembership(organizationId: string, userId: string): Promise<boolean> {

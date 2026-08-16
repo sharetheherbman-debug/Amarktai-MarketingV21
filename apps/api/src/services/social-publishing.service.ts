@@ -3,6 +3,8 @@ import { logger } from '../utils/logger';
 import { NotFoundError, AppError } from '../middleware/errorHandler';
 import { openSecrets, sealSecrets } from './external-platform.service';
 import { deliverSocialPost } from './strict-social-delivery.service';
+import { assertApprovedContentVersion } from './approved-content.service';
+import { validatePublicHttpUrl } from '../utils/safe-fetch';
 
 export interface SocialConnection {
   id: string;
@@ -37,6 +39,35 @@ export interface SocialPost {
   created_at: string;
 }
 
+export const SOCIAL_PLATFORM_CAPABILITIES = {
+  x: { enabled: true, formats: ['text'], notes: 'Text posts only in this release.' },
+  linkedin: { enabled: true, formats: ['text'], notes: 'Text posts only; media registration is not exposed.' },
+  facebook: { enabled: true, formats: ['text','link'], notes: 'Page feed text and link posts.' },
+  instagram: { enabled: true, formats: ['single_image'], notes: 'Instagram Business single-image publishing.' },
+  threads: { enabled: true, formats: ['text'], notes: 'Text posts only.' },
+  pinterest: { enabled: true, formats: ['single_image'], notes: 'One image URL to a configured board.' },
+  reddit: { enabled: true, formats: ['text','link'], notes: 'Self or link post to a configured subreddit.' },
+  youtube: { enabled: true, formats: ['single_video'], notes: 'One video upload; defaults to private unless configured.' },
+  tiktok: { enabled: false, formats: [], notes: 'Hidden until TikTok app audit, video.publish approval, creator consent UX, and status polling are configured.' },
+  bluesky: { enabled: false, formats: [], notes: 'Deferred and hidden.' },
+  mastodon: { enabled: false, formats: [], notes: 'Deferred and hidden.' },
+  telegram: { enabled: false, formats: [], notes: 'Deferred and hidden.' },
+} as const;
+
+function assertSupportedSocialPayload(platform: string, mediaUrls: string[]): void {
+  const capability = SOCIAL_PLATFORM_CAPABILITIES[platform as keyof typeof SOCIAL_PLATFORM_CAPABILITIES];
+  if (!capability?.enabled) throw new AppError(400, `${platform} publishing is disabled for this release`, 'UNSUPPORTED_SOCIAL_PLATFORM');
+  if (['x','linkedin','threads'].includes(platform) && mediaUrls.length > 0) {
+    throw new AppError(400, `${platform} media publishing is not enabled; use an approved text-only asset`, 'SOCIAL_FORMAT_UNSUPPORTED');
+  }
+  if (['instagram','pinterest','youtube'].includes(platform) && mediaUrls.length !== 1) {
+    throw new AppError(400, `${platform} requires exactly one approved media URL`, 'SOCIAL_MEDIA_REQUIRED');
+  }
+  if (['facebook','reddit'].includes(platform) && mediaUrls.length > 1) {
+    throw new AppError(400, `${platform} supports at most one approved link in this release`, 'SOCIAL_FORMAT_UNSUPPORTED');
+  }
+}
+
 function publicConfig(config: Record<string, unknown>): Record<string, unknown> {
   const { credentials: _credentials, ...visible } = config;
   return visible;
@@ -63,6 +94,8 @@ export async function addConnection(
   config: Record<string, unknown> = {},
   credentials: Record<string, unknown> = {}
 ): Promise<SocialConnection> {
+  const capability = SOCIAL_PLATFORM_CAPABILITIES[platform as keyof typeof SOCIAL_PLATFORM_CAPABILITIES];
+  if (!capability?.enabled) throw new AppError(400, `${platform} is disabled or deferred for this release`, 'UNSUPPORTED_SOCIAL_PLATFORM');
   if (!credentials.access_token) {
     throw new AppError(400, 'A platform access token is required', 'SOCIAL_CREDENTIALS_REQUIRED');
   }
@@ -150,7 +183,7 @@ export async function testConnection(id: string, orgId: string): Promise<{ healt
     case 'x': url = 'https://api.x.com/2/users/me'; break;
     case 'linkedin': url = 'https://api.linkedin.com/v2/userinfo'; break;
     case 'facebook':
-    case 'instagram': url = `https://graph.facebook.com/${String(config.api_version || 'v20.0')}/me?fields=id,name&access_token=${encodeURIComponent(token)}`; break;
+    case 'instagram': url = `https://graph.facebook.com/${String(config.api_version || 'v25.0')}/me?fields=id,name&access_token=${encodeURIComponent(token)}`; break;
     case 'threads': url = `https://graph.threads.net/${String(config.api_version || 'v1.0')}/me?fields=id,username&access_token=${encodeURIComponent(token)}`; break;
     case 'pinterest': url = 'https://api.pinterest.com/v5/user_account'; break;
     case 'reddit': url = 'https://oauth.reddit.com/api/v1/me'; break;
@@ -175,7 +208,7 @@ export async function schedulePost(
   orgId: string,
   connectionId: string,
   body: string,
-  options?: { content_id?: string; campaign_id?: string; media_urls?: string[]; hashtags?: string[]; scheduled_at?: string }
+  options?: { content_id?: string; campaign_id?: string; media_urls?: string[]; hashtags?: string[]; scheduled_at?: string; approved_content_version?: number; approved_content_hash?: string }
 ): Promise<SocialPost> {
   const connection = await query(
     'SELECT * FROM social_connections WHERE id = $1 AND organization_id = $2 AND status = $3',
@@ -183,9 +216,24 @@ export async function schedulePost(
   );
   if (connection.rows.length === 0) throw new AppError(400, 'An active organization-owned social connection is required', 'SOCIAL_CONNECTION_INVALID');
 
+  const binding = await assertApprovedContentVersion({
+    organizationId: orgId,
+    contentId: String(options?.content_id || ''),
+    channel: 'social',
+    platform: String(connection.rows[0].platform),
+    body,
+    mediaUrls: options?.media_urls,
+    hashtags: options?.hashtags,
+  });
+  assertSupportedSocialPayload(String(connection.rows[0].platform), options?.media_urls || []);
+  if ((options?.approved_content_version && options.approved_content_version !== binding.version)
+    || (options?.approved_content_hash && options.approved_content_hash !== binding.hash)) {
+    throw new AppError(409, 'Approved social content binding changed before persistence', 'CONTENT_APPROVAL_STALE');
+  }
+
   const result = await query(
-    `INSERT INTO social_posts (organization_id, connection_id, content_id, campaign_id, platform, body, media_urls, hashtags, status, scheduled_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *`,
+    `INSERT INTO social_posts (organization_id, connection_id, content_id, campaign_id, platform, body, media_urls, hashtags, status, scheduled_at,approved_content_version,approved_content_hash)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10,$11,$12) RETURNING *`,
     [
       orgId,
       connectionId,
@@ -197,6 +245,8 @@ export async function schedulePost(
       JSON.stringify(options?.hashtags || []),
       options?.scheduled_at ? 'scheduled' : 'draft',
       options?.scheduled_at || null,
+      binding.version,
+      binding.hash,
     ]
   );
   logger.info(`Social post created for connection ${connectionId}`);
@@ -217,6 +267,24 @@ export async function publishPost(postId: string, orgId: string): Promise<Social
   if (row.connection_status !== 'active') throw new AppError(400, 'Social connection is not active', 'SOCIAL_CONNECTION_INACTIVE');
   if (row.status === 'published') return mapPostRow(row);
 
+  const mediaUrls = typeof row.media_urls === 'string' ? JSON.parse(row.media_urls) : (row.media_urls as string[]) || [];
+  const hashtags = typeof row.hashtags === 'string' ? JSON.parse(row.hashtags) : (row.hashtags as string[]) || [];
+  const binding = await assertApprovedContentVersion({
+    organizationId: orgId,
+    contentId: String(row.content_id || ''),
+    channel: 'social',
+    platform: String(row.platform),
+    body: String(row.body || ''),
+    mediaUrls,
+    hashtags,
+  });
+  assertSupportedSocialPayload(String(row.platform), mediaUrls);
+  if (Number(row.approved_content_version || 0) !== binding.version
+    || String(row.approved_content_hash || '') !== binding.hash) {
+    throw new AppError(409, 'The post approval binding is stale', 'CONTENT_APPROVAL_STALE');
+  }
+  for (const mediaUrl of mediaUrls) await validatePublicHttpUrl(String(mediaUrl));
+
   await query("UPDATE social_posts SET status = 'publishing', error = NULL WHERE id = $1", [postId]);
 
   try {
@@ -227,8 +295,8 @@ export async function publishPost(postId: string, orgId: string): Promise<Social
     const { credentials: _credentials, ...platformConfig } = connectionConfig;
     const result = await deliverSocialPost(String(row.platform), credentials, platformConfig, {
       body: String(row.body || ''),
-      mediaUrls: typeof row.media_urls === 'string' ? JSON.parse(row.media_urls) : (row.media_urls as string[]) || [],
-      hashtags: typeof row.hashtags === 'string' ? JSON.parse(row.hashtags) : (row.hashtags as string[]) || [],
+      mediaUrls,
+      hashtags,
     });
 
     const updated = await query(
@@ -314,7 +382,7 @@ export function formatForPlatform(platform: string, body: string, maxLength?: nu
 
 export function getHashtagsForPlatform(_platform: string, topic: string): string[] {
   const base = topic.toLowerCase().replace(/[^a-z0-9]+/g, '');
-  return [`#${base}`, '#marketing', '#amarktai'].filter((tag) => tag !== '#');
+  return [`#${base}`, '#marketing', '#equiprofile'].filter((tag) => tag !== '#');
 }
 
 function mapConnectionRow(row: Record<string, unknown>): SocialConnection {

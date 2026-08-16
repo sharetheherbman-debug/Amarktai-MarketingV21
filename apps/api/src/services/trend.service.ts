@@ -201,7 +201,7 @@ export async function getUnreadCount(orgId: string): Promise<number> {
 
 async function fetchSource(sourceUrl: string): Promise<CandidateItem[]> {
   const response = await safeFetch(sourceUrl, {
-    headers: { 'User-Agent': 'AmarktAI-Trend-Monitor/1.0', Accept: 'application/rss+xml,application/atom+xml,application/json,text/xml,*/*' },
+    headers: { 'User-Agent': 'EquiProfile-Marketing-Trend-Monitor/1.0', Accept: 'application/rss+xml,application/atom+xml,application/json,text/xml,*/*' },
     timeoutMs: 25000,
     maxResponseBytes: 5 * 1024 * 1024,
   });

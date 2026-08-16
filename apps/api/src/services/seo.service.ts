@@ -160,7 +160,7 @@ export async function listKeywords(orgId: string): Promise<SeoKeyword[]> {
 
 export async function auditUrl(orgId: string, url: string, userId: string): Promise<SeoAudit> {
   const response = await safeFetch(url, {
-    headers: { 'User-Agent': 'AmarktAI-SEO-Audit/1.0', Accept: 'text/html,application/xhtml+xml' },
+    headers: { 'User-Agent': 'EquiProfile-Marketing-SEO-Audit/1.0', Accept: 'text/html,application/xhtml+xml' },
     timeoutMs: 20000,
     maxResponseBytes: 5 * 1024 * 1024,
   });

@@ -67,6 +67,10 @@ router.post('/workflows/seed-templates', async (req: AuthRequest, res: Response<
 
 // ─── Social Publishing ───────────────────────────────────────────────────────
 
+router.get('/social/capabilities', (_req: AuthRequest, res: Response<ApiResponse>): void => {
+  res.json({ success: true, data: socialService.SOCIAL_PLATFORM_CAPABILITIES });
+});
+
 router.get('/social/connections', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
   try {
     const orgId = req.query.organization_id as string;

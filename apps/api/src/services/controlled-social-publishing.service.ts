@@ -13,6 +13,7 @@ import {
   markExecutionRunning,
   requireExecutionApproval,
 } from './relaunch-execution-gate.service';
+import { assertApprovedContentVersion } from './approved-content.service';
 
 export async function schedulePostThroughControlCentre(input: {
   organizationId: string;
@@ -20,13 +21,29 @@ export async function schedulePostThroughControlCentre(input: {
   body: string;
   userId?: string | null;
   requestedBy?: 'system' | 'user' | 'application';
-  contentId?: string;
+  contentId: string;
   campaignId?: string;
   mediaUrls?: string[];
   hashtags?: string[];
   scheduledAt: string;
   idempotencyKey?: string;
 }): Promise<SocialPost> {
+  const connection = await query(
+    'SELECT platform FROM social_connections WHERE id=$1 AND organization_id=$2 AND status=\'active\'',
+    [input.connectionId, input.organizationId]
+  );
+  if (connection.rows.length === 0) {
+    throw new AppError(400, 'An active organization-owned social connection is required', 'SOCIAL_CONNECTION_INVALID');
+  }
+  const binding = await assertApprovedContentVersion({
+    organizationId: input.organizationId,
+    contentId: input.contentId,
+    channel: 'social',
+    platform: String(connection.rows[0].platform),
+    body: input.body,
+    mediaUrls: input.mediaUrls,
+    hashtags: input.hashtags,
+  });
   const fingerprint = crypto.createHash('sha256').update(JSON.stringify({
     connectionId: input.connectionId, body: input.body, scheduledAt: input.scheduledAt,
     campaignId: input.campaignId || null, mediaUrls: input.mediaUrls || [], hashtags: input.hashtags || [],
@@ -38,7 +55,8 @@ export async function schedulePostThroughControlCentre(input: {
     requested_by: input.requestedBy || 'user', requested_by_user_id: input.userId || null,
     payload: {
       connection_id: input.connectionId, campaign_id: input.campaignId || null,
-      content_id: input.contentId || null, scheduled_at: input.scheduledAt,
+      content_id: binding.contentId, content_version: binding.version,
+      approved_content_hash: binding.hash, scheduled_at: input.scheduledAt,
       body_hash: crypto.createHash('sha256').update(input.body).digest('hex'),
     },
   });
@@ -50,6 +68,8 @@ export async function schedulePostThroughControlCentre(input: {
       media_urls: input.mediaUrls,
       hashtags: input.hashtags,
       scheduled_at: input.scheduledAt,
+      approved_content_version: binding.version,
+      approved_content_hash: binding.hash,
     });
     await markExecutionCompleted(decision.id);
     return post;
@@ -71,7 +91,8 @@ async function executeControlledSocialPost(
   requestedByUserId?: string | null
 ): Promise<SocialPost> {
   const postResult = await query(
-    `SELECT id,organization_id,platform,body,campaign_id,scheduled_at,status
+    `SELECT id,organization_id,platform,body,content_id,campaign_id,media_urls,hashtags,
+            approved_content_version,approved_content_hash,scheduled_at,status
      FROM social_posts WHERE id=$1 AND organization_id=$2`,
     [postId, organizationId]
   );
@@ -79,6 +100,20 @@ async function executeControlledSocialPost(
   const post = postResult.rows[0];
   if (String(post.status) === 'published') {
     return deliverApprovedSocialPost(postId, organizationId);
+  }
+
+  const binding = await assertApprovedContentVersion({
+    organizationId,
+    contentId: String(post.content_id || ''),
+    channel: 'social',
+    platform: String(post.platform),
+    body: String(post.body || ''),
+    mediaUrls: typeof post.media_urls === 'string' ? JSON.parse(post.media_urls) : post.media_urls || [],
+    hashtags: typeof post.hashtags === 'string' ? JSON.parse(post.hashtags) : post.hashtags || [],
+  });
+  if (Number(post.approved_content_version || 0) !== binding.version
+    || String(post.approved_content_hash || '') !== binding.hash) {
+    throw new AppError(409, 'The scheduled post is not bound to the current owner-approved content version', 'CONTENT_APPROVAL_STALE');
   }
 
   let decisionId: string | null = null;
@@ -96,6 +131,9 @@ async function executeControlledSocialPost(
         social_post_id: postId,
         platform: String(post.platform),
         campaign_id: post.campaign_id || null,
+        content_id: binding.contentId,
+        content_version: binding.version,
+        approved_content_hash: binding.hash,
         scheduled_at: post.scheduled_at || null,
       },
     });

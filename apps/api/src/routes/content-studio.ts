@@ -4,6 +4,7 @@ import { ApiResponse } from '../types';
 import * as contentEngine from '../services/content-engine.service';
 import * as contentQuality from '../services/content-quality.service';
 import * as contentWorkflow from '../services/content-workflow.service';
+import { requireOrganizationRole } from '../middleware/organization-access';
 
 const router = Router();
 router.use(requireAuth);
@@ -28,6 +29,17 @@ router.get('/workflow/approval-queue', async (req: AuthRequest, res: Response<Ap
     if (!orgId) { res.status(400).json({ success: false, error: { message: 'organization_id is required', code: 'BAD_REQUEST' } }); return; }
     const queue = await contentWorkflow.getApprovalQueue(orgId);
     res.json({ success: true, data: queue });
+  } catch (error) { next(error); }
+});
+
+router.get('/reuse/candidates', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
+  try {
+    res.json({ success: true, data: await contentEngine.findReusableContent(req.organizationId!, {
+      query: req.query.q ? String(req.query.q) : undefined,
+      type: req.query.type ? String(req.query.type) : undefined,
+      platform: req.query.platform ? String(req.query.platform) : undefined,
+      limit: Number(req.query.limit || 10),
+    }) });
   } catch (error) { next(error); }
 });
 
@@ -105,6 +117,14 @@ router.post('/:id/duplicate', async (req: AuthRequest, res: Response<ApiResponse
   } catch (error) { next(error); }
 });
 
+router.post('/:id/adapt', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
+  try {
+    res.status(201).json({ success: true, data: await contentEngine.adaptContent(
+      req.params.id, req.organizationId!, req.user!.userId, req.body
+    ) });
+  } catch (error) { next(error); }
+});
+
 router.post('/:id/revise', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
   try {
     const orgId = String(req.body.organization_id || '');
@@ -147,7 +167,7 @@ router.post('/:id/submit', async (req: AuthRequest, res: Response<ApiResponse>, 
   } catch (error) { next(error); }
 });
 
-router.post('/:id/approve', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
+router.post('/:id/approve', requireOrganizationRole('owner'), async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
   try {
     const orgId = req.body.organization_id;
     if (!orgId) { res.status(400).json({ success: false, error: { message: 'organization_id is required', code: 'BAD_REQUEST' } }); return; }
@@ -156,11 +176,20 @@ router.post('/:id/approve', async (req: AuthRequest, res: Response<ApiResponse>,
   } catch (error) { next(error); }
 });
 
-router.post('/:id/reject', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
+router.post('/:id/reject', requireOrganizationRole('owner'), async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
   try {
     const orgId = req.body.organization_id;
     if (!orgId || !req.body.comments) { res.status(400).json({ success: false, error: { message: 'organization_id and comments are required', code: 'BAD_REQUEST' } }); return; }
     const approval = await contentWorkflow.reject(req.params.id, orgId, req.user!.userId, req.body.comments);
+    res.json({ success: true, data: approval });
+  } catch (error) { next(error); }
+});
+
+router.post('/:id/request-changes', requireOrganizationRole('owner'), async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
+  try {
+    const orgId = req.body.organization_id;
+    if (!orgId || !req.body.comments) { res.status(400).json({ success: false, error: { message: 'organization_id and comments are required', code: 'BAD_REQUEST' } }); return; }
+    const approval = await contentWorkflow.requestChanges(req.params.id, orgId, req.user!.userId, req.body.comments);
     res.json({ success: true, data: approval });
   } catch (error) { next(error); }
 });

@@ -1,5 +1,6 @@
 import { AppError } from '../middleware/errorHandler';
 import { decrypt, encrypt, EncryptedData } from '../utils/encryption';
+import { safeFetch, type SafeFetchResponse } from '../utils/safe-fetch';
 
 export interface SecretEnvelope {
   encrypted: EncryptedData;
@@ -68,7 +69,7 @@ function numberValue(value: unknown): number {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-async function readResponse(response: Response): Promise<Record<string, unknown>> {
+async function readResponse(response: Pick<SafeFetchResponse, 'text'>): Promise<Record<string, unknown>> {
   const text = await response.text();
   if (!text) return {};
   try {
@@ -83,15 +84,16 @@ async function requestJson(
   init: RequestInit = {},
   timeoutMs = 30000
 ): Promise<Record<string, unknown>> {
-  const response = await fetch(url, {
+  const response = await safeFetch(url, {
     ...init,
-    signal: AbortSignal.timeout(timeoutMs),
+    timeoutMs,
+    maxResponseBytes: 5 * 1024 * 1024,
   });
   const data = await readResponse(response);
   if (!response.ok) {
     const detail = typeof data.error === 'object'
       ? JSON.stringify(data.error)
-      : String(data.error || data.message || data.text || response.statusText);
+      : String(data.error || data.message || data.text || `HTTP ${response.status}`);
     throw new AppError(response.status, `External API request failed: ${detail}`, 'EXTERNAL_API_ERROR');
   }
   return data;
@@ -118,14 +120,14 @@ export async function testExternalConnection(
   switch (providerSlug) {
     case 'meta-ads': {
       const token = stringValue(credentials.access_token, 'access_token');
-      const version = stringValue(config.api_version || 'v20.0', 'api_version');
+      const version = stringValue(config.api_version || 'v25.0', 'api_version');
       return requestJson(`https://graph.facebook.com/${version}/me?fields=id,name&access_token=${encodeURIComponent(token)}`);
     }
     case 'google-ads': {
       const token = stringValue(credentials.access_token, 'access_token');
       const developerToken = stringValue(credentials.developer_token, 'developer_token');
       const customerId = stringValue(config.customer_id, 'customer_id').replace(/-/g, '');
-      const version = stringValue(config.api_version || 'v18', 'api_version');
+      const version = stringValue(config.api_version || 'v25', 'api_version');
       const headers: Record<string, string> = bearer(token, { 'developer-token': developerToken });
       const loginCustomerId = stringValue(credentials.login_customer_id, 'login_customer_id', false).replace(/-/g, '');
       if (loginCustomerId) headers['login-customer-id'] = loginCustomerId;
@@ -247,7 +249,7 @@ export async function syncAdvertising(
   if (providerSlug === 'meta-ads') {
     const token = stringValue(credentials.access_token, 'access_token');
     const accountId = stringValue(config.ad_account_id, 'ad_account_id').replace(/^act_/, '');
-    const version = stringValue(config.api_version || 'v20.0', 'api_version');
+    const version = stringValue(config.api_version || 'v25.0', 'api_version');
     const fields = 'id,name,status,objective,daily_budget,lifetime_budget,account_id';
     const campaignsRaw = await requestJson(`https://graph.facebook.com/${version}/act_${accountId}/campaigns?fields=${encodeURIComponent(fields)}&limit=500&access_token=${encodeURIComponent(token)}`);
     const insightsRaw = await requestJson(`https://graph.facebook.com/${version}/act_${accountId}/insights?level=campaign&fields=campaign_id,campaign_name,impressions,clicks,spend,reach,actions&time_range=${encodeURIComponent(JSON.stringify({ since: startDate, until: endDate }))}&limit=500&access_token=${encodeURIComponent(token)}`);
@@ -288,7 +290,7 @@ export async function syncAdvertising(
     const token = stringValue(credentials.access_token, 'access_token');
     const developerToken = stringValue(credentials.developer_token, 'developer_token');
     const customerId = stringValue(config.customer_id, 'customer_id').replace(/-/g, '');
-    const version = stringValue(config.api_version || 'v18', 'api_version');
+    const version = stringValue(config.api_version || 'v25', 'api_version');
     const headers: Record<string, string> = bearer(token, { 'developer-token': developerToken });
     const loginCustomerId = stringValue(credentials.login_customer_id, 'login_customer_id', false).replace(/-/g, '');
     if (loginCustomerId) headers['login-customer-id'] = loginCustomerId;
@@ -350,7 +352,7 @@ export async function publishSocialPost(
     const raw = await requestJson('https://api.linkedin.com/rest/posts', {
       method: 'POST',
       headers: bearer(token, {
-        'LinkedIn-Version': stringValue(config.linkedin_version || '202501', 'linkedin_version'),
+        'LinkedIn-Version': stringValue(config.linkedin_version || '202607', 'linkedin_version'),
         'X-Restli-Protocol-Version': '2.0.0',
       }),
       body: JSON.stringify({ author, commentary: message, visibility: 'PUBLIC', distribution: { feedDistribution: 'MAIN_FEED', targetEntities: [], thirdPartyDistributionChannels: [] }, lifecycleState: 'PUBLISHED', isReshareDisabledByAuthor: false }),
@@ -361,18 +363,18 @@ export async function publishSocialPost(
 
   if (platform === 'facebook') {
     const pageId = stringValue(config.page_id || config.account_id, 'page_id');
-    const version = stringValue(config.api_version || 'v20.0', 'api_version');
+    const version = stringValue(config.api_version || 'v25.0', 'api_version');
     const body = new URLSearchParams({ message, access_token: token });
     if (input.mediaUrls[0]) body.set('link', input.mediaUrls[0]);
     const raw = await requestJson(`https://graph.facebook.com/${version}/${pageId}/feed`, { method: 'POST', body });
     const id = stringValue(raw.id, 'Facebook post id');
-    return { externalId: id, externalUrl: `https://www.facebook.com/${id.replace('_', '/posts/')}`, raw };
+    return { externalId: id, raw };
   }
 
   if (platform === 'instagram') {
     const accountId = stringValue(config.account_id, 'account_id');
     const mediaUrl = stringValue(input.mediaUrls[0], 'media_urls[0]');
-    const version = stringValue(config.api_version || 'v20.0', 'api_version');
+    const version = stringValue(config.api_version || 'v25.0', 'api_version');
     const createParams = new URLSearchParams({ image_url: mediaUrl, caption: message, access_token: token });
     const created = await requestJson(`https://graph.facebook.com/${version}/${accountId}/media`, { method: 'POST', body: createParams });
     const creationId = stringValue(created.id, 'Instagram creation id');
@@ -380,7 +382,7 @@ export async function publishSocialPost(
       method: 'POST', body: new URLSearchParams({ creation_id: creationId, access_token: token }),
     });
     const id = stringValue(published.id, 'Instagram media id');
-    return { externalId: id, externalUrl: `https://www.instagram.com/p/${id}/`, raw: { created, published } };
+    return { externalId: id, raw: { created, published } };
   }
 
   if (platform === 'threads') {
@@ -415,7 +417,7 @@ export async function publishSocialPost(
     const title = stringValue(config.title || input.body.split('\n')[0].slice(0, 300), 'title');
     const raw = await requestJson('https://oauth.reddit.com/api/submit', {
       method: 'POST',
-      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': stringValue(config.user_agent || 'AmarktAI/1.0', 'user_agent') },
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': stringValue(config.user_agent || 'EquiProfileMarketing/1.0', 'user_agent') },
       body: new URLSearchParams({ api_type: 'json', kind: input.mediaUrls[0] ? 'link' : 'self', sr: subreddit, title, text: input.mediaUrls[0] ? '' : message, url: input.mediaUrls[0] || '' }),
     });
     const json = raw.json as Record<string, unknown> || {};
@@ -426,17 +428,20 @@ export async function publishSocialPost(
 
   if (platform === 'youtube') {
     const mediaUrl = stringValue(input.mediaUrls[0], 'media_urls[0]');
-    const mediaResponse = await fetch(mediaUrl, { signal: AbortSignal.timeout(120000) });
+    const mediaResponse = await safeFetch(mediaUrl, { timeoutMs: 120000, maxResponseBytes: 25 * 1024 * 1024 });
     if (!mediaResponse.ok) throw new AppError(mediaResponse.status, 'Unable to download YouTube media URL', 'MEDIA_DOWNLOAD_ERROR');
-    const mediaBlob = await mediaResponse.blob();
+    const mediaBlob = new Blob([await mediaResponse.bytes()]);
     const metadata = {
       snippet: {
-        title: String(config.title || input.body.split('\n')[0] || 'AmarktAI upload').slice(0, 100),
+        title: String(config.title || input.body.split('\n')[0] || 'EquiProfile Marketing upload').slice(0, 100),
         description: message,
         tags: input.hashtags.map((tag) => tag.replace(/^#/, '')).filter(Boolean),
         categoryId: String(config.category_id || '22'),
       },
-      status: { privacyStatus: String(config.privacy_status || 'private') },
+      status: {
+        privacyStatus: String(config.privacy_status || 'private'),
+        containsSyntheticMedia: config.contains_synthetic_media !== false,
+      },
     };
     const form = new FormData();
     form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));

@@ -1,6 +1,7 @@
 import { query } from '../config/database';
 import { logger } from '../utils/logger';
 import { NotFoundError, AppError } from '../middleware/errorHandler';
+import { sealSecrets } from './external-platform.service';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -337,11 +338,30 @@ export async function listEmailProviders(orgId: string): Promise<EmailProvider[]
   return result.rows.map(mapEmailProviderRow);
 }
 
+export async function hardenLegacyEmailProviderConfigs(): Promise<number> {
+  const providers = await query('SELECT id,config FROM email_providers');
+  let hardened = 0;
+  for (const row of providers.rows) {
+    const config = typeof row.config === 'string' ? JSON.parse(row.config) : (row.config as Record<string, unknown>) || {};
+    if (config.encrypted) continue;
+    await query('UPDATE email_providers SET config=$1,updated_at=NOW() WHERE id=$2', [JSON.stringify(sealSecrets(config)), row.id]);
+    hardened += 1;
+  }
+  return hardened;
+}
+
 export async function createEmailProvider(orgId: string, data: Partial<EmailProvider>): Promise<EmailProvider> {
+  const providerType = String(data.provider_type || '').toLowerCase();
+  if (!['resend', 'sendgrid', 'webhook'].includes(providerType)) {
+    throw new AppError(400, 'Email provider must be resend, sendgrid, or webhook', 'EMAIL_PROVIDER_UNSUPPORTED');
+  }
+  if (!data.config || Object.keys(data.config).length === 0) {
+    throw new AppError(400, 'Email provider credentials/configuration are required', 'EMAIL_PROVIDER_CONFIG_REQUIRED');
+  }
   const result = await query(
     `INSERT INTO email_providers (organization_id, name, provider_type, config, from_email, from_name, daily_limit, is_default)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
-    [orgId, data.name, data.provider_type, JSON.stringify(data.config || {}), data.from_email || null, data.from_name || null, data.daily_limit || 500, data.is_default || false]
+    [orgId, data.name, providerType, JSON.stringify(sealSecrets(data.config)), data.from_email || null, data.from_name || null, data.daily_limit || 500, data.is_default || false]
   );
   return mapEmailProviderRow(result.rows[0]);
 }
@@ -394,7 +414,7 @@ function mapConnectionRow(row: Record<string, unknown>): IntegrationConnection {
     provider_name: row.provider_name as string | undefined,
     name: row.name as string,
     auth_data: typeof row.auth_data === 'string' ? JSON.parse(row.auth_data) : (row.auth_data as Record<string, unknown>) || {},
-    config: typeof row.config === 'string' ? JSON.parse(row.config) : (row.config as Record<string, unknown>) || {},
+    config: { configured: Boolean(row.config) },
     permissions: typeof row.permissions === 'string' ? JSON.parse(row.permissions) : (row.permissions as string[]) || [],
     health_status: row.health_status as string, last_health_check: row.last_health_check as string | null,
     last_sync_at: row.last_sync_at as string | null, error_message: row.error_message as string | null,

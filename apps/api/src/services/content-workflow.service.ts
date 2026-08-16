@@ -8,6 +8,29 @@ import {
   markExecutionRunning,
   requireExecutionApproval,
 } from './relaunch-execution-gate.service';
+import { approvedContentHash, assertApprovedContentVersion } from './approved-content.service';
+import type { PoolClient } from 'pg';
+
+async function recordOwnerFeedback(
+  client: PoolClient,
+  orgId: string,
+  content: Record<string, unknown>,
+  decision: 'approved' | 'rejected' | 'changes_requested',
+  comments?: string
+): Promise<void> {
+  const key = `${String(content.type || 'content')}:${String(content.platform || 'any')}`.slice(0, 255);
+  const delta = decision === 'approved' ? 0.2 : decision === 'rejected' ? -0.2 : -0.1;
+  await client.query(
+    `INSERT INTO owner_marketing_preferences
+       (organization_id,preference_type,preference_key,weight,evidence_count,examples)
+     VALUES ($1,'content_decision',$2,$3,1,$4)
+     ON CONFLICT (organization_id,preference_type,preference_key)
+     DO UPDATE SET weight=GREATEST(0.1,LEAST(10,owner_marketing_preferences.weight+$5)),
+                   evidence_count=owner_marketing_preferences.evidence_count+1,
+                   examples=EXCLUDED.examples,updated_at=NOW()`,
+    [orgId, key, 1 + delta, JSON.stringify([{ content_id: content.id, decision, comments: comments || null }]), delta]
+  );
+}
 
 export async function submitForReview(contentId: string, orgId: string, assignedTo: string, userId: string): Promise<ContentApproval> {
   const content = await query(
@@ -27,35 +50,56 @@ export async function submitForReview(contentId: string, orgId: string, assigned
   if (Number(qualityState.rows[0]?.total || 0) === 0 || Number(qualityState.rows[0]?.failing || 0) > 0) {
     throw new AppError(409, 'Resolve the latest content quality checks before review', 'CONTENT_QUALITY_REQUIRED');
   }
+  const owner = await query(
+    "SELECT user_id FROM organization_members WHERE organization_id=$1 AND role='owner' ORDER BY created_at ASC LIMIT 1",
+    [orgId]
+  );
+  if (owner.rows.length === 0) throw new AppError(409, 'Workspace owner is required for content approval', 'CONTENT_OWNER_REQUIRED');
+  const ownerId = String(owner.rows[0].user_id);
   const approval = await transaction(async (client) => {
     await client.query(
       "UPDATE content_items SET status='review',workflow_state='review',assigned_to=$1,updated_at=NOW() WHERE id=$2 AND organization_id=$3",
-      [assignedTo, contentId, orgId]
+      [ownerId, contentId, orgId]
     );
     const result = await client.query(
       `INSERT INTO content_approvals (content_id,organization_id,status,assigned_to,content_version)
        VALUES ($1,$2,'pending',$3,$4) RETURNING *`,
-      [contentId, orgId, assignedTo, Number(content.rows[0].version || 1)]
+      [contentId, orgId, ownerId, Number(content.rows[0].version || 1)]
     );
     return result.rows[0];
   });
 
-  logger.info(`Content ${contentId} submitted for review to ${assignedTo}`);
+  logger.info(`Content ${contentId} submitted for owner review (${ownerId}); requester assignment ${assignedTo || userId} was not used as an approval bypass`);
   return mapRow(approval);
 }
 
 export async function approve(contentId: string, orgId: string, reviewerId: string, comments?: string): Promise<ContentApproval> {
   const approval = await transaction(async (client) => {
+    const contentResult = await client.query(
+      `SELECT content.* FROM content_items content
+       JOIN organization_members member
+         ON member.organization_id=content.organization_id
+        AND member.user_id=$1 AND member.role='owner'
+       WHERE content.id=$2 AND content.organization_id=$3
+         AND content.deleted_at IS NULL
+       FOR UPDATE`,
+      [reviewerId, contentId, orgId]
+    );
+    if (contentResult.rows.length === 0) {
+      throw new AppError(403, 'Only the workspace owner may approve customer-facing content', 'OWNER_APPROVAL_REQUIRED');
+    }
+    const contentHash = approvedContentHash(contentResult.rows[0]);
     const result = await client.query(
       `UPDATE content_approvals approval SET
-         status='approved',reviewed_by=$1,reviewed_at=NOW(),comments=$2
+         status='approved',reviewed_by=$1,reviewed_at=NOW(),comments=$2,
+         approved_content_hash=$5
        FROM content_items content
        WHERE approval.content_id=$3 AND approval.organization_id=$4
          AND approval.status='pending' AND approval.assigned_to=$1
          AND content.id=approval.content_id AND content.organization_id=approval.organization_id
          AND content.version=approval.content_version
        RETURNING approval.*`,
-      [reviewerId, comments || null, contentId, orgId]
+      [reviewerId, comments || null, contentId, orgId, contentHash]
     );
     if (result.rows.length === 0) {
       throw new AppError(409, 'The approval is missing, assigned elsewhere, or belongs to an older content version', 'CONTENT_APPROVAL_STALE');
@@ -64,6 +108,7 @@ export async function approve(contentId: string, orgId: string, reviewerId: stri
       "UPDATE content_items SET status='approved',workflow_state='approved',approved_by=$1,updated_at=NOW() WHERE id=$2 AND organization_id=$3",
       [reviewerId, contentId, orgId]
     );
+    await recordOwnerFeedback(client, orgId, contentResult.rows[0], 'approved', comments);
     return result.rows[0];
   });
 
@@ -73,6 +118,17 @@ export async function approve(contentId: string, orgId: string, reviewerId: stri
 
 export async function reject(contentId: string, orgId: string, reviewerId: string, comments: string): Promise<ContentApproval> {
   const approval = await transaction(async (client) => {
+    const contentResult = await client.query(
+      `SELECT content.* FROM content_items content
+       JOIN organization_members member
+         ON member.organization_id=content.organization_id
+        AND member.user_id=$1 AND member.role='owner'
+       WHERE content.id=$2 AND content.organization_id=$3
+         AND content.deleted_at IS NULL
+       FOR UPDATE`,
+      [reviewerId, contentId, orgId]
+    );
+    if (contentResult.rows.length === 0) throw new AppError(403, 'Only the workspace owner may reject customer-facing content', 'OWNER_APPROVAL_REQUIRED');
     const result = await client.query(
       `UPDATE content_approvals approval SET
          status='rejected',reviewed_by=$1,reviewed_at=NOW(),comments=$2
@@ -91,6 +147,7 @@ export async function reject(contentId: string, orgId: string, reviewerId: strin
       "UPDATE content_items SET status='rejected',workflow_state='rejected',updated_at=NOW() WHERE id=$1 AND organization_id=$2",
       [contentId, orgId]
     );
+    await recordOwnerFeedback(client, orgId, contentResult.rows[0], 'rejected', comments);
     return result.rows[0];
   });
 
@@ -100,6 +157,17 @@ export async function reject(contentId: string, orgId: string, reviewerId: strin
 
 export async function requestChanges(contentId: string, orgId: string, reviewerId: string, comments: string): Promise<ContentApproval> {
   const approval = await transaction(async (client) => {
+    const contentResult = await client.query(
+      `SELECT content.* FROM content_items content
+       JOIN organization_members member
+         ON member.organization_id=content.organization_id
+        AND member.user_id=$1 AND member.role='owner'
+       WHERE content.id=$2 AND content.organization_id=$3
+         AND content.deleted_at IS NULL
+       FOR UPDATE`,
+      [reviewerId, contentId, orgId]
+    );
+    if (contentResult.rows.length === 0) throw new AppError(403, 'Only the workspace owner may request changes to customer-facing content', 'OWNER_APPROVAL_REQUIRED');
     const result = await client.query(
       `UPDATE content_approvals approval SET
          status='changes_requested',reviewed_by=$1,reviewed_at=NOW(),comments=$2
@@ -118,6 +186,7 @@ export async function requestChanges(contentId: string, orgId: string, reviewerI
       "UPDATE content_items SET status='draft',workflow_state='changes_requested',updated_at=NOW() WHERE id=$1 AND organization_id=$2",
       [contentId, orgId]
     );
+    await recordOwnerFeedback(client, orgId, contentResult.rows[0], 'changes_requested', comments);
     return result.rows[0];
   });
 
@@ -135,12 +204,22 @@ export async function publish(contentId: string, orgId: string, userId: string):
   if (String(content.rows[0].status) !== 'approved') {
     throw new AppError(409, 'Content must be approved before publication', 'CONTENT_APPROVAL_REQUIRED');
   }
+  const binding = await assertApprovedContentVersion({
+    organizationId: orgId,
+    contentId,
+    channel: String(content.rows[0].platform || '').toLowerCase() === 'seo' ? 'seo' : 'content',
+  });
   const decision = await requireExecutionApproval(orgId, {
     action_type: 'content_publish', channel: 'content', title: `Publish ${String(content.rows[0].title)}`,
     summary: `${String(content.rows[0].type)} for ${String(content.rows[0].platform || 'web')}`,
     idempotency_key: `content-publish:${contentId}:v${Number(content.rows[0].version)}`,
     requested_by: 'user', requested_by_user_id: userId,
-    payload: { content_id: contentId, version: Number(content.rows[0].version), campaign_id: content.rows[0].campaign_id || null },
+    payload: {
+      content_id: contentId,
+      version: binding.version,
+      approved_content_hash: binding.hash,
+      campaign_id: content.rows[0].campaign_id || null,
+    },
   });
   try {
     await markExecutionRunning(decision.id);

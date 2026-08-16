@@ -45,10 +45,10 @@ router.post('/social/posts', async (
       scheduled_at,
       publish_now,
     } = req.body;
-    if (!connection_id || !body) {
+    if (!connection_id || !body || !content_id) {
       res.status(400).json({
         success: false,
-        error: { message: 'connection_id and body required', code: 'BAD_REQUEST' },
+        error: { message: 'connection_id, content_id, and the exact approved body are required', code: 'BAD_REQUEST' },
       });
       return;
     }

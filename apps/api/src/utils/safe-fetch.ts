@@ -1,5 +1,7 @@
 import { lookup } from 'dns/promises';
 import net from 'net';
+import type { LookupFunction } from 'net';
+import { Agent } from 'undici';
 import { AppError } from '../middleware/errorHandler';
 
 export interface SafeFetchOptions extends Omit<RequestInit, 'redirect' | 'signal'> {
@@ -128,19 +130,42 @@ export async function safeFetch(value: string, options: SafeFetchOptions = {}): 
   let body = options.body;
 
   for (let redirectCount = 0; redirectCount <= maxRedirects; redirectCount++) {
-    const response = await fetch(current, {
-      ...options,
-      method,
-      body,
-      redirect: 'manual',
-      signal: AbortSignal.timeout(timeoutMs),
-    });
+    const pinnedAddresses = net.isIP(current.hostname)
+      ? [{ address: current.hostname, family: net.isIP(current.hostname) }]
+      : await lookup(current.hostname, { all: true, verbatim: true });
+    if (pinnedAddresses.length === 0 || pinnedAddresses.some((entry) => isPrivateAddress(entry.address))) {
+      throw new AppError(400, 'External hostname resolves to a private or unsafe address', 'UNSAFE_EXTERNAL_URL');
+    }
+    const pinnedLookup = ((_hostname: string, lookupOptions: Record<string, unknown>, callback: (...args: unknown[]) => void) => {
+      if (lookupOptions?.all === true) callback(null, pinnedAddresses);
+      else callback(null, pinnedAddresses[0].address, pinnedAddresses[0].family);
+    }) as unknown as LookupFunction;
+    const dispatcher = new Agent({ connect: { lookup: pinnedLookup } });
+    let response: Response;
+    try {
+      response = await fetch(current, {
+        ...options,
+        method,
+        body,
+        redirect: 'manual',
+        signal: AbortSignal.timeout(timeoutMs),
+        dispatcher,
+      } as RequestInit & { dispatcher: Agent });
+    } catch (error) {
+      await dispatcher.close();
+      throw error;
+    }
 
     if ([301, 302, 303, 307, 308].includes(response.status)) {
-      const location = response.headers.get('location');
-      if (!location) throw new AppError(502, 'External redirect did not include a location', 'EXTERNAL_REDIRECT_INVALID');
-      if (redirectCount === maxRedirects) throw new AppError(502, 'External request exceeded the redirect limit', 'EXTERNAL_REDIRECT_LIMIT');
-      current = await validatePublicHttpUrl(new URL(location, current).toString());
+      try {
+        const location = response.headers.get('location');
+        if (!location) throw new AppError(502, 'External redirect did not include a location', 'EXTERNAL_REDIRECT_INVALID');
+        if (redirectCount === maxRedirects) throw new AppError(502, 'External request exceeded the redirect limit', 'EXTERNAL_REDIRECT_LIMIT');
+        current = await validatePublicHttpUrl(new URL(location, current).toString());
+      } finally {
+        await response.body?.cancel();
+        await dispatcher.close();
+      }
       if (response.status === 303 || ((response.status === 301 || response.status === 302) && method === 'POST')) {
         method = 'GET';
         body = undefined;
@@ -148,11 +173,13 @@ export async function safeFetch(value: string, options: SafeFetchOptions = {}): 
       continue;
     }
 
-    let cached: Uint8Array | null = null;
-    const bytes = async () => {
-      if (!cached) cached = await readLimitedBody(response, maxResponseBytes);
-      return cached;
-    };
+    let cached: Uint8Array;
+    try {
+      cached = await readLimitedBody(response, maxResponseBytes);
+    } finally {
+      await dispatcher.close();
+    }
+    const bytes = async () => cached;
     return {
       url: response.url || current.toString(),
       status: response.status,

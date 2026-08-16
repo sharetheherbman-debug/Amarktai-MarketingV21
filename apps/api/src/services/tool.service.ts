@@ -10,6 +10,7 @@ import * as externalIntegrations from './external-integrations.service';
 import * as studioService from './studio.service';
 import { publishPostThroughControlCentre, schedulePostThroughControlCentre } from './controlled-social-publishing.service';
 import { deliverEmailBatchThroughControlCentre } from './controlled-email-delivery.service';
+import { safeFetch } from '../utils/safe-fetch';
 
 export interface Tool {
   id: string;
@@ -54,7 +55,7 @@ async function webSearch(input: Record<string, unknown>): Promise<unknown> {
   if (!searchText) throw new AppError(400, 'query is required', 'VALIDATION_ERROR');
   const limit = Math.max(1, Math.min(Number(input.limit || 8), 20));
   const response = await fetch(`https://www.bing.com/search?format=rss&q=${encodeURIComponent(searchText)}`, {
-    headers: { 'User-Agent': 'AmarktAI-Agent/1.0' },
+    headers: { 'User-Agent': 'EquiProfile-Marketing-Agent/1.0' },
     signal: AbortSignal.timeout(15000),
   });
   if (!response.ok) throw new AppError(response.status, `Web search returned HTTP ${response.status}`, 'WEB_SEARCH_FAILED');
@@ -88,7 +89,7 @@ async function analyzeSeo(input: Record<string, unknown>): Promise<unknown> {
   let text = content;
   let title = String(input.title || '').trim();
   if (!text && url) {
-    const response = await fetch(url, { headers: { 'User-Agent': 'AmarktAI-SEO/1.0' }, signal: AbortSignal.timeout(15000) });
+    const response = await safeFetch(url, { headers: { 'User-Agent': 'EquiProfile-SEO/1.0' }, timeoutMs: 15000, maxResponseBytes: 2 * 1024 * 1024 });
     if (!response.ok) throw new AppError(response.status, `SEO URL returned HTTP ${response.status}`, 'SEO_FETCH_FAILED');
     const html = await response.text();
     title = title || (html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] || '').replace(/<[^>]+>/g, '').trim();
@@ -128,6 +129,8 @@ async function resolveSocialConnection(orgId: string, input: Record<string, unkn
 async function createSocialPost(input: Record<string, unknown>, orgId: string, requireSchedule: boolean): Promise<unknown> {
   const body = String(input.content || input.body || '').trim();
   if (!body) throw new AppError(400, 'content is required', 'VALIDATION_ERROR');
+  const contentId = String(input.content_id || '').trim();
+  if (!contentId) throw new AppError(400, 'content_id for the exact owner-approved content version is required', 'CONTENT_APPROVAL_REQUIRED');
   const scheduledAt = input.scheduled_at ? String(input.scheduled_at) : undefined;
   if (requireSchedule && !scheduledAt) throw new AppError(400, 'scheduled_at is required', 'VALIDATION_ERROR');
   const connectionId = await resolveSocialConnection(orgId, input);
@@ -140,11 +143,12 @@ async function createSocialPost(input: Record<string, unknown>, orgId: string, r
   const post = scheduledAt
     ? await schedulePostThroughControlCentre({
         organizationId: orgId, connectionId, body, requestedBy: 'system',
+        contentId,
         campaignId: options.campaign_id, mediaUrls: options.media_urls,
         hashtags: options.hashtags, scheduledAt,
         idempotencyKey: input.idempotency_key ? String(input.idempotency_key) : undefined,
       })
-    : await socialService.schedulePost(orgId, connectionId, body, options);
+    : await socialService.schedulePost(orgId, connectionId, body, { ...options, content_id: contentId });
   return input.publish_now === true
     ? publishPostThroughControlCentre(post.id, orgId, '')
     : post;
@@ -155,9 +159,16 @@ async function sendEmail(input: Record<string, unknown>, orgId: string): Promise
   const subject = String(input.subject || '').trim();
   const body = String(input.body || '').trim();
   if (!to || !subject || !body) throw new AppError(400, 'to, subject, and body are required', 'VALIDATION_ERROR');
+  const contentId = String(input.content_id || '').trim();
+  if (!contentId) throw new AppError(400, 'content_id for the exact owner-approved content version is required', 'CONTENT_APPROVAL_REQUIRED');
+  const consentBasis = String(input.consent_basis || '');
+  if (!['consent', 'contract', 'legitimate_interest'].includes(consentBasis)) {
+    throw new AppError(400, 'consent_basis is required for external email', 'EMAIL_CONSENT_BASIS_REQUIRED');
+  }
   return deliverEmailBatchThroughControlCentre({
     organizationId: orgId,
-    deliveries: [{ to, subject, html: body }],
+    contentId,
+    deliveries: [{ to, subject, html: body, consent_basis: consentBasis as 'consent' | 'contract' | 'legitimate_interest' }],
     actionTitle: `Send email: ${subject}`,
     actionSummary: `Controlled delivery to one recipient`,
     requestedBy: 'system',
@@ -258,14 +269,15 @@ export async function execute(toolName: string, input: Record<string, unknown>, 
       const url = String(config.url || '');
       if (!url) throw new AppError(500, 'Tool URL is missing', 'TOOL_CONFIG_ERROR');
       const method = String(config.method || 'POST').toUpperCase();
-      const response = await fetch(url, {
+      const response = await safeFetch(url, {
         method,
         headers: { 'Content-Type': 'application/json', ...(objectValue(config.headers) as Record<string, string>) },
         body: method === 'GET' ? undefined : JSON.stringify(input),
-        signal: AbortSignal.timeout(Number(config.timeout_ms || 30000)),
+        timeoutMs: Number(config.timeout_ms || 30000),
+        maxResponseBytes: 5 * 1024 * 1024,
       });
       const text = await response.text();
-      if (!response.ok) throw new AppError(response.status, `Tool API failed: ${text || response.statusText}`, 'TOOL_API_ERROR');
+      if (!response.ok) throw new AppError(response.status, `Tool API failed: ${text || `HTTP ${response.status}`}`, 'TOOL_API_ERROR');
       try { output = text ? JSON.parse(text) : {}; } catch { output = { text }; }
     } else {
       throw new AppError(400, `Unknown tool handler type: ${tool.handler_type}`, 'INVALID_HANDLER_TYPE');
@@ -282,9 +294,9 @@ const defaultDefinitions: Record<string, { description: string; parameters: Reco
   web_search: { description: 'Search the public web and return result titles, URLs and snippets.', parameters: { type: 'object', properties: { query: { type: 'string' }, limit: { type: 'number' } }, required: ['query'] } },
   generate_text: { description: 'Generate text through the configured AI provider.', parameters: { type: 'object', properties: { prompt: { type: 'string' }, model: { type: 'string' }, max_tokens: { type: 'number' }, temperature: { type: 'number' } }, required: ['prompt'] } },
   analyze_seo: { description: 'Analyze supplied content or a public URL for concrete SEO and readability issues.', parameters: { type: 'object', properties: { url: { type: 'string' }, content: { type: 'string' }, title: { type: 'string' }, keyword: { type: 'string' } } } },
-  create_social_post: { description: 'Create or immediately publish a post through a real connected social account.', parameters: { type: 'object', properties: { connection_id: { type: 'string' }, platform: { type: 'string' }, content: { type: 'string' }, media_urls: { type: 'array', items: { type: 'string' } }, hashtags: { type: 'array', items: { type: 'string' } }, publish_now: { type: 'boolean' } }, required: ['content'] } },
-  schedule_post: { description: 'Schedule a post through a real connected social account.', parameters: { type: 'object', properties: { connection_id: { type: 'string' }, platform: { type: 'string' }, content: { type: 'string' }, scheduled_at: { type: 'string' }, media_urls: { type: 'array', items: { type: 'string' } }, hashtags: { type: 'array', items: { type: 'string' } } }, required: ['content', 'scheduled_at'] } },
-  send_email: { description: 'Send an email through the organization default Resend, SendGrid or webhook email provider.', parameters: { type: 'object', properties: { to: { type: 'string' }, subject: { type: 'string' }, body: { type: 'string' } }, required: ['to', 'subject', 'body'] } },
+  create_social_post: { description: 'Create or immediately publish an exact owner-approved content version through a connected social account.', parameters: { type: 'object', properties: { content_id: { type: 'string' }, connection_id: { type: 'string' }, platform: { type: 'string' }, content: { type: 'string' }, media_urls: { type: 'array', items: { type: 'string' } }, hashtags: { type: 'array', items: { type: 'string' } }, publish_now: { type: 'boolean' } }, required: ['content_id', 'content'] } },
+  schedule_post: { description: 'Schedule an exact owner-approved content version through a connected social account.', parameters: { type: 'object', properties: { content_id: { type: 'string' }, connection_id: { type: 'string' }, platform: { type: 'string' }, content: { type: 'string' }, scheduled_at: { type: 'string' }, media_urls: { type: 'array', items: { type: 'string' } }, hashtags: { type: 'array', items: { type: 'string' } } }, required: ['content_id', 'content', 'scheduled_at'] } },
+  send_email: { description: 'Send an exact owner-approved, consent-aware email through the organization default provider.', parameters: { type: 'object', properties: { content_id: { type: 'string' }, to: { type: 'string' }, subject: { type: 'string' }, body: { type: 'string' }, consent_basis: { type: 'string', enum: ['consent','contract','legitimate_interest'] } }, required: ['content_id', 'to', 'subject', 'body', 'consent_basis'] } },
   get_analytics: { description: 'Retrieve synchronized external analytics and internal event data.', parameters: { type: 'object', properties: { entity_type: { type: 'string' }, entity_id: { type: 'string' }, start_date: { type: 'string' }, end_date: { type: 'string' } } } },
   search_knowledge: { description: 'Run hybrid semantic and keyword search across organization knowledge.', parameters: { type: 'object', properties: { query: { type: 'string' }, limit: { type: 'number' } }, required: ['query'] } },
   generate_image: { description: 'Queue a real GenX text-to-image generation and return the persistent generation job.', parameters: { type: 'object', properties: { prompt: { type: 'string' }, negative_prompt: { type: 'string' }, model: { type: 'string' }, options: { type: 'object' } }, required: ['prompt'] } },

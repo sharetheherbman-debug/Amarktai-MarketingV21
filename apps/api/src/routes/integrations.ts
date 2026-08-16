@@ -3,6 +3,7 @@ import { requireAuth, AuthRequest } from '../middleware/auth';
 import { ApiResponse } from '../types';
 import * as integrationService from '../services/integration.service';
 import * as externalService from '../services/external-integrations.service';
+import { requireOrganizationRole } from '../middleware/organization-access';
 
 const router = Router();
 router.use(requireAuth);
@@ -218,13 +219,20 @@ router.get('/email-providers', async (req: AuthRequest, res: Response<ApiRespons
   } catch (error) { next(error); }
 });
 
-router.post('/email-providers', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
+router.post('/email-providers', requireOrganizationRole('owner', 'admin'), async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
   try {
     const orgId = req.body.organization_id;
     if (!orgId || !req.body.name || !req.body.provider_type) {
       res.status(400).json({ success: false, error: { message: 'organization_id, name, and provider_type required', code: 'BAD_REQUEST' } }); return;
     }
     res.status(201).json({ success: true, data: await integrationService.createEmailProvider(orgId, req.body) });
+  } catch (error) { next(error); }
+});
+
+router.delete('/email-providers/:id', requireOrganizationRole('owner', 'admin'), async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
+  try {
+    await integrationService.deleteEmailProvider(req.params.id, req.organizationId!);
+    res.json({ success: true, data: { deleted: true } });
   } catch (error) { next(error); }
 });
 

@@ -4,6 +4,7 @@ import { Job, Worker } from 'bullmq';
 import { closePool, query } from '../config/database';
 import { logger } from '../utils/logger';
 import * as ffmpegService from '../services/ffmpeg.service';
+import { safeFetch } from '../utils/safe-fetch';
 
 const connection = {
   host: process.env.REDIS_HOST || 'localhost',
@@ -86,12 +87,11 @@ async function materializeMedia(
 
   if (!source) return undefined;
   if (path.isAbsolute(source)) {
-    await fs.copyFile(source, destination);
-    return destination;
+    throw new Error('Absolute host filesystem media paths are not accepted; use an organization-owned Studio asset');
   }
-  const response = await fetch(source);
+  const response = await safeFetch(source, { timeoutMs: 120000, maxResponseBytes: 25 * 1024 * 1024 });
   if (!response.ok) throw new Error(`Media download failed: ${response.status}`);
-  await fs.writeFile(destination, Buffer.from(await response.arrayBuffer()));
+  await fs.writeFile(destination, Buffer.from(await response.bytes()));
   return destination;
 }
 

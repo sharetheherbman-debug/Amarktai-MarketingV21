@@ -204,11 +204,11 @@ export async function requireExecutionApproval(
     let campaignPlanExecutable = true;
     if (request.action_type === 'generation' && campaignPlanId) {
       const planResult = await client.query(
-        `SELECT status,generation_credit_limit FROM campaign_plans
+        `SELECT status,strategy_validation_status,generation_credit_limit FROM campaign_plans
          WHERE id=$1 AND organization_id=$2`,
         [campaignPlanId, organizationId]
       );
-      campaignPlanExecutable = planResult.rows.length > 0 && String(planResult.rows[0].status) === 'approved';
+      campaignPlanExecutable = planResult.rows.length > 0 && String(planResult.rows[0].strategy_validation_status) === 'valid';
       campaignCreditLimit = Number(planResult.rows[0]?.generation_credit_limit || 0);
       const committed = await client.query(
         `SELECT COALESCE(SUM(requested_credits),0)::bigint AS used
@@ -256,7 +256,7 @@ export async function requireExecutionApproval(
       return recordTemporaryBlock('Daily advertising budget exceeded');
     }
     if (!campaignPlanExecutable) {
-      return recordTemporaryBlock('The campaign strategy must be approved before asset generation');
+      return recordTemporaryBlock('The campaign strategy must pass internal validation before asset generation');
     }
     if (overCampaignCredits) {
       return recordTemporaryBlock('Campaign Generation Credit limit exceeded');

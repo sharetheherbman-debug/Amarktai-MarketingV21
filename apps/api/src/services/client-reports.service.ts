@@ -125,14 +125,21 @@ export async function sendReport(
   if (agencyResult.rows.length === 0) throw new NotFoundError('Agency');
   const organizationId = String(agencyResult.rows[0].organization_id);
   const html = reportHtml(report);
+  const reportContent = typeof report.content === 'string' ? JSON.parse(report.content) : report.content || {};
+  const approvedContentId = String((reportContent as Record<string, unknown>).content_id || '');
+  if (!approvedContentId) {
+    throw new AppError(409, 'Client report delivery requires an owner-approved Content Library item linked as content_id', 'CONTENT_APPROVAL_REQUIRED');
+  }
   const recipientDigest = createHash('sha256').update(uniqueRecipients.join('\n')).digest('hex').slice(0, 24);
 
   const controlled = await deliverEmailBatchThroughControlCentre({
     organizationId,
+    contentId: approvedContentId,
     deliveries: uniqueRecipients.map((recipient) => ({
       to: recipient,
       subject: report.title,
       html,
+      consent_basis: 'contract',
     })),
     actionTitle: `Send client report: ${report.title}`,
     actionSummary: `${uniqueRecipients.length} report recipient(s)`,
