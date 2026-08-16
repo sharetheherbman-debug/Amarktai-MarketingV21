@@ -168,9 +168,9 @@ export default function AgentsPage() {
               <span className="text-gradient">Marketing Workforce</span>
             </h1>
             <p className="mt-6 text-lg leading-relaxed text-zinc-400 sm:text-xl">
-              Specialized AI agents that handle every aspect of your marketing —
-              from content creation to analytics. They work 24/7, learn from
-              data, and never miss a deadline.
+              Specialized AI agents that support the marketing lifecycle — from
+              content creation to analytics — with durable schedules, measurable
+              feedback, and owner-controlled external publication.
             </p>
           </div>
         </div>

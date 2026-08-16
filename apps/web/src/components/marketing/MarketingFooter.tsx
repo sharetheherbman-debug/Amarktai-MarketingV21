@@ -84,12 +84,12 @@ export function MarketingFooter() {
                 </svg>
               </div>
               <span className="text-lg font-bold text-white">
-                Amarkt<span className="text-brand-400">AI</span>
+                EquiProfile <span className="text-brand-400">Marketing</span>
               </span>
             </Link>
             <p className="mt-4 text-sm leading-relaxed text-zinc-400">
-              The AI Marketing Operating System. Deploy autonomous agents that
-              grow your business 24/7.
+              A governed marketing operating system for planning, creating,
+              approving, distributing, and learning from measurable work.
             </p>
             <div className="mt-6 flex gap-4">
               {socialLinks.map((social) => (
@@ -164,11 +164,11 @@ export function MarketingFooter() {
 
         <div className="mt-12 flex flex-col items-center justify-between gap-4 border-t border-white/[0.06] pt-8 sm:flex-row">
           <p className="text-sm text-zinc-500">
-            &copy; 2026 AmarktAI Marketing. All rights reserved.
+            &copy; 2026 EquiProfile Marketing. All rights reserved.
           </p>
           <div className="flex items-center gap-6">
             <span className="text-sm text-zinc-500">
-              marketing.amarktai.co.za
+              marketing.equiprofile.online
             </span>
             <Link
               href="/status"

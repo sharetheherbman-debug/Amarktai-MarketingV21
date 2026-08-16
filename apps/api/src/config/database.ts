@@ -1,3 +1,4 @@
+import './bullmq-compat';
 import { Pool, PoolClient, QueryResult } from 'pg';
 import { env } from './env';
 import { logger } from '../utils/logger';

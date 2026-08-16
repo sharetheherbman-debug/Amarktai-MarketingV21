@@ -2,6 +2,7 @@ import { logger } from '../utils/logger';
 import * as knowledgeService from './knowledge.service';
 import * as vectorService from './vector.service';
 import { AppError } from '../middleware/errorHandler';
+import { safeFetch, validatePublicHttpUrl } from '../utils/safe-fetch';
 
 interface CrawlResult {
   url: string;
@@ -9,6 +10,7 @@ interface CrawlResult {
   content: string;
   links: string[];
   statusCode: number;
+  contentType: string;
 }
 
 interface CrawlOptions {
@@ -28,7 +30,28 @@ const DEFAULT_OPTIONS: Required<CrawlOptions> = {
 };
 
 const REQUEST_TIMEOUT_MS = 15000;
+const MAX_PAGE_BYTES = 2 * 1024 * 1024;
 const CHUNK_MAX_TOKENS = 500;
+const CRAWLER_USER_AGENT = 'EquiProfile-Marketing-KnowledgeBot/1.0';
+
+function normalizeUrl(value: string): string {
+  const url = new URL(value);
+  url.hash = '';
+  for (const key of [...url.searchParams.keys()]) {
+    if (/^(utm_|fbclid$|gclid$|msclkid$)/i.test(key)) url.searchParams.delete(key);
+  }
+  return url.toString();
+}
+
+function boundedOptions(options?: CrawlOptions): Required<CrawlOptions> {
+  return {
+    maxPages: Math.max(1, Math.min(Number(options?.maxPages ?? DEFAULT_OPTIONS.maxPages), 100)),
+    maxDepth: Math.max(0, Math.min(Number(options?.maxDepth ?? DEFAULT_OPTIONS.maxDepth), 6)),
+    includePatterns: Array.isArray(options?.includePatterns) ? options!.includePatterns.slice(0, 50) : [],
+    excludePatterns: Array.isArray(options?.excludePatterns) ? options!.excludePatterns.slice(0, 50) : [],
+    followLinks: options?.followLinks ?? DEFAULT_OPTIONS.followLinks,
+  };
+}
 
 // ─── Public API ──────────────────────────────────────────────────────────────
 
@@ -38,29 +61,29 @@ export async function crawlWebsite(
   url: string,
   options?: CrawlOptions
 ): Promise<void> {
-  const opts = { ...DEFAULT_OPTIONS, ...options };
+  const opts = boundedOptions(options);
+  const validatedRoot = await validatePublicHttpUrl(url);
+  const rootUrl = normalizeUrl(validatedRoot.toString());
   const visited = new Set<string>();
-  const queue: { url: string; depth: number }[] = [{ url, depth: 0 }];
+  const queued = new Set<string>([rootUrl]);
+  const queue: { url: string; depth: number }[] = [{ url: rootUrl, depth: 0 }];
   let totalChunks = 0;
 
   try {
     await knowledgeService.updateSourceStatus(sourceId, 'crawling');
     await knowledgeService.deleteItemsBySource(sourceId);
 
-    const baseDomain = new URL(url).hostname;
+    const baseDomain = validatedRoot.hostname.toLowerCase();
 
     while (queue.length > 0 && visited.size < opts.maxPages) {
       const { url: currentUrl, depth } = queue.shift()!;
+      queued.delete(currentUrl);
 
       if (visited.has(currentUrl)) continue;
       if (depth > opts.maxDepth) continue;
 
-      if (opts.excludePatterns.length > 0 && matchesPatterns(currentUrl, opts.excludePatterns)) {
-        continue;
-      }
-      if (opts.includePatterns.length > 0 && !matchesPatterns(currentUrl, opts.includePatterns)) {
-        continue;
-      }
+      if (opts.excludePatterns.length > 0 && matchesPatterns(currentUrl, opts.excludePatterns)) continue;
+      if (opts.includePatterns.length > 0 && !matchesPatterns(currentUrl, opts.includePatterns)) continue;
 
       visited.add(currentUrl);
 
@@ -72,11 +95,18 @@ export async function crawlWebsite(
           continue;
         }
 
-        const { title, content, links } = await extractText(result.content, currentUrl);
-
-        if (!content || content.trim().length === 0) {
+        const isHtml = /(?:text\/html|application\/xhtml\+xml)/i.test(result.contentType) || /<html\b/i.test(result.content);
+        const isPlainText = /^text\/plain/i.test(result.contentType);
+        if (!isHtml && !isPlainText) {
+          logger.warn(`Crawl skipped ${currentUrl}: unsupported content type ${result.contentType || 'unknown'}`);
           continue;
         }
+
+        const { title, content, links } = isHtml
+          ? await extractText(result.content, result.url)
+          : { title: result.url, content: result.content.trim(), links: [] as string[] };
+
+        if (!content || content.trim().length < 40) continue;
 
         const chunks = chunkText(content, CHUNK_MAX_TOKENS);
 
@@ -88,8 +118,14 @@ export async function crawlWebsite(
             title: chunks.length > 1 ? `${title} [${i + 1}/${chunks.length}]` : title,
             content: chunk,
             content_type: 'webpage',
-            url: currentUrl,
-            metadata: { depth, chunkIndex: i, totalChunks: chunks.length },
+            url: result.url,
+            metadata: {
+              depth,
+              chunkIndex: i,
+              totalChunks: chunks.length,
+              contentType: result.contentType,
+              fetchedAt: new Date().toISOString(),
+            },
             tokens,
             chunk_index: i,
           });
@@ -98,14 +134,16 @@ export async function crawlWebsite(
         }
 
         if (opts.followLinks && depth < opts.maxDepth) {
-          for (const link of links) {
+          for (const rawLink of links) {
             try {
-              const linkDomain = new URL(link).hostname;
-              if (linkDomain === baseDomain && !visited.has(link)) {
-                queue.push({ url: link, depth: depth + 1 });
-              }
+              const link = normalizeUrl(rawLink);
+              const parsed = new URL(link);
+              if (parsed.hostname.toLowerCase() !== baseDomain) continue;
+              if (visited.has(link) || queued.has(link)) continue;
+              queued.add(link);
+              queue.push({ url: link, depth: depth + 1 });
             } catch {
-              // invalid URL, skip
+              // Invalid URL, skip.
             }
           }
         }
@@ -143,31 +181,26 @@ export async function parseDocument(
 // ─── Internal: HTTP fetching ─────────────────────────────────────────────────
 
 async function fetchPage(url: string): Promise<CrawlResult> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  const response = await safeFetch(url, {
+    headers: {
+      'User-Agent': CRAWLER_USER_AGENT,
+      Accept: 'text/html,application/xhtml+xml,text/plain;q=0.9',
+    },
+    timeoutMs: REQUEST_TIMEOUT_MS,
+    maxRedirects: 5,
+    maxResponseBytes: MAX_PAGE_BYTES,
+  });
 
-  try {
-    const response = await fetch(url, {
-      signal: controller.signal,
-      headers: {
-        'User-Agent': 'AmarktAI-Crawler/1.0',
-        Accept: 'text/html,application/xhtml+xml,text/plain',
-      },
-      redirect: 'follow',
-    });
-
-    const statusCode = response.status;
-    const html = await response.text();
-
-    return { url, title: '', content: html, links: [], statusCode };
-  } catch (error) {
-    if (error instanceof Error && error.name === 'AbortError') {
-      throw new Error(`Request timeout for ${url}`);
-    }
-    throw error;
-  } finally {
-    clearTimeout(timeout);
-  }
+  const contentType = response.headers.get('content-type') || '';
+  const content = await response.text();
+  return {
+    url: normalizeUrl(response.url || url),
+    title: '',
+    content,
+    links: [],
+    statusCode: response.status,
+    contentType,
+  };
 }
 
 // ─── Internal: HTML parsing (regex-based, no dependencies) ───────────────────
@@ -185,49 +218,39 @@ async function extractText(
   while ((linkMatch = linkRegex.exec(html)) !== null) {
     try {
       const href = linkMatch[1];
-      if (href.startsWith('#') || href.startsWith('javascript:') || href.startsWith('mailto:')) {
-        continue;
-      }
-      const absoluteUrl = new URL(href, url).toString();
-      links.push(absoluteUrl);
+      if (href.startsWith('#') || href.startsWith('javascript:') || href.startsWith('mailto:') || href.startsWith('tel:')) continue;
+      const absoluteUrl = new URL(href, url);
+      if (!['http:', 'https:'].includes(absoluteUrl.protocol)) continue;
+      links.push(absoluteUrl.toString());
     } catch {
-      // invalid URL, skip
+      // Invalid URL, skip.
     }
   }
 
   let content = html;
-
-  content = content.replace(/<script[\s\S]*?<\/script>/gi, '');
-  content = content.replace(/<style[\s\S]*?<\/style>/gi, '');
+  content = content.replace(/<(script|style|noscript|svg)[\s\S]*?<\/\1>/gi, '');
   content = content.replace(/<nav[\s\S]*?<\/nav>/gi, '');
   content = content.replace(/<footer[\s\S]*?<\/footer>/gi, '');
   content = content.replace(/<header[\s\S]*?<\/header>/gi, '');
-
   content = content.replace(/<br\s*\/?>/gi, '\n');
-  content = content.replace(/<\/p>/gi, '\n\n');
-  content = content.replace(/<\/div>/gi, '\n');
-  content = content.replace(/<\/li>/gi, '\n');
+  content = content.replace(/<\/(p|article|section)>/gi, '\n\n');
+  content = content.replace(/<\/(div|li)>/gi, '\n');
   content = content.replace(/<\/h[1-6]>/gi, '\n\n');
   content = content.replace(/<hr\s*\/?>/gi, '\n\n');
-
   content = content.replace(/<[^>]+>/g, ' ');
-
   content = decodeEntities(content);
-
   content = content.replace(/[ \t]+/g, ' ');
   content = content.replace(/\n{3,}/g, '\n\n');
   content = content.replace(/^\s+|\s+$/gm, '');
   content = content.trim();
 
-  return { title, content, links };
+  return { title, content, links: [...new Set(links)] };
 }
 
 // ─── Internal: Text chunking ─────────────────────────────────────────────────
 
 function chunkText(text: string, maxTokens: number = CHUNK_MAX_TOKENS): string[] {
-  if (!text || text.trim().length === 0) {
-    return [];
-  }
+  if (!text || text.trim().length === 0) return [];
 
   const paragraphs = text.split(/\n{2,}/).filter((p) => p.trim().length > 0);
   const chunks: string[] = [];
@@ -243,9 +266,7 @@ function chunkText(text: string, maxTokens: number = CHUNK_MAX_TOKENS): string[]
         currentChunk = '';
         currentTokens = 0;
       }
-
-      const sentences = splitIntoChunks(paragraph, maxTokens);
-      chunks.push(...sentences);
+      chunks.push(...splitIntoChunks(paragraph, maxTokens));
       continue;
     }
 
@@ -259,10 +280,7 @@ function chunkText(text: string, maxTokens: number = CHUNK_MAX_TOKENS): string[]
     currentTokens += paragraphTokens;
   }
 
-  if (currentChunk.trim().length > 0) {
-    chunks.push(currentChunk.trim());
-  }
-
+  if (currentChunk.trim().length > 0) chunks.push(currentChunk.trim());
   return chunks;
 }
 
@@ -281,10 +299,7 @@ function splitIntoChunks(text: string, maxTokens: number): string[] {
     }
   }
 
-  if (current.trim().length > 0) {
-    chunks.push(current);
-  }
-
+  if (current.trim().length > 0) chunks.push(current);
   return chunks;
 }
 
@@ -331,9 +346,7 @@ function extractPdfText(buffer: Buffer): string {
     const stream = match[1];
     const textMatches = stream.match(/\(([^)]*)\)/g);
     if (textMatches) {
-      for (const tm of textMatches) {
-        content += tm.slice(1, -1) + ' ';
-      }
+      for (const tm of textMatches) content += tm.slice(1, -1) + ' ';
     }
   }
 
@@ -343,9 +356,7 @@ function extractPdfText(buffer: Buffer): string {
     const inner = tjMatch[1];
     const strMatches = inner.match(/\(([^)]*)\)/g);
     if (strMatches) {
-      for (const sm of strMatches) {
-        content += sm.slice(1, -1) + ' ';
-      }
+      for (const sm of strMatches) content += sm.slice(1, -1) + ' ';
     }
   }
 

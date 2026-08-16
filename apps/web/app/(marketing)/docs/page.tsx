@@ -38,7 +38,7 @@ const quickStartCards = [
       </svg>
     ),
     title: 'Webhooks',
-    description: 'Set up webhooks to receive real-time events from AmarktAI.',
+    description: 'Set up webhooks to receive real-time events from EquiProfile Marketing.',
     href: '/docs/webhooks',
   },
 ];
@@ -124,7 +124,7 @@ export default function DocsPage() {
               Documentation
             </h1>
             <p className="mt-6 text-lg leading-relaxed text-zinc-400 sm:text-xl">
-              Everything you need to build with AmarktAI Marketing.
+              Everything you need to build with EquiProfile Marketing.
             </p>
             <div className="mx-auto mt-8 max-w-xl">
               <div className="relative">

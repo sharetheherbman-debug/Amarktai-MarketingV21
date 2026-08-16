@@ -67,6 +67,10 @@ router.post('/workflows/seed-templates', async (req: AuthRequest, res: Response<
 
 // ─── Social Publishing ───────────────────────────────────────────────────────
 
+router.get('/social/capabilities', (_req: AuthRequest, res: Response<ApiResponse>): void => {
+  res.json({ success: true, data: socialService.SOCIAL_PLATFORM_CAPABILITIES });
+});
+
 router.get('/social/connections', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
   try {
     const orgId = req.query.organization_id as string;
@@ -78,28 +82,37 @@ router.get('/social/connections', async (req: AuthRequest, res: Response<ApiResp
 
 router.post('/social/connections', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
   try {
-    const { organization_id, platform, account_name, config } = req.body;
+    const { organization_id, platform, account_name, config, credentials } = req.body;
     if (!organization_id || !platform || !account_name) { res.status(400).json({ success: false, error: { message: 'organization_id, platform, and account_name required', code: 'BAD_REQUEST' } }); return; }
-    const connection = await socialService.addConnection(organization_id, platform, account_name, config);
+    const connection = await socialService.addConnection(organization_id, platform, account_name, config || {}, credentials || {});
     res.status(201).json({ success: true, data: connection });
   } catch (error) { next(error); }
 });
 
-router.post('/social/posts', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
+router.put('/social/connections/:id', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
   try {
-    const { organization_id, connection_id, body, content_id, campaign_id, media_urls, hashtags, scheduled_at } = req.body;
-    if (!organization_id || !connection_id || !body) { res.status(400).json({ success: false, error: { message: 'organization_id, connection_id, and body required', code: 'BAD_REQUEST' } }); return; }
-    const post = await socialService.schedulePost(organization_id, connection_id, body, { content_id, campaign_id, media_urls, hashtags, scheduled_at });
-    res.status(201).json({ success: true, data: post });
+    const organizationId = req.body.organization_id || req.query.organization_id as string;
+    if (!organizationId) { res.status(400).json({ success: false, error: { message: 'organization_id required', code: 'BAD_REQUEST' } }); return; }
+    const connection = await socialService.updateConnection(req.params.id, organizationId, req.body);
+    res.json({ success: true, data: connection });
   } catch (error) { next(error); }
 });
 
-router.post('/social/posts/:id/publish', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
+router.delete('/social/connections/:id', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
   try {
-    const orgId = req.body.organization_id;
-    if (!orgId) { res.status(400).json({ success: false, error: { message: 'organization_id required', code: 'BAD_REQUEST' } }); return; }
-    const post = await socialService.publishPost(req.params.id, orgId);
-    res.json({ success: true, data: post });
+    const organizationId = req.query.organization_id as string;
+    if (!organizationId) { res.status(400).json({ success: false, error: { message: 'organization_id required', code: 'BAD_REQUEST' } }); return; }
+    await socialService.removeConnection(req.params.id, organizationId);
+    res.json({ success: true, data: { message: 'Social connection deleted' } });
+  } catch (error) { next(error); }
+});
+
+router.post('/social/connections/:id/test', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
+  try {
+    const organizationId = req.body.organization_id || req.query.organization_id as string;
+    if (!organizationId) { res.status(400).json({ success: false, error: { message: 'organization_id required', code: 'BAD_REQUEST' } }); return; }
+    const result = await socialService.testConnection(req.params.id, organizationId);
+    res.json({ success: true, data: result });
   } catch (error) { next(error); }
 });
 

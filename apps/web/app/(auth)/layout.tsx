@@ -4,9 +4,9 @@ import Link from 'next/link';
 export const metadata: Metadata = {
   title: {
     default: 'Authentication',
-    template: '%s | AmarktAI Marketing',
+    template: '%s | EquiProfile Marketing',
   },
-  description: 'Sign in to your AmarktAI Marketing account or create a new one.',
+  description: 'Secure owner access to EquiProfile Marketing.',
 };
 
 export default function AuthLayout({
@@ -20,7 +20,7 @@ export default function AuthLayout({
       <div className="absolute inset-0 bg-[linear-gradient(to_right,rgba(255,255,255,0.02)_1px,transparent_1px),linear-gradient(to_bottom,rgba(255,255,255,0.02)_1px,transparent_1px)] bg-[size:64px_64px]" />
       <div className="relative z-10 w-full max-w-[440px]">
         <div className="mb-8 flex justify-center">
-          <Link href="/" className="flex items-center gap-2">
+          <Link href="/login" className="flex items-center gap-2">
             <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-brand-500/20">
               <svg
                 className="h-6 w-6 text-brand-400"
@@ -36,12 +36,11 @@ export default function AuthLayout({
                 />
               </svg>
             </div>
-            <span className="text-xl font-bold text-white">
-              Amarkt<span className="text-brand-400">AI</span>
-            </span>
+            <span className="text-xl font-bold text-white">EquiProfile Marketing</span>
           </Link>
         </div>
         {children}
+        <p className="mt-6 text-center text-xs text-zinc-600">© 2026 EquiProfile Marketing</p>
       </div>
     </div>
   );

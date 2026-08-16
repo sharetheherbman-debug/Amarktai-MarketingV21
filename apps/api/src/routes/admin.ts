@@ -1,69 +1,95 @@
+import { randomUUID } from 'crypto';
 import { Router, Response, NextFunction } from 'express';
-import { requireAuth, AuthRequest } from '../middleware/auth';
+import { z } from 'zod';
+import { requireAuth, requireRole, AuthRequest } from '../middleware/auth';
 import { ApiResponse } from '../types';
 import * as platformOps from '../services/platform-ops.service';
 import * as featureFlags from '../services/feature-flags.service';
 import * as licensing from '../services/licensing.service';
+import * as generationCredits from '../services/generation-credit.service';
 
 const router = Router();
 
-router.use(requireAuth);
+router.use(requireAuth, requireRole('admin', 'superadmin'));
 
-// ─── System Health ───────────────────────────────────────────────────────────
-
-router.get('/health', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
-  try {
-    const health = await platformOps.getSystemHealth();
-    res.json({ success: true, data: health });
-  } catch (error) { next(error); }
+const creditGrantSchema = z.object({
+  credits: z.number().int().positive().max(100_000_000),
+  mode: z.enum(['free', 'at_cost', 'internal_funding', 'promotion']),
+  wholesale_cost_basis_pence: z.number().int().nonnegative().optional(),
+  description: z.string().trim().max(500).optional(),
+  idempotency_key: z.string().trim().min(8).max(255).optional(),
+  metadata: z.record(z.unknown()).optional(),
 });
 
-router.get('/metrics', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
-  try {
-    const metrics = await platformOps.getSystemMetrics();
-    res.json({ success: true, data: metrics });
-  } catch (error) { next(error); }
+router.get('/health', async (_req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
+  try { res.json({ success: true, data: await platformOps.getSystemHealth() }); }
+  catch (error) { next(error); }
 });
 
-// ─── Provider Status ─────────────────────────────────────────────────────────
-
-router.get('/providers/status', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
-  try {
-    const providers = await platformOps.getProviderStatuses();
-    res.json({ success: true, data: providers });
-  } catch (error) { next(error); }
+router.get('/metrics', async (_req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
+  try { res.json({ success: true, data: await platformOps.getSystemMetrics() }); }
+  catch (error) { next(error); }
 });
 
-// ─── Queue Status ────────────────────────────────────────────────────────────
-
-router.get('/queues', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
-  try {
-    const queues = await platformOps.getQueueStatuses();
-    res.json({ success: true, data: queues });
-  } catch (error) { next(error); }
+router.get('/providers/status', async (_req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
+  try { res.json({ success: true, data: await platformOps.getProviderStatuses() }); }
+  catch (error) { next(error); }
 });
 
-// ─── Tenant Management ───────────────────────────────────────────────────────
+router.get('/queues', async (_req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
+  try { res.json({ success: true, data: await platformOps.getQueueStatuses() }); }
+  catch (error) { next(error); }
+});
 
 router.get('/tenants', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
   try {
     const tenants = await platformOps.listTenants({
       status: req.query.status as string,
       plan: req.query.plan as string,
-      limit: parseInt(req.query.limit as string) || 100,
+      limit: Math.min(parseInt(req.query.limit as string) || 100, 500),
     });
     res.json({ success: true, data: tenants });
   } catch (error) { next(error); }
 });
 
 router.get('/tenants/:orgId', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
+  try { res.json({ success: true, data: await platformOps.getTenantDetails(req.params.orgId) }); }
+  catch (error) { next(error); }
+});
+
+/**
+ * Platform-owner GBP Generation Credit controls.
+ *
+ * These endpoints never expose or modify the GenX API key. They operate only on
+ * the organisation wallet and immutable ledger. The admin may fund an internal
+ * workspace, grant promotional/free credits, or record an at-cost allocation.
+ */
+router.get('/credits/:orgId', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
   try {
-    const details = await platformOps.getTenantDetails(req.params.orgId);
-    res.json({ success: true, data: details });
+    res.json({ success: true, data: await generationCredits.getWallet(req.params.orgId) });
   } catch (error) { next(error); }
 });
 
-// ─── Audit Logs ──────────────────────────────────────────────────────────────
+router.post('/credits/:orgId/grant', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
+  try {
+    const input = creditGrantSchema.parse(req.body);
+    const wallet = await generationCredits.grantCredits({
+      organizationId: req.params.orgId,
+      credits: input.credits,
+      mode: input.mode,
+      adminUserId: req.user!.userId,
+      wholesaleCostBasisPence: input.wholesale_cost_basis_pence,
+      description: input.description,
+      idempotencyKey: input.idempotency_key || `admin-credit-${req.params.orgId}-${randomUUID()}`,
+      metadata: {
+        source: 'platform_admin',
+        currency: 'GBP',
+        ...(input.metadata || {}),
+      },
+    });
+    res.status(201).json({ success: true, data: wallet });
+  } catch (error) { next(error); }
+});
 
 router.get('/audit-logs', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
   try {
@@ -71,34 +97,26 @@ router.get('/audit-logs', async (req: AuthRequest, res: Response<ApiResponse>, n
       action: req.query.action as string,
       entity_type: req.query.entity_type as string,
       user_id: req.query.user_id as string,
-      limit: parseInt(req.query.limit as string) || 50,
-      offset: parseInt(req.query.offset as string) || 0,
+      limit: Math.min(parseInt(req.query.limit as string) || 50, 500),
+      offset: Math.max(parseInt(req.query.offset as string) || 0, 0),
     });
     res.json({ success: true, data: result.logs, meta: { total: result.total } });
   } catch (error) { next(error); }
 });
 
-// ─── Feature Flags ───────────────────────────────────────────────────────────
-
-router.get('/feature-flags', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
-  try {
-    const flags = await featureFlags.listFlags();
-    res.json({ success: true, data: flags });
-  } catch (error) { next(error); }
+router.get('/feature-flags', async (_req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
+  try { res.json({ success: true, data: await featureFlags.listFlags() }); }
+  catch (error) { next(error); }
 });
 
 router.post('/feature-flags', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
-  try {
-    const flag = await featureFlags.createFlag(req.body);
-    res.status(201).json({ success: true, data: flag });
-  } catch (error) { next(error); }
+  try { res.status(201).json({ success: true, data: await featureFlags.createFlag(req.body) }); }
+  catch (error) { next(error); }
 });
 
 router.put('/feature-flags/:key', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
-  try {
-    const flag = await featureFlags.updateFlag(req.params.key, req.body);
-    res.json({ success: true, data: flag });
-  } catch (error) { next(error); }
+  try { res.json({ success: true, data: await featureFlags.updateFlag(req.params.key, req.body) }); }
+  catch (error) { next(error); }
 });
 
 router.delete('/feature-flags/:key', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
@@ -108,43 +126,31 @@ router.delete('/feature-flags/:key', async (req: AuthRequest, res: Response<ApiR
   } catch (error) { next(error); }
 });
 
-router.post('/feature-flags/seed', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
+router.post('/feature-flags/seed', async (_req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
   try {
     await featureFlags.seedDefaultFlags();
     res.json({ success: true, data: { message: 'Default flags seeded' } });
   } catch (error) { next(error); }
 });
 
-// ─── Licensing ───────────────────────────────────────────────────────────────
-
 router.get('/licensing/validate/:orgId', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
-  try {
-    const validation = await licensing.validateLicense(req.params.orgId);
-    res.json({ success: true, data: validation });
-  } catch (error) { next(error); }
+  try { res.json({ success: true, data: await licensing.validateLicense(req.params.orgId) }); }
+  catch (error) { next(error); }
 });
 
 router.get('/licensing/overages/:orgId', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
-  try {
-    const overages = await licensing.detectOverages(req.params.orgId);
-    res.json({ success: true, data: overages });
-  } catch (error) { next(error); }
+  try { res.json({ success: true, data: await licensing.detectOverages(req.params.orgId) }); }
+  catch (error) { next(error); }
 });
 
-// ─── Announcements ───────────────────────────────────────────────────────────
-
 router.get('/announcements', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
-  try {
-    const announcements = await platformOps.listAnnouncements(req.query.active !== 'false');
-    res.json({ success: true, data: announcements });
-  } catch (error) { next(error); }
+  try { res.json({ success: true, data: await platformOps.listAnnouncements(req.query.active !== 'false') }); }
+  catch (error) { next(error); }
 });
 
 router.post('/announcements', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
-  try {
-    const announcement = await platformOps.createAnnouncement(req.body);
-    res.status(201).json({ success: true, data: announcement });
-  } catch (error) { next(error); }
+  try { res.status(201).json({ success: true, data: await platformOps.createAnnouncement(req.body) }); }
+  catch (error) { next(error); }
 });
 
 export default router;

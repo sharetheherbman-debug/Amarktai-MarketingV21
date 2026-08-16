@@ -90,9 +90,9 @@ export default function AboutPage() {
               <span className="text-gradient">Marketing</span>
             </h1>
             <p className="mt-6 text-lg leading-relaxed text-zinc-400 sm:text-xl">
-              AmarktAI Marketing is on a mission to democratize marketing
-              through AI. We believe every business deserves access to
-              enterprise-grade marketing automation.
+              EquiProfile Marketing is building governed, evidence-led
+              automation that gives growing businesses a capable marketing
+              operating system without giving up owner control.
             </p>
           </div>
         </div>
@@ -107,7 +107,7 @@ export default function AboutPage() {
             </h2>
             <div className="mt-8 space-y-6 text-base leading-relaxed text-zinc-400">
               <p>
-                AmarktAI Marketing was born from a simple observation: marketing
+                EquiProfile Marketing starts from a simple observation: marketing
                 teams spend too much time on repetitive tasks and not enough
                 time on strategy and creativity. We saw talented marketers
                 drowning in content calendars, social media scheduling, and
@@ -115,18 +115,15 @@ export default function AboutPage() {
                 customers and building great campaigns took a back seat.
               </p>
               <p>
-                In 2024, our founders — a marketing executive and an AI
-                researcher — came together with a vision: what if AI agents
-                could handle the execution, freeing marketers to focus on what
-                they do best? Not replacing marketers, but empowering them with
-                an AI workforce that never sleeps.
+                The product is designed around a clear division of responsibility:
+                specialist agents can research, plan, draft, revise, and measure,
+                while owners retain control of final customer-facing content and
+                policy-governed external actions.
               </p>
               <p>
-                Today, AmarktAI Marketing serves thousands of businesses
-                worldwide, from solo entrepreneurs to enterprise marketing
-                teams. Our AI agents create content, optimize SEO, manage social
-                media, run email campaigns, and deliver analytics — all while
-                learning and improving every day.
+                The current release connects campaign strategy, a living business
+                knowledge layer, governed content production, supported social and
+                email delivery, and attribution in one auditable workspace.
               </p>
               <p>
                 We&apos;re just getting started. Our vision is a world where

@@ -1,57 +1,125 @@
 import { query } from '../config/database';
-import { decrypt } from '../utils/encryption';
+import { decrypt, encrypt } from '../utils/encryption';
 import { GenXProvider } from './genx.provider';
-import { TogetherProvider } from './together.provider';
-import { DeepInfraProvider } from './deepinfra.provider';
-import { AIProvider, ChatMessage, ChatOptions, ChatResult, EmbeddingResult, ProviderInterface, ProviderHealth, HealthStatus } from '../types';
+import {
+  ChatMessage,
+  ChatOptions,
+  ChatResult,
+  EmbeddingResult,
+  ProviderHealth,
+  ProviderInterface,
+  HealthStatus,
+} from '../types';
 import { logger } from '../utils/logger';
+import { env } from '../config/env';
 import * as usageService from '../services/usage.service';
+
+type ProviderType = 'genx';
 
 interface ProviderInstance {
   id: string;
   name: string;
+  type: ProviderType;
   provider: ProviderInterface;
   priority: number;
   enabled: boolean;
   healthStatus: HealthStatus;
 }
 
+const LEGACY_GENX_MODELS = new Set([
+  '',
+  'default',
+  'gpt-4',
+  'gpt-4-turbo',
+  'gpt-4o',
+  'gpt-4o-mini',
+  'gpt-3.5-turbo',
+]);
+
+/**
+ * Single-provider AI router.
+ *
+ * GenX is the only remote AI provider used by the marketing platform. The
+ * provider key is sourced exclusively from the server environment and is never
+ * accepted from a customer-facing settings page. Local deterministic services
+ * such as PostgreSQL search and FFmpeg rendering remain separate platform
+ * infrastructure and are not AI fallbacks.
+ */
 export class ProviderRouter {
   private providers: Map<string, ProviderInstance> = new Map();
 
+  private async syncEnvironmentProvider(): Promise<void> {
+    if (!env.GENX_API_KEY) {
+      throw new Error('GENX_API_KEY is required');
+    }
+
+    const encryptedKey = JSON.stringify(encrypt(env.GENX_API_KEY));
+    await query(
+      `INSERT INTO ai_providers
+         (name, type, api_key_encrypted, base_url, models, enabled, priority, health_status)
+       VALUES ('genx','genx',$1,$2,'[]'::jsonb,TRUE,100,'unknown')
+       ON CONFLICT (name) DO UPDATE SET
+         type = 'genx',
+         api_key_encrypted = EXCLUDED.api_key_encrypted,
+         base_url = EXCLUDED.base_url,
+         enabled = TRUE,
+         priority = 100,
+         updated_at = NOW()`,
+      [encryptedKey, env.GENX_BASE_URL.replace(/\/$/, '')]
+    );
+
+    // Historical provider rows may remain for audit purposes, but they must not
+    // be selectable by the runtime once the GenX-only policy is active.
+    await query(
+      `UPDATE ai_providers
+       SET enabled=FALSE, updated_at=NOW()
+       WHERE LOWER(name) <> 'genx' OR LOWER(type) <> 'genx'`
+    );
+  }
+
   async loadProviders(): Promise<void> {
-    const result = await query('SELECT * FROM ai_providers WHERE enabled = true ORDER BY priority DESC');
+    await this.syncEnvironmentProvider();
+    this.providers.clear();
+
+    const result = await query(
+      `SELECT * FROM ai_providers
+       WHERE enabled=TRUE AND LOWER(name)='genx' AND LOWER(type)='genx'
+       ORDER BY priority DESC, created_at ASC
+       LIMIT 1`
+    );
 
     for (const row of result.rows) {
       try {
         const apiKey = decrypt(JSON.parse(row.api_key_encrypted));
-        const provider = this.createProviderInstance(row.type, { apiKey, baseUrl: row.base_url });
+        const provider = new GenXProvider({
+          apiKey,
+          baseUrl: String(row.base_url).replace(/\/$/, ''),
+        });
 
-        this.providers.set(row.id, {
-          id: row.id,
-          name: row.name,
+        this.providers.set(String(row.id), {
+          id: String(row.id),
+          name: 'genx',
+          type: 'genx',
           provider,
-          priority: row.priority,
-          enabled: row.enabled,
-          healthStatus: row.health_status || 'unknown',
+          priority: 100,
+          enabled: row.enabled !== false,
+          healthStatus: (row.health_status || 'unknown') as HealthStatus,
         });
       } catch (error) {
-        logger.error(`Failed to load provider ${row.name}: ${error}`);
+        logger.error(`Failed to load GenX provider: ${error}`);
       }
+    }
+
+    if (this.providers.size !== 1) {
+      throw new Error('GenX provider could not be loaded from GENX_API_KEY');
     }
   }
 
-  private createProviderInstance(type: string, config: { apiKey: string; baseUrl: string }): ProviderInterface {
-    switch (type) {
-      case 'genx':
-        return new GenXProvider(config);
-      case 'together':
-        return new TogetherProvider(config);
-      case 'deepinfra':
-        return new DeepInfraProvider(config);
-      default:
-        throw new Error(`Unknown provider type: ${type}`);
-    }
+  private resolveChatModel(requestedModel?: string): string {
+    const requested = String(requestedModel || '').trim();
+    return LEGACY_GENX_MODELS.has(requested.toLowerCase())
+      ? env.DEFAULT_TEXT_MODEL
+      : requested;
   }
 
   async routeRequest(
@@ -60,91 +128,56 @@ export class ProviderRouter {
     options?: ChatOptions,
     context?: { organizationId?: string; userId?: string }
   ): Promise<ChatResult> {
-    const provider = await this.selectProvider(model);
+    const provider = await this.selectProvider();
     if (!provider) {
-      throw new Error('No available provider for the requested model');
+      throw new Error('GenX is not available');
     }
 
+    const resolvedModel = this.resolveChatModel(model);
     try {
-      const result = await provider.provider.chat(messages, model, options);
-      const costCents = usageService.estimateCost(provider.name, model, result.tokensIn, result.tokensOut);
-
-      if (context?.organizationId) {
-        await this.trackUsage({
-          organizationId: context.organizationId,
-          userId: context.userId,
-          providerId: provider.id,
-          model,
-          action: 'chat',
-          tokensIn: result.tokensIn,
-          tokensOut: result.tokensOut,
-          costCents,
-        });
-      }
-
+      const result = await provider.provider.chat(messages, resolvedModel, options);
+      await this.recordUsage(provider, resolvedModel, result, context);
       return result;
     } catch (error) {
-      logger.error(`Provider ${provider.name} failed: ${error}`);
-      return this.failover(provider.id, messages, model, options, context);
+      const message = error instanceof Error ? error.message : String(error);
+      logger.error(`GenX failed for ${resolvedModel}: ${message}`);
+      throw new Error(`GenX request failed: ${message}`);
     }
   }
 
-  async selectProvider(model?: string): Promise<ProviderInstance | null> {
-    const available = Array.from(this.providers.values())
-      .filter((p) => p.enabled && p.healthStatus !== 'unhealthy')
-      .sort((a, b) => b.priority - a.priority);
-
-    if (available.length === 0) {
-      return null;
-    }
-
-    if (model) {
-      const withModel = available.filter((p) => p.provider.getModels().includes(model));
-      if (withModel.length > 0) {
-        return withModel[0];
-      }
-    }
-
-    return available[0];
+  async selectProvider(_model?: string): Promise<ProviderInstance | null> {
+    return Array.from(this.providers.values()).find(
+      (provider) =>
+        provider.enabled &&
+        provider.type === 'genx' &&
+        provider.healthStatus !== 'unhealthy'
+    ) || null;
   }
 
-  async failover(
-    failedProviderId: string,
-    messages: ChatMessage[],
+  private async recordUsage(
+    provider: ProviderInstance,
     model: string,
-    options?: ChatOptions,
+    result: ChatResult,
     context?: { organizationId?: string; userId?: string }
-  ): Promise<ChatResult> {
-    const available = Array.from(this.providers.values())
-      .filter((p) => p.id !== failedProviderId && p.enabled && p.healthStatus !== 'unhealthy')
-      .sort((a, b) => b.priority - a.priority);
+  ): Promise<void> {
+    if (!context?.organizationId) return;
+    const costCents = usageService.estimateCost(
+      'genx',
+      model,
+      result.tokensIn,
+      result.tokensOut
+    );
 
-    for (const provider of available) {
-      try {
-        const result = await provider.provider.chat(messages, model, options);
-        const costCents = usageService.estimateCost(provider.name, model, result.tokensIn, result.tokensOut);
-
-        if (context?.organizationId) {
-          await this.trackUsage({
-            organizationId: context.organizationId,
-            userId: context.userId,
-            providerId: provider.id,
-            model,
-            action: 'chat',
-            tokensIn: result.tokensIn,
-            tokensOut: result.tokensOut,
-            costCents,
-          });
-        }
-
-        return result;
-      } catch (error) {
-        logger.error(`Failover provider ${provider.name} failed: ${error}`);
-        continue;
-      }
-    }
-
-    throw new Error('All providers failed');
+    await this.trackUsage({
+      organizationId: context.organizationId,
+      userId: context.userId,
+      providerId: provider.id,
+      model,
+      action: 'chat',
+      tokensIn: result.tokensIn,
+      tokensOut: result.tokensOut,
+      costCents,
+    });
   }
 
   async trackUsage(data: {
@@ -158,17 +191,7 @@ export class ProviderRouter {
     costCents: number;
   }): Promise<void> {
     try {
-      await usageService.track({
-        organizationId: data.organizationId,
-        userId: data.userId,
-        providerId: data.providerId,
-        model: data.model,
-        action: data.action,
-        tokensIn: data.tokensIn,
-        tokensOut: data.tokensOut,
-        costCents: data.costCents,
-      });
-
+      await usageService.track(data);
       await query(
         `UPDATE ai_providers
          SET usage_stats = jsonb_set(
@@ -180,7 +203,7 @@ export class ProviderRouter {
         [data.providerId]
       );
     } catch (error) {
-      logger.error(`Failed to track usage: ${error}`);
+      logger.error(`Failed to track GenX usage: ${error}`);
     }
   }
 
@@ -192,32 +215,22 @@ export class ProviderRouter {
       try {
         const healthy = await instance.provider.healthCheck();
         const latency = Date.now() - start;
-
         const status: HealthStatus = healthy ? 'healthy' : 'degraded';
         await query(
-          'UPDATE ai_providers SET health_status = $1, last_health_check = NOW() WHERE id = $2',
+          'UPDATE ai_providers SET health_status=$1,last_health_check=NOW() WHERE id=$2',
           [status, id]
         );
-
         instance.healthStatus = status;
-
-        results.push({
-          name: instance.name,
-          status,
-          latency,
-          lastCheck: new Date(),
-        });
+        results.push({ name: 'genx', status, latency, lastCheck: new Date() });
       } catch (error) {
         const latency = Date.now() - start;
         await query(
-          'UPDATE ai_providers SET health_status = $1, last_health_check = NOW() WHERE id = $2',
-          ['unhealthy', id]
+          "UPDATE ai_providers SET health_status='unhealthy',last_health_check=NOW() WHERE id=$1",
+          [id]
         );
-
         instance.healthStatus = 'unhealthy';
-
         results.push({
-          name: instance.name,
+          name: 'genx',
           status: 'unhealthy',
           latency,
           lastCheck: new Date(),
@@ -229,12 +242,13 @@ export class ProviderRouter {
     return results;
   }
 
-  async embeddings(input: string | string[], model: string): Promise<EmbeddingResult[]> {
-    const provider = await this.selectProvider(model);
-    if (!provider) {
-      throw new Error('No available provider for embeddings');
-    }
-    return provider.provider.embeddings(input, model);
+  async embeddings(
+    _input: string | string[],
+    _requestedModel?: string
+  ): Promise<EmbeddingResult[]> {
+    throw new Error(
+      'Remote embeddings are disabled in GenX-only mode; use the platform local embeddings service'
+    );
   }
 }
 

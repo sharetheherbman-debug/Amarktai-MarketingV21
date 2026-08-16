@@ -1,6 +1,7 @@
 import { query } from '../config/database';
 import { logger } from '../utils/logger';
 import { ContentQualityCheck, QualityIssue, QualityReport } from '../types';
+import { evaluateContentQuality } from './content-quality-evaluator';
 
 // ─── Quality Checks ──────────────────────────────────────────────────────────
 
@@ -24,6 +25,32 @@ export async function runQualityChecks(contentId: string, orgId: string): Promis
   checks.push(await checkReadability(contentId, orgId, body));
   checks.push(await checkBrandVoice(contentId, orgId, body));
   checks.push(await checkCta(contentId, orgId, body));
+
+  const brandResult = await query('SELECT prohibited_phrases FROM brand_dna WHERE organization_id=$1', [orgId]);
+  const prohibitedPhrases = Array.isArray(brandResult.rows[0]?.prohibited_phrases)
+    ? brandResult.rows[0].prohibited_phrases.map(String)
+    : [];
+  const metadata = typeof content.metadata === 'string' ? JSON.parse(content.metadata) : content.metadata || {};
+  for (const evaluation of evaluateContentQuality({
+    text: body,
+    type: String(content.type),
+    platform: content.platform ? String(content.platform) : null,
+    metadata,
+    prohibitedPhrases,
+  })) {
+    await query(
+      `INSERT INTO content_quality_checks
+         (content_id,organization_id,check_type,score,issues,suggestions,passed)
+       VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+      [contentId, orgId, evaluation.type, evaluation.score, JSON.stringify(evaluation.issues), JSON.stringify(evaluation.suggestions), evaluation.passed]
+    );
+    checks.push({
+      id: '', content_id: contentId, organization_id: orgId,
+      check_type: evaluation.type, score: evaluation.score,
+      issues: evaluation.issues, suggestions: evaluation.suggestions,
+      passed: evaluation.passed, created_at: new Date().toISOString(),
+    });
+  }
 
   // Calculate overall score
   const totalScore = checks.reduce((sum, c) => sum + c.score, 0) / checks.length;

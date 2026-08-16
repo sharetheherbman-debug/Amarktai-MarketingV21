@@ -1,332 +1,91 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
-import {
-  BookOpen,
-  Globe,
-  FileText,
-  FileUp,
-  Search,
-  Plus,
-  Trash2,
-  RefreshCw,
-  Loader2,
-  AlertCircle,
-  CheckCircle2,
-  Clock,
-  X,
-} from 'lucide-react';
+import { useCallback, useEffect, useState } from 'react';
+import { AlertCircle, BookOpen, CheckCircle2, FileText, Globe, Loader2, Plus, RefreshCw, Search, Trash2, X } from 'lucide-react';
 import { api } from '@/lib/api';
 import type { KnowledgeSource, ApiResponse } from '@/types';
 
-const sourceTypeOptions = [
-  { value: 'website', label: 'Website', icon: Globe, description: 'Crawl and index website pages' },
-  { value: 'document', label: 'Document', icon: FileText, description: 'Upload text documents' },
-  { value: 'api', label: 'API Feed', icon: Globe, description: 'Connect to an API endpoint' },
-  { value: 'manual', label: 'Manual', icon: FileUp, description: 'Add content manually' },
-];
-
-const statusConfig: Record<string, { color: string; bg: string; icon: typeof CheckCircle2 }> = {
-  active: { color: 'text-emerald-400', bg: 'bg-emerald-500/10', icon: CheckCircle2 },
-  completed: { color: 'text-emerald-400', bg: 'bg-emerald-500/10', icon: CheckCircle2 },
-  pending: { color: 'text-amber-400', bg: 'bg-amber-500/10', icon: Clock },
-  crawling: { color: 'text-blue-400', bg: 'bg-blue-500/10', icon: RefreshCw },
-  syncing: { color: 'text-blue-400', bg: 'bg-blue-500/10', icon: RefreshCw },
-  error: { color: 'text-red-400', bg: 'bg-red-500/10', icon: AlertCircle },
-  failed: { color: 'text-red-400', bg: 'bg-red-500/10', icon: AlertCircle },
-};
+interface SearchResult { id: string; title: string | null; content: string; url?: string | null; score?: number; match_type?: string; }
+const types = ['website', 'api', 'rss', 'document', 'manual'];
 
 export default function KnowledgePage() {
   const [sources, setSources] = useState<KnowledgeSource[]>([]);
   const [loading, setLoading] = useState(true);
+  const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
-  const [search, setSearch] = useState('');
-  const [typeFilter, setTypeFilter] = useState<string>('all');
-  const [creating, setCreating] = useState(false);
-  const [newSource, setNewSource] = useState({ name: '', type: 'website', url: '' });
+  const [form, setForm] = useState({ name: '', type: 'website', url: '', content: '', headers: '', max_pages: '10' });
+  const [queryText, setQueryText] = useState('');
+  const [searching, setSearching] = useState(false);
+  const [results, setResults] = useState<SearchResult[]>([]);
 
-  const orgId = typeof window !== 'undefined' ? localStorage.getItem('org_id') || '' : '';
-
-  const fetchSources = useCallback(async () => {
-    if (!orgId) return;
+  const load = useCallback(async () => {
+    setLoading(true);
     try {
-      setLoading(true);
-      const params: Record<string, string> = { organization_id: orgId };
-      if (typeFilter !== 'all') params.type = typeFilter;
-      const res = await api.get<ApiResponse<KnowledgeSource[]>>('/knowledge', { params });
-      setSources(res.data);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load sources');
-    } finally {
-      setLoading(false);
-    }
-  }, [orgId, typeFilter]);
+      const response = await api.get<ApiResponse<KnowledgeSource[]>>('/knowledge');
+      setSources(response.data || []);
+    } catch (caught) { setError(caught instanceof Error ? caught.message : 'Failed to load knowledge sources.'); }
+    finally { setLoading(false); }
+  }, []);
 
-  useEffect(() => {
-    fetchSources();
-  }, [fetchSources]);
+  useEffect(() => { void load(); }, [load]);
 
-  const handleCreate = async () => {
-    if (!newSource.name || !orgId) return;
+  const create = async () => {
+    if (!form.name.trim()) return;
+    setBusyId('create');
+    setError(null);
     try {
-      setCreating(true);
+      let headers: Record<string, string> = {};
+      if (form.headers.trim()) headers = JSON.parse(form.headers) as Record<string, string>;
       await api.post('/knowledge', {
-        body: { ...newSource, organization_id: orgId },
+        body: {
+          name: form.name.trim(), type: form.type, url: form.url.trim() || undefined,
+          content: form.content.trim() || undefined,
+          config: { headers, max_pages: Number(form.max_pages || 10) },
+          sync_now: true,
+        },
       });
+      setForm({ name: '', type: 'website', url: '', content: '', headers: '', max_pages: '10' });
       setShowCreate(false);
-      setNewSource({ name: '', type: 'website', url: '' });
-      fetchSources();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to create source');
-    } finally {
-      setCreating(false);
-    }
+      await load();
+    } catch (caught) { setError(caught instanceof Error ? caught.message : 'Source ingestion failed.'); }
+    finally { setBusyId(null); }
   };
 
-  const handleSync = async (id: string) => {
+  const sync = async (id: string) => {
+    setBusyId(id);
+    try { await api.post(`/knowledge/${id}/sync`, { body: {} }); await load(); }
+    catch (caught) { setError(caught instanceof Error ? caught.message : 'Sync failed.'); }
+    finally { setBusyId(null); }
+  };
+
+  const remove = async (id: string) => {
+    if (!confirm('Delete this source and all indexed content?')) return;
+    setBusyId(id);
+    try { await api.delete(`/knowledge/${id}`); await load(); }
+    catch (caught) { setError(caught instanceof Error ? caught.message : 'Delete failed.'); }
+    finally { setBusyId(null); }
+  };
+
+  const search = async () => {
+    if (!queryText.trim()) return;
+    setSearching(true);
+    setError(null);
     try {
-      await api.post(`/knowledge/${id}/sync`, {
-        body: { organization_id: orgId },
-      });
-      fetchSources();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to sync source');
-    }
+      const response = await api.get<ApiResponse<SearchResult[]>>('/knowledge/search', { params: { q: queryText.trim(), limit: '20' } });
+      setResults(response.data || []);
+    } catch (caught) { setError(caught instanceof Error ? caught.message : 'Search failed.'); }
+    finally { setSearching(false); }
   };
 
-  const handleDelete = async (id: string) => {
-    if (!confirm('Delete this source and all its items?')) return;
-    try {
-      await api.delete(`/knowledge/${id}`, {
-        params: { organization_id: orgId },
-      });
-      fetchSources();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to delete source');
-    }
-  };
+  return <div className="space-y-6">
+    <header className="flex flex-wrap items-center justify-between gap-3"><div><h1 className="text-2xl font-bold text-white">Knowledge Base</h1><p className="mt-1 text-sm text-zinc-400">Crawl, ingest, embed and search organization knowledge used by AI agents.</p></div><button type="button" onClick={() => setShowCreate(true)} className="inline-flex items-center gap-2 rounded-lg bg-brand-500 px-4 py-2.5 text-sm font-semibold text-white"><Plus className="h-4 w-4" />Add source</button></header>
+    {error && <div className="flex items-center gap-3 rounded-lg border border-red-500/20 bg-red-500/5 px-4 py-3"><AlertCircle className="h-4 w-4 text-red-400" /><p className="text-sm text-red-300">{error}</p><button type="button" onClick={() => setError(null)} className="ml-auto text-red-400"><X className="h-4 w-4" /></button></div>}
 
-  const filteredSources = sources.filter((s) =>
-    search ? s.name.toLowerCase().includes(search.toLowerCase()) : true
-  );
+    {showCreate && <section className="rounded-xl border border-white/[0.06] bg-surface-100 p-6"><h2 className="text-lg font-semibold text-white">Create and ingest source</h2><div className="mt-4 grid gap-4 md:grid-cols-2"><label className="space-y-1.5 text-sm text-zinc-300"><span>Name</span><input value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} className="h-10 w-full rounded-lg border border-white/10 bg-black/30 px-3 text-white" /></label><label className="space-y-1.5 text-sm text-zinc-300"><span>Type</span><select value={form.type} onChange={(event) => setForm({ ...form, type: event.target.value })} className="h-10 w-full rounded-lg border border-white/10 bg-black/30 px-3 text-white">{types.map((type) => <option key={type} value={type}>{type}</option>)}</select></label>{['website', 'api', 'rss'].includes(form.type) && <label className="space-y-1.5 text-sm text-zinc-300 md:col-span-2"><span>URL</span><input type="url" value={form.url} onChange={(event) => setForm({ ...form, url: event.target.value })} placeholder="https://example.com" className="h-10 w-full rounded-lg border border-white/10 bg-black/30 px-3 text-white" /></label>}{form.type === 'website' && <label className="space-y-1.5 text-sm text-zinc-300"><span>Maximum pages</span><input type="number" min="1" max="50" value={form.max_pages} onChange={(event) => setForm({ ...form, max_pages: event.target.value })} className="h-10 w-full rounded-lg border border-white/10 bg-black/30 px-3 text-white" /></label>}{form.type === 'api' && <label className="space-y-1.5 text-sm text-zinc-300"><span>Request headers JSON</span><textarea rows={4} value={form.headers} onChange={(event) => setForm({ ...form, headers: event.target.value })} placeholder='{"Authorization":"Bearer ..."}' className="w-full rounded-lg border border-white/10 bg-black/30 p-3 font-mono text-xs text-white" /></label>}{['manual', 'document'].includes(form.type) && <label className="space-y-1.5 text-sm text-zinc-300 md:col-span-2"><span>Content</span><textarea rows={10} value={form.content} onChange={(event) => setForm({ ...form, content: event.target.value })} placeholder="Paste the complete document or knowledge text." className="w-full rounded-lg border border-white/10 bg-black/30 p-3 text-white" /></label>}</div><div className="mt-4 flex gap-2"><button type="button" disabled={busyId === 'create' || !form.name.trim()} onClick={() => void create()} className="inline-flex items-center gap-2 rounded bg-brand-500 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">{busyId === 'create' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}Create and ingest</button><button type="button" onClick={() => setShowCreate(false)} className="px-4 py-2 text-sm text-zinc-400">Cancel</button></div></section>}
 
-  return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-white">Knowledge Base</h1>
-          <p className="mt-1 text-sm text-zinc-400">
-            Import and manage content for your AI agents to reference.
-          </p>
-        </div>
-        <button
-          onClick={() => setShowCreate(true)}
-          className="inline-flex items-center gap-2 rounded-lg bg-brand-500 px-4 py-2.5 text-sm font-semibold text-white transition-all hover:bg-brand-400 active:scale-[0.98]"
-        >
-          <Plus className="h-4 w-4" />
-          Add Source
-        </button>
-      </div>
+    <section className="rounded-xl border border-white/[0.06] bg-surface-100 p-5"><div className="flex gap-2"><div className="relative flex-1"><Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500" /><input value={queryText} onChange={(event) => setQueryText(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') void search(); }} placeholder="Search indexed knowledge semantically and by keyword" className="h-10 w-full rounded-lg border border-white/10 bg-black/20 pl-10 pr-3 text-sm text-white" /></div><button type="button" onClick={() => void search()} disabled={searching || !queryText.trim()} className="rounded bg-brand-500 px-4 text-sm text-white disabled:opacity-50">{searching ? 'Searching…' : 'Search'}</button></div>{results.length > 0 && <div className="mt-4 divide-y divide-white/[0.06]">{results.map((result) => <article key={result.id} className="py-4"><div className="flex justify-between gap-3"><h3 className="text-sm font-medium text-white">{result.title || 'Untitled knowledge chunk'}</h3><span className="text-xs text-zinc-500">{result.match_type || 'match'}{result.score !== undefined ? ` · ${Number(result.score).toFixed(3)}` : ''}</span></div><p className="mt-2 line-clamp-4 whitespace-pre-wrap text-xs text-zinc-400">{result.content}</p>{result.url && <a href={result.url} target="_blank" rel="noreferrer" className="mt-2 inline-block text-xs text-brand-400">Open source</a>}</article>)}</div>}</section>
 
-      {error && (
-        <div className="flex items-center gap-3 rounded-lg border border-red-500/20 bg-red-500/5 px-4 py-3">
-          <AlertCircle className="h-4 w-4 text-red-400" />
-          <p className="text-sm text-red-300">{error}</p>
-          <button onClick={() => setError(null)} className="ml-auto text-red-400 hover:text-red-300">
-            <X className="h-4 w-4" />
-          </button>
-        </div>
-      )}
-
-      {showCreate && (
-        <div className="rounded-xl border border-white/[0.06] bg-surface-100 p-6">
-          <h2 className="text-lg font-semibold text-white">Add Knowledge Source</h2>
-          <div className="mt-4 space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-zinc-300 mb-1.5">Name</label>
-              <input
-                type="text"
-                value={newSource.name}
-                onChange={(e) => setNewSource({ ...newSource, name: e.target.value })}
-                placeholder="My Website"
-                className="h-10 w-full rounded-lg border border-white/[0.06] bg-white/[0.03] px-4 text-sm text-white placeholder-zinc-500 outline-none focus:border-brand-500/50"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-zinc-300 mb-1.5">Type</label>
-              <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-                {sourceTypeOptions.map((opt) => (
-                  <button
-                    key={opt.value}
-                    type="button"
-                    onClick={() => setNewSource({ ...newSource, type: opt.value })}
-                    className={`flex items-center gap-3 rounded-lg border p-3 text-left transition-colors ${
-                      newSource.type === opt.value
-                        ? 'border-brand-500/50 bg-brand-500/10'
-                        : 'border-white/[0.06] bg-white/[0.02] hover:bg-white/[0.04]'
-                    }`}
-                  >
-                    <opt.icon className={`h-5 w-5 ${newSource.type === opt.value ? 'text-brand-400' : 'text-zinc-400'}`} />
-                    <div>
-                      <p className={`text-sm font-medium ${newSource.type === opt.value ? 'text-white' : 'text-zinc-300'}`}>{opt.label}</p>
-                      <p className="text-[11px] text-zinc-500">{opt.description}</p>
-                    </div>
-                  </button>
-                ))}
-              </div>
-            </div>
-            {(newSource.type === 'website' || newSource.type === 'api') && (
-              <div>
-                <label className="block text-sm font-medium text-zinc-300 mb-1.5">URL</label>
-                <input
-                  type="url"
-                  value={newSource.url}
-                  onChange={(e) => setNewSource({ ...newSource, url: e.target.value })}
-                  placeholder="https://example.com"
-                  className="h-10 w-full rounded-lg border border-white/[0.06] bg-white/[0.03] px-4 text-sm text-white placeholder-zinc-500 outline-none focus:border-brand-500/50"
-                />
-              </div>
-            )}
-            <div className="flex items-center gap-3">
-              <button
-                onClick={handleCreate}
-                disabled={creating || !newSource.name}
-                className="inline-flex items-center gap-2 rounded-lg bg-brand-500 px-4 py-2.5 text-sm font-semibold text-white transition-all hover:bg-brand-400 disabled:opacity-50"
-              >
-                {creating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
-                Create Source
-              </button>
-              <button
-                onClick={() => setShowCreate(false)}
-                className="rounded-lg px-4 py-2.5 text-sm font-medium text-zinc-400 hover:bg-white/[0.04] hover:text-white"
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
-        <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500" />
-          <input
-            type="text"
-            placeholder="Search sources..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="h-10 w-full rounded-lg border border-white/[0.06] bg-white/[0.03] pl-10 pr-4 text-sm text-white placeholder-zinc-500 outline-none focus:border-brand-500/50"
-          />
-        </div>
-        <div className="flex items-center gap-2">
-          {['all', 'website', 'document', 'api', 'manual'].map((t) => (
-            <button
-              key={t}
-              onClick={() => setTypeFilter(t)}
-              className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
-                typeFilter === t
-                  ? 'bg-brand-500/10 text-brand-400'
-                  : 'text-zinc-400 hover:bg-white/[0.04] hover:text-white'
-              }`}
-            >
-              {t === 'all' ? 'All' : t.charAt(0).toUpperCase() + t.slice(1)}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {loading ? (
-        <div className="flex items-center justify-center py-20">
-          <Loader2 className="h-8 w-8 animate-spin text-brand-400" />
-        </div>
-      ) : filteredSources.length === 0 ? (
-        <div className="rounded-xl border border-white/[0.06] bg-surface-100">
-          <div className="flex flex-col items-center justify-center py-20 text-center">
-            <div className="flex h-16 w-16 items-center justify-center rounded-full bg-white/[0.04]">
-              <BookOpen className="h-8 w-8 text-zinc-500" />
-            </div>
-            <h3 className="mt-6 text-lg font-semibold text-white">No knowledge sources</h3>
-            <p className="mt-2 max-w-sm text-sm text-zinc-500">
-              Add a website, document, or API feed to build your knowledge base.
-            </p>
-            <button
-              onClick={() => setShowCreate(true)}
-              className="mt-6 inline-flex items-center gap-2 rounded-lg bg-brand-500 px-5 py-2.5 text-sm font-semibold text-white transition-all hover:bg-brand-400"
-            >
-              <Plus className="h-4 w-4" />
-              Add your first source
-            </button>
-          </div>
-        </div>
-      ) : (
-        <div className="space-y-3">
-          {filteredSources.map((source) => {
-            const status = statusConfig[source.status] || statusConfig.pending;
-            const StatusIcon = status.icon;
-            return (
-              <div
-                key={source.id}
-                className="group rounded-xl border border-white/[0.06] bg-surface-100 p-5 transition-all hover:border-brand-500/20"
-              >
-                <div className="flex items-start justify-between">
-                  <div className="flex items-start gap-4">
-                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-brand-500/10">
-                      {source.type === 'website' ? (
-                        <Globe className="h-5 w-5 text-brand-400" />
-                      ) : source.type === 'document' ? (
-                        <FileText className="h-5 w-5 text-purple-400" />
-                      ) : (
-                        <FileUp className="h-5 w-5 text-blue-400" />
-                      )}
-                    </div>
-                    <div>
-                      <h3 className="text-sm font-semibold text-white">{source.name}</h3>
-                      <p className="mt-0.5 text-xs text-zinc-500">
-                        {source.type}
-                        {source.url ? ` — ${source.url}` : ''}
-                      </p>
-                      <div className="mt-2 flex items-center gap-4 text-xs text-zinc-400">
-                        <span>{source.item_count} items</span>
-                        <span>{source.total_tokens.toLocaleString()} tokens</span>
-                        {source.last_synced_at && (
-                          <span>Last synced {new Date(source.last_synced_at).toLocaleDateString()}</span>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold ${status.bg} ${status.color}`}>
-                      <StatusIcon className={`h-3 w-3 ${source.status === 'crawling' || source.status === 'syncing' ? 'animate-spin' : ''}`} />
-                      {source.status}
-                    </span>
-                    <button
-                      onClick={() => handleSync(source.id)}
-                      title="Sync"
-                      className="rounded-md p-1.5 text-zinc-500 transition-colors hover:bg-white/[0.04] hover:text-white"
-                    >
-                      <RefreshCw className="h-4 w-4" />
-                    </button>
-                    <button
-                      onClick={() => handleDelete(source.id)}
-                      title="Delete"
-                      className="rounded-md p-1.5 text-zinc-500 transition-colors hover:bg-red-500/10 hover:text-red-400"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </button>
-                  </div>
-                </div>
-                {source.error_message && (
-                  <div className="mt-3 flex items-center gap-2 rounded-lg bg-red-500/5 px-3 py-2">
-                    <AlertCircle className="h-3.5 w-3.5 text-red-400" />
-                    <p className="text-xs text-red-300">{source.error_message}</p>
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      )}
-    </div>
-  );
+    {loading ? <div className="flex justify-center py-20"><Loader2 className="h-8 w-8 animate-spin text-brand-400" /></div> : sources.length === 0 ? <div className="rounded-xl border border-dashed border-white/10 py-16 text-center"><BookOpen className="mx-auto h-8 w-8 text-zinc-600" /><p className="mt-3 text-sm text-zinc-500">No knowledge sources yet.</p></div> : <div className="space-y-3">{sources.map((source) => <article key={source.id} className="rounded-xl border border-white/[0.06] bg-surface-100 p-5"><div className="flex items-start justify-between gap-4"><div className="flex gap-3">{source.type === 'website' || source.type === 'api' || source.type === 'rss' ? <Globe className="h-5 w-5 text-brand-400" /> : <FileText className="h-5 w-5 text-purple-400" />}<div><h3 className="text-sm font-semibold text-white">{source.name}</h3><p className="text-xs text-zinc-500">{source.type}{source.url ? ` · ${source.url}` : ''}</p><p className="mt-2 text-xs text-zinc-400">{source.item_count} chunks · {source.total_tokens.toLocaleString()} estimated tokens</p>{source.error_message && <p className="mt-2 text-xs text-red-400">{source.error_message}</p>}</div></div><div className="flex items-center gap-2"><span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs ${source.status === 'active' ? 'bg-emerald-500/10 text-emerald-400' : source.status === 'error' ? 'bg-red-500/10 text-red-400' : 'bg-blue-500/10 text-blue-400'}`}>{source.status === 'active' && <CheckCircle2 className="h-3 w-3" />}{source.status}</span><button type="button" onClick={() => void sync(source.id)} className="rounded p-1.5 text-zinc-400 hover:bg-white/5">{busyId === source.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}</button><button type="button" onClick={() => void remove(source.id)} className="rounded p-1.5 text-zinc-400 hover:text-red-400"><Trash2 className="h-4 w-4" /></button></div></div></article>)}</div>}
+  </div>;
 }

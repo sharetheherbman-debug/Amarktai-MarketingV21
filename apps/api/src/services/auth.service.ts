@@ -5,6 +5,7 @@ import { generateAccessToken, generateRefreshToken, verifyRefreshToken } from '.
 import { AppError, ConflictError, UnauthorizedError, NotFoundError } from '../middleware/errorHandler';
 import { User, RegisterData, LoginData, TokenPair } from '../types';
 import { logger } from '../utils/logger';
+import { verify as verifyMfa } from './mfa.service';
 import crypto from 'crypto';
 
 export async function register(data: RegisterData): Promise<{ user: Omit<User, 'password_hash'>; tokens: TokenPair }> {
@@ -32,7 +33,7 @@ export async function register(data: RegisterData): Promise<{ user: Omit<User, '
   return { user, tokens };
 }
 
-export async function login(email: string, password: string): Promise<{ user: Omit<User, 'password_hash'>; tokens: TokenPair }> {
+export async function login(email: string, password: string, mfaCode?: string): Promise<{ user: Omit<User, 'password_hash'>; tokens: TokenPair; mfaEnrollmentRequired?: boolean }> {
   const result = await query(
     'SELECT * FROM users WHERE email = $1 AND deleted_at IS NULL',
     [email]
@@ -51,6 +52,18 @@ export async function login(email: string, password: string): Promise<{ user: Om
   const isValidPassword = await comparePassword(password, user.password_hash);
   if (!isValidPassword) {
     throw new UnauthorizedError('Invalid email or password');
+  }
+
+  if (user.two_factor_enabled) {
+    if (!mfaCode) throw new AppError(401, 'Authenticator or recovery code required', 'MFA_REQUIRED');
+    await verifyMfa(user.id, mfaCode);
+  } else {
+    const { password_hash, ...userWithoutPassword } = user;
+    return {
+      user: userWithoutPassword,
+      tokens: { accessToken: generateAccessToken(user.id, user.email, user.role, false), refreshToken: '' },
+      mfaEnrollmentRequired: true,
+    };
   }
 
   const tokens = generateTokenPair(user.id, user.email, user.role);
@@ -228,4 +241,14 @@ async function storeRefreshToken(userId: string, token: string): Promise<void> {
     'INSERT INTO refresh_tokens (user_id, token_hash, expires_at) VALUES ($1, $2, $3)',
     [userId, tokenHash, expiresAt]
   );
+}
+
+export async function issueSessionAfterMfaEnrollment(userId: string) {
+  const result = await query('SELECT * FROM users WHERE id=$1 AND status=\'active\' AND two_factor_enabled=TRUE AND deleted_at IS NULL', [userId]);
+  if (!result.rows[0]) throw new UnauthorizedError('MFA enrollment is incomplete');
+  const user = result.rows[0];
+  const tokens = generateTokenPair(user.id, user.email, user.role);
+  await storeRefreshToken(user.id, tokens.refreshToken);
+  const { password_hash, two_factor_secret, two_factor_recovery_codes, ...safeUser } = user;
+  return { user: safeUser, tokens };
 }

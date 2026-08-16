@@ -23,12 +23,8 @@ import {
 } from 'lucide-react';
 
 const settingsTabs = [
-  { id: 'profile', label: 'Profile', icon: User },
-  { id: 'organization', label: 'Organization', icon: Building2 },
   { id: 'appearance', label: 'Appearance', icon: Palette },
-  { id: 'notifications', label: 'Notifications', icon: Bell },
   { id: 'security', label: 'Security', icon: Shield },
-  { id: 'billing', label: 'Billing', icon: CreditCard },
 ] as const;
 
 type TabId = (typeof settingsTabs)[number]['id'];
@@ -36,7 +32,7 @@ type TabId = (typeof settingsTabs)[number]['id'];
 function SettingsContent() {
   const { user } = useAuthStore();
   const searchParams = useSearchParams();
-  const [activeTab, setActiveTab] = useState<TabId>('profile');
+  const [activeTab, setActiveTab] = useState<TabId>('security');
 
   useEffect(() => {
     const tab = searchParams.get('tab') as TabId | null;
@@ -74,12 +70,8 @@ function SettingsContent() {
         </nav>
 
         <div className="flex-1 rounded-xl border border-white/[0.06] bg-surface-100 p-6">
-          {activeTab === 'profile' && <ProfileTab />}
-          {activeTab === 'organization' && <OrganizationTab />}
           {activeTab === 'appearance' && <AppearanceTab />}
-          {activeTab === 'notifications' && <NotificationsTab />}
           {activeTab === 'security' && <SecurityTab />}
-          {activeTab === 'billing' && <BillingTab />}
         </div>
       </div>
     </div>
@@ -245,7 +237,7 @@ function AppearanceTab() {
 
       <div>
         <p className="mb-3 text-sm text-zinc-400">
-          Choose how AmarktAI looks on this device. Your preference is saved locally.
+          Choose how EquiProfile Marketing looks on this device. Your preference is saved locally.
         </p>
         <div className="grid gap-3 sm:grid-cols-3">
           {themeOptions.map((option) => (
@@ -366,22 +358,17 @@ function SecurityTab() {
             <Smartphone className="h-5 w-5 text-zinc-400" />
             <div className="flex-1">
               <p className="text-sm font-medium text-white">Two-factor authentication</p>
-              <p className="mt-0.5 text-xs text-zinc-500">Add an extra layer of security to your account.</p>
+              <p className="mt-0.5 text-xs text-zinc-500">Required for every owner session. Recovery codes can be regenerated through the secured MFA API.</p>
             </div>
             <button
               type="button"
-              disabled
-              className="rounded-lg border border-white/[0.06] px-4 py-2 text-sm font-medium text-zinc-500 transition-colors disabled:cursor-not-allowed"
+              className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-4 py-2 text-sm font-medium text-emerald-400"
             >
-              Coming soon
+              Required
             </button>
           </div>
         </div>
 
-        <div className="rounded-lg border border-white/[0.06] bg-white/[0.02] p-4">
-          <p className="text-sm font-medium text-white">Active sessions</p>
-          <p className="mt-1 text-xs text-zinc-500">Session management will be available in a future update.</p>
-        </div>
       </div>
     </div>
   );

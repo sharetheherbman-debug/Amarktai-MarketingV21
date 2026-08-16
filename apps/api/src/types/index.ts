@@ -174,7 +174,7 @@ export interface AIProvider {
   updated_at: Date;
 }
 
-export type ProviderType = 'genx' | 'together' | 'deepinfra' | 'openai' | 'custom';
+export type ProviderType = 'genx';
 export type HealthStatus = 'healthy' | 'degraded' | 'unhealthy' | 'unknown';
 
 export interface Memory {
@@ -312,6 +312,7 @@ export interface AuthPayload {
   userId: string;
   email: string;
   role: UserRole;
+  mfa: boolean;
 }
 
 export interface TokenPair {
@@ -423,6 +424,7 @@ export interface CreateContentData {
   metadata?: Record<string, unknown>;
   scheduled_at?: string;
   assigned_to?: string;
+  parent_id?: string;
 }
 
 export interface UpdateContentData {
@@ -898,6 +900,11 @@ export interface ContentItem {
   ai_context: Record<string, unknown>;
   template_id: string | null;
   parent_id: string | null;
+  root_content_id: string | null;
+  source_content_id: string | null;
+  transformation_type: string | null;
+  reuse_score: number;
+  performance_summary: Record<string, unknown>;
   version: number;
   scheduled_at: string | null;
   published_at: string | null;
@@ -1039,6 +1046,7 @@ export interface ContentGenerationJob {
   created_by: string | null;
   created_at: string;
   updated_at: string;
+  attempt_count?: number;
 }
 
 export interface GenerateContentRequest {
@@ -1049,16 +1057,27 @@ export interface GenerateContentRequest {
   template_id?: string;
   variables?: Record<string, string>;
   campaign_id?: string;
+  campaign_plan_id?: string;
+  brief_id?: string;
   max_words?: number;
   tone?: string;
   language?: string;
+  audience?: string;
+  objective?: string;
+  offer?: string;
+  calls_to_action?: string[];
+  creative_direction?: string;
+  prohibited_claims?: string[];
+  required_terms?: string[];
+  alt_text?: string;
+  idempotency_key?: string;
 }
 
 export interface ContentQualityCheck {
   id: string;
   content_id: string;
   organization_id: string;
-  check_type: 'grammar' | 'readability' | 'seo' | 'brand_voice' | 'duplicate' | 'compliance' | 'cta';
+  check_type: 'grammar' | 'readability' | 'seo' | 'brand_voice' | 'duplicate' | 'compliance' | 'cta' | 'campaign_alignment' | 'platform' | 'originality' | 'accessibility';
   score: number;
   issues: QualityIssue[];
   suggestions: string[];

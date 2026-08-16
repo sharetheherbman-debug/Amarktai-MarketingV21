@@ -1,4 +1,5 @@
 import { query } from '../config/database';
+import { safeFetch } from '../utils/safe-fetch';
 import { logger } from '../utils/logger';
 import { NotFoundError, AppError } from '../middleware/errorHandler';
 import crypto from 'crypto';
@@ -179,17 +180,13 @@ export async function testWebhook(url: string, payload: Record<string, unknown>,
 }> {
   const start = Date.now();
   try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 10000);
-
-    const response = await fetch(url, {
+    const response = await safeFetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...headers },
       body: JSON.stringify(payload),
-      signal: controller.signal,
+      timeoutMs: 10000,
+      maxResponseBytes: 1024 * 1024,
     });
-
-    clearTimeout(timeout);
     const body = await response.text();
 
     return {

@@ -102,7 +102,7 @@ export default function BlogPage() {
               Blog
             </h1>
             <p className="mt-6 text-lg leading-relaxed text-zinc-400 sm:text-xl">
-              Insights, tutorials, and news from AmarktAI Marketing.
+              Insights, tutorials, and news from EquiProfile Marketing.
             </p>
           </div>
         </div>

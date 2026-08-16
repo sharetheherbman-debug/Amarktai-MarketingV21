@@ -1,6 +1,7 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import * as authService from '../services/auth.service';
-import { requireAuth, AuthRequest } from '../middleware/auth';
+import { requireAuth, requireMfaEnrollment, AuthRequest } from '../middleware/auth';
+import * as mfaService from '../services/mfa.service';
 import { validateBody } from '../middleware/validator';
 import { authLimiter } from '../middleware/rateLimit';
 import { registerSchema, loginSchema, forgotPasswordSchema, resetPasswordSchema } from '../utils/validation';
@@ -16,33 +17,19 @@ const cookieOptions = {
   path: '/',
 };
 
-router.post('/register', authLimiter, validateBody(registerSchema), async (req: Request, res: Response<ApiResponse>, next: NextFunction) => {
-  try {
-    const { user, tokens } = await authService.register(req.body);
-
-    res.cookie('accessToken', tokens.accessToken, {
-      ...cookieOptions,
-      maxAge: 15 * 60 * 1000,
-    });
-
-    res.cookie('refreshToken', tokens.refreshToken, {
-      ...cookieOptions,
-      maxAge: 7 * 24 * 60 * 60 * 1000,
-    });
-
-    res.status(201).json({
-      success: true,
-      data: { user, accessToken: tokens.accessToken },
-    });
-  } catch (error) {
-    next(error);
-  }
+router.post('/register', authLimiter, (_req: Request, res: Response<ApiResponse>) => {
+  res.status(404).json({ success: false, error: { message: 'Public registration is not available', code: 'REGISTRATION_DISABLED' } });
 });
 
 router.post('/login', authLimiter, validateBody(loginSchema), async (req: Request, res: Response<ApiResponse>, next: NextFunction) => {
   try {
-    const { email, password } = req.body;
-    const { user, tokens } = await authService.login(email, password);
+    const { email, password, mfa_code } = req.body;
+    const { user, tokens, mfaEnrollmentRequired } = await authService.login(email, password, mfa_code);
+
+    if (mfaEnrollmentRequired) {
+      res.json({ success: true, data: { user, accessToken: tokens.accessToken, mfa_enrollment_required: true } });
+      return;
+    }
 
     res.cookie('accessToken', tokens.accessToken, {
       ...cookieOptions,
@@ -61,6 +48,25 @@ router.post('/login', authLimiter, validateBody(loginSchema), async (req: Reques
   } catch (error) {
     next(error);
   }
+});
+
+router.post('/mfa/enroll', authLimiter, requireMfaEnrollment, async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction) => {
+  try { res.json({ success: true, data: await mfaService.beginEnrollment(req.user!.userId) }); } catch (error) { next(error); }
+});
+
+router.post('/mfa/confirm', authLimiter, requireMfaEnrollment, async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction) => {
+  try {
+    const code = String(req.body.code || '');
+    const enrollment = await mfaService.completeEnrollment(req.user!.userId, code);
+    const { user, tokens } = await authService.issueSessionAfterMfaEnrollment(req.user!.userId);
+    res.cookie('accessToken', tokens.accessToken, { ...cookieOptions, maxAge: 15 * 60 * 1000 });
+    res.cookie('refreshToken', tokens.refreshToken, { ...cookieOptions, maxAge: 7 * 24 * 60 * 60 * 1000 });
+    res.json({ success: true, data: { ...enrollment, user, accessToken: tokens.accessToken } });
+  } catch (error) { next(error); }
+});
+
+router.post('/mfa/recovery-codes/regenerate', authLimiter, requireAuth, async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction) => {
+  try { res.json({ success: true, data: await mfaService.regenerateRecoveryCodes(req.user!.userId, String(req.body.code || '')) }); } catch (error) { next(error); }
 });
 
 router.post('/logout', (_req: Request, res: Response<ApiResponse>) => {

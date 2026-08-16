@@ -54,7 +54,7 @@ export function MarketingHeader() {
             </svg>
           </div>
           <span className="text-lg font-bold text-white">
-            Amarkt<span className="text-brand-400">AI</span>
+            EquiProfile <span className="text-brand-400">Marketing</span>
           </span>
         </Link>
 

@@ -13,7 +13,7 @@ module.exports = {
   ],
   coverageDirectory: 'coverage',
   coverageReporters: ['text', 'lcov', 'clover'],
-  coverageThresholds: {
+  coverageThreshold: {
     global: {
       branches: 0,
       functions: 0,

@@ -1,0 +1,12 @@
+declare global {
+  interface Object {
+    STRIPE_PRICE_STARTER_MONTHLY_ID: string;
+    STRIPE_PRICE_STARTER_YEARLY_ID: string;
+    STRIPE_PRICE_PROFESSIONAL_MONTHLY_ID: string;
+    STRIPE_PRICE_PROFESSIONAL_YEARLY_ID: string;
+    STRIPE_PRICE_ENTERPRISE_MONTHLY_ID: string;
+    STRIPE_PRICE_ENTERPRISE_YEARLY_ID: string;
+  }
+}
+
+export {};

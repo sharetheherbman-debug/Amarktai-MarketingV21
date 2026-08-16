@@ -4,7 +4,6 @@ import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import {
   FileText,
-  Plus,
   Search,
   Filter,
   Loader2,
@@ -101,7 +100,8 @@ export default function ContentStudioPage() {
   const stats = {
     total: items.length,
     drafts: items.filter(i => i.status === 'draft').length,
-    published: items.filter(i => i.status === 'published').length,
+    review: items.filter(i => i.status === 'review').length,
+    approved: items.filter(i => i.status === 'approved').length,
     aiGenerated: items.filter(i => i.ai_generated).length,
   };
 
@@ -110,7 +110,7 @@ export default function ContentStudioPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-white">Content Studio</h1>
-          <p className="mt-1 text-sm text-zinc-400">Create, manage, and publish AI-powered marketing content.</p>
+          <p className="mt-1 text-sm text-zinc-400">Create, review and govern campaign content from one workspace.</p>
         </div>
         <div className="flex items-center gap-3">
           <Link
@@ -118,14 +118,7 @@ export default function ContentStudioPage() {
             className="inline-flex items-center gap-2 rounded-lg bg-brand-500 px-4 py-2.5 text-sm font-semibold text-white transition-all hover:bg-brand-400"
           >
             <Sparkles className="h-4 w-4" />
-            AI Generate
-          </Link>
-          <Link
-            href="/content-studio/new"
-            className="inline-flex items-center gap-2 rounded-lg border border-white/[0.06] bg-white/[0.03] px-4 py-2.5 text-sm font-semibold text-white transition-all hover:bg-white/[0.06]"
-          >
-            <Plus className="h-4 w-4" />
-            New Content
+            Create content
           </Link>
         </div>
       </div>
@@ -142,7 +135,8 @@ export default function ContentStudioPage() {
         {[
           { label: 'Total Content', value: stats.total, icon: FileText, color: 'text-blue-400', bg: 'bg-blue-500/10' },
           { label: 'Drafts', value: stats.drafts, icon: Edit3, color: 'text-amber-400', bg: 'bg-amber-500/10' },
-          { label: 'Published', value: stats.published, icon: CheckCircle2, color: 'text-emerald-400', bg: 'bg-emerald-500/10' },
+          { label: 'Owner review', value: stats.review, icon: Clock, color: 'text-amber-400', bg: 'bg-amber-500/10' },
+          { label: 'Approved', value: stats.approved, icon: CheckCircle2, color: 'text-emerald-400', bg: 'bg-emerald-500/10' },
           { label: 'AI Generated', value: stats.aiGenerated, icon: Sparkles, color: 'text-purple-400', bg: 'bg-purple-500/10' },
         ].map(stat => (
           <div key={stat.label} className="rounded-xl border border-white/[0.06] bg-surface-100 p-5">
@@ -165,7 +159,7 @@ export default function ContentStudioPage() {
         </div>
         <div className="flex items-center gap-2">
           <Filter className="h-4 w-4 text-zinc-500" />
-          {['all', 'draft', 'review', 'published'].map(s => (
+          {['all', 'draft', 'review', 'approved', 'published'].map(s => (
             <button key={s} onClick={() => setStatusFilter(s)}
               className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${statusFilter === s ? 'bg-brand-500/10 text-brand-400' : 'text-zinc-400 hover:bg-white/[0.04]'}`}>
               {s === 'all' ? 'All' : s.charAt(0).toUpperCase() + s.slice(1)}

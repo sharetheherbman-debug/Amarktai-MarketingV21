@@ -1,9 +1,8 @@
 import { query } from '../config/database';
 import { logger } from '../utils/logger';
-import { providerRouter } from '../providers/provider-router';
+import { AppError } from '../middleware/errorHandler';
+import { generateGovernedText } from './governed-text-generation.service';
 import { contextEngine } from './context-engine.service';
-
-// ─── Types ───────────────────────────────────────────────────────────────────
 
 export interface CampaignOptimization {
   id: string;
@@ -18,107 +17,110 @@ export interface CampaignOptimization {
   created_at: string;
 }
 
-// ─── Optimization Analysis ───────────────────────────────────────────────────
+function parseRecommendations(content: string): Array<Record<string, unknown>> {
+  const cleaned = content.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '');
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(cleaned);
+  } catch {
+    const start = cleaned.indexOf('[');
+    const end = cleaned.lastIndexOf(']');
+    if (start < 0 || end <= start) throw new AppError(502, 'AI provider returned invalid optimization JSON', 'AI_RESPONSE_INVALID');
+    try { parsed = JSON.parse(cleaned.slice(start, end + 1)); }
+    catch { throw new AppError(502, 'AI provider returned invalid optimization JSON', 'AI_RESPONSE_INVALID'); }
+  }
+  if (!Array.isArray(parsed)) throw new AppError(502, 'AI optimization response must be an array', 'AI_RESPONSE_INVALID');
+  const recommendations = parsed.slice(0, 10).flatMap((value): Array<Record<string, unknown>> => {
+    if (!value || typeof value !== 'object') return [];
+    const row = value as Record<string, unknown>;
+    const recommendation = String(row.recommendation || '').trim();
+    if (!recommendation) return [];
+    return [{
+      type: String(row.type || 'general').slice(0, 80),
+      recommendation,
+      impact_score: Math.max(0, Math.min(Number(row.impact_score || 50), 100)),
+      data: row.data && typeof row.data === 'object' ? row.data as Record<string, unknown> : {},
+    }];
+  });
+  if (recommendations.length === 0) throw new AppError(502, 'AI provider returned no usable optimization recommendations', 'AI_RESPONSE_INVALID');
+  return recommendations;
+}
 
 export async function analyzeCampaign(orgId: string, campaignId: string): Promise<CampaignOptimization[]> {
-  // Get campaign data
-  const campaignResult = await query(
-    'SELECT * FROM campaigns WHERE id = $1 AND organization_id = $2',
-    [campaignId, orgId]
-  );
-  if (campaignResult.rows.length === 0) return [];
-
+  const campaignResult = await query('SELECT * FROM campaigns WHERE id = $1 AND organization_id = $2', [campaignId, orgId]);
+  if (campaignResult.rows.length === 0) throw new AppError(404, 'Campaign not found', 'NOT_FOUND');
   const campaign = campaignResult.rows[0];
   const metrics = typeof campaign.metrics === 'string' ? JSON.parse(campaign.metrics) : campaign.metrics || {};
-
-  // Get related content performance
   const contentResult = await query(
     'SELECT type, status, quality_score, word_count FROM content_items WHERE campaign_id = $1 AND organization_id = $2',
     [campaignId, orgId]
   );
-
-  const context = await contextEngine.assemble({ orgId, agentId: '', includeBrandDna: true });
-
-  const prompt = `Analyze this marketing campaign and provide optimization recommendations.
-
-Campaign: ${campaign.name}
-Type: ${campaign.type}
-Status: ${campaign.status}
-Metrics: ${JSON.stringify(metrics)}
-Content pieces: ${contentResult.rows.length}
-${context.brandDna ? `Brand: ${context.brandDna.substring(0, 500)}` : ''}
-
-Provide 3-5 specific optimization recommendations with:
-- Type (content_rewrite, timing, keyword, audience, budget)
-- Specific recommendation
-- Estimated impact (0-100)
-- Implementation steps
-
-Return as JSON: [{"type":"...","recommendation":"...","impact_score":0,"data":{"steps":["..."]}}]`;
+  const context = await contextEngine.assemble({ orgId, includeBrandDna: true, includeKnowledge: true, knowledgeQuery: String(campaign.name || '') });
+  const prompt = `Analyze this marketing campaign and return 3-5 specific optimization recommendations as strict JSON.\n\nCampaign: ${campaign.name}\nType: ${campaign.type}\nStatus: ${campaign.status}\nMetrics: ${JSON.stringify(metrics)}\nContent: ${JSON.stringify(contentResult.rows)}\n${context.fullContext}\n\nSchema: [{"type":"content_rewrite|timing|keyword|audience|budget","recommendation":"specific action","impact_score":0,"data":{"steps":["..."]}}]`;
 
   try {
-    const result = await providerRouter.routeRequest(
-      [{ role: 'user', content: prompt }],
-      'gpt-4o-mini',
-      { max_tokens: 3000, temperature: 0.7 },
-      { organizationId: orgId }
-    );
-
-    const recommendations = JSON.parse(result.content.replace(/```json\n?|\n?```/g, ''));
+    const result = await generateGovernedText({
+      organizationId: orgId,
+      campaignId,
+      title: `Analyse campaign: ${String(campaign.name || campaignId)}`,
+      summary: 'Generate bounded optimization recommendations from recorded campaign metrics',
+      messages: [
+        { role: 'system', content: 'Return only valid JSON. Do not invent performance data that is not provided.' },
+        { role: 'user', content: prompt },
+      ],
+      maxTokens: 3000,
+      temperature: 0.3,
+      payload: { campaign_id: campaignId, purpose: 'optimization_recommendations' },
+    });
+    const recommendations = parseRecommendations(result.content);
     const optimizations: CampaignOptimization[] = [];
-
-    for (const rec of recommendations) {
+    for (const recommendation of recommendations) {
       const dbResult = await query(
         `INSERT INTO campaign_optimizations (organization_id, campaign_id, type, recommendation, data, impact_score)
-         VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
-        [orgId, campaignId, rec.type, rec.recommendation, JSON.stringify(rec.data || {}), rec.impact_score || 50]
+         VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
+        [orgId, campaignId, recommendation.type, recommendation.recommendation, JSON.stringify(recommendation.data || {}), recommendation.impact_score]
       );
       optimizations.push(mapRow(dbResult.rows[0]));
     }
-
     logger.info(`Campaign ${campaignId} analyzed: ${optimizations.length} recommendations`);
     return optimizations;
   } catch (error) {
-    logger.error(`Campaign analysis failed: ${error}`);
-    return [];
+    if (error instanceof AppError) throw error;
+    const message = error instanceof Error ? error.message : String(error);
+    logger.error(`Campaign analysis failed: ${message}`);
+    throw new AppError(502, `Campaign analysis failed: ${message}`, 'CAMPAIGN_ANALYSIS_FAILED');
   }
 }
 
 export async function listOptimizations(orgId: string, campaignId?: string): Promise<CampaignOptimization[]> {
   let sql = 'SELECT * FROM campaign_optimizations WHERE organization_id = $1';
   const params: unknown[] = [orgId];
-
-  if (campaignId) {
-    sql += ' AND campaign_id = $2';
-    params.push(campaignId);
-  }
-
+  if (campaignId) { sql += ' AND campaign_id = $2'; params.push(campaignId); }
   sql += ' ORDER BY impact_score DESC, created_at DESC';
   const result = await query(sql, params);
   return result.rows.map(mapRow);
 }
 
 export async function applyOptimization(id: string, orgId: string): Promise<void> {
-  await query(
-    "UPDATE campaign_optimizations SET status = 'applied', applied_at = NOW() WHERE id = $1 AND organization_id = $2",
+  const result = await query(
+    "UPDATE campaign_optimizations SET status = 'applied', applied_at = NOW() WHERE id = $1 AND organization_id = $2 RETURNING id",
     [id, orgId]
   );
+  if (result.rows.length === 0) throw new AppError(404, 'Campaign optimization not found', 'NOT_FOUND');
   logger.info(`Optimization ${id} applied`);
 }
 
-// ─── Mapper ──────────────────────────────────────────────────────────────────
-
 function mapRow(row: Record<string, unknown>): CampaignOptimization {
   return {
-    id: row.id as string,
-    organization_id: row.organization_id as string,
-    campaign_id: row.campaign_id as string,
-    type: row.type as string,
-    recommendation: row.recommendation as string,
+    id: String(row.id),
+    organization_id: String(row.organization_id),
+    campaign_id: String(row.campaign_id),
+    type: String(row.type),
+    recommendation: String(row.recommendation),
     data: typeof row.data === 'string' ? JSON.parse(row.data) : (row.data as Record<string, unknown>) || {},
-    status: row.status as string,
-    impact_score: parseFloat(row.impact_score as string) || 0,
-    applied_at: row.applied_at as string | null,
-    created_at: row.created_at as string,
+    status: String(row.status),
+    impact_score: Number(row.impact_score || 0),
+    applied_at: row.applied_at ? String(row.applied_at) : null,
+    created_at: String(row.created_at),
   };
 }

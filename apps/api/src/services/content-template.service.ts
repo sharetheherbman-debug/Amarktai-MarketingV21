@@ -160,7 +160,7 @@ export async function seedDefaultTemplates(orgId: string): Promise<void> {
         { name: 'social_proof', type: 'text', description: 'Testimonials or stats', required: false },
         { name: 'cta', type: 'string', description: 'Call to action', required: true },
       ],
-      prompt_template: 'Create a landing page for {{product}}. Focus on benefits: {{benefits}}. Target audience: {{audience}}. Main CTA: {{cta}}.',
+      prompt_template: 'Create a landing page for {{product}} using only the supplied facts. Focus on verified benefits: {{benefits}}. Target audience: {{audience}}. Main CTA: {{cta}}. Include social proof only when the owner supplied it; never invent testimonials or statistics.',
     },
   ];
 

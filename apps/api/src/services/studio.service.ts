@@ -1,3 +1,5 @@
+import crypto from 'crypto';
+import { promises as fs } from 'fs';
 import { Queue } from 'bullmq';
 import { query } from '../config/database';
 import { logger } from '../utils/logger';
@@ -5,15 +7,14 @@ import { AppError, NotFoundError } from '../middleware/errorHandler';
 import { genxMultimodalProvider } from '../providers/genx-multimodal.provider';
 import * as genxRegistry from './genx-model-registry.service';
 
-const generationQueue = new Queue('studio-generations', {
-  connection: {
-    host: process.env.REDIS_HOST || 'localhost',
-    port: parseInt(process.env.REDIS_PORT || '6379'),
-    password: process.env.REDIS_PASSWORD || undefined,
-  },
-});
+const redisConnection = {
+  host: process.env.REDIS_HOST || 'localhost',
+  port: parseInt(process.env.REDIS_PORT || '6379', 10),
+  password: process.env.REDIS_PASSWORD || undefined,
+};
 
-// Types
+export const generationQueue = new Queue('studio-generations', { connection: redisConnection });
+
 export interface StudioGeneration {
   id: string;
   organization_id: string;
@@ -37,66 +38,42 @@ export interface StudioGeneration {
   completed_at: string | null;
 }
 
-export interface StudioModel {
+export interface StudioAsset {
   id: string;
-  name: string;
-  type: string; // 'text_to_image', 'image_to_image', 'text_to_video', etc.
-  provider: string;
-  status: 'available' | 'pending' | 'unsupported';
-  description: string;
+  organization_id: string;
+  user_id: string | null;
+  filename: string;
+  original_name: string | null;
+  mime_type: string;
+  size_bytes: number;
+  storage_path: string;
+  url: string;
+  metadata: Record<string, unknown>;
+  created_at: string;
 }
 
-// ─── Model Catalogue ─────────────────────────────────────────────────────────
-
-export function getAvailableModels(): StudioModel[] {
-  // This is a sync function for backward compatibility
-  // In production, models come from the genx_models database table
-  // For now, return models that will be populated by the sync process
-  return [
-    {
-      id: 'genx-sync-required',
-      name: 'Sync GenX Models',
-      type: 'text_generation',
-      provider: 'genx',
-      status: 'available',
-      description: 'Run model sync from admin panel to discover available models',
-    },
-  ];
+function normalizeOperation(type: string): string {
+  if (type === 'cinema') return 'text_to_video';
+  return type;
 }
 
-export async function getAvailableModelsAsync(): Promise<StudioModel[]> {
-  // Get models from the live GenX registry
-  const genxModels = await genxRegistry.getAvailableModels();
+async function ensureAvailableModels(operation?: string) {
+  const normalized = operation ? normalizeOperation(operation) : undefined;
+  let models = await genxRegistry.getAvailableModels(normalized);
+  if (models.length > 0) return models;
 
-  if (genxModels.length === 0) {
-    return getAvailableModels();
+  const liveModels = await genxRegistry.fetchLiveModelCatalogue();
+  if (liveModels.length === 0) {
+    throw new AppError(503, 'GenX model catalogue is unavailable', 'GENX_CATALOGUE_UNAVAILABLE');
   }
-
-  // Map GenX models to Studio models
-  return genxModels.map(model => ({
-    id: model.id,
-    name: model.name,
-    type: getPrimaryOperation(model.operations || []),
-    provider: 'genx',
-    status: model.available ? 'available' : 'pending',
-    description: `${model.vendor ? model.vendor + ' - ' : ''}${(model.operations || []).join(', ')}`,
-  }));
+  await genxRegistry.syncModelsToDatabase(liveModels);
+  models = await genxRegistry.getAvailableModels(normalized);
+  return models;
 }
 
-function getPrimaryOperation(operations: string[]): string {
-  if (operations.includes('text_to_image')) return 'text_to_image';
-  if (operations.includes('image_to_image')) return 'image_to_image';
-  if (operations.includes('text_to_video')) return 'text_to_video';
-  if (operations.includes('image_to_video')) return 'image_to_video';
-  if (operations.includes('lip_sync')) return 'lip_sync';
-  if (operations.includes('text_to_speech')) return 'text_to_speech';
-  if (operations.includes('speech_to_text')) return 'speech_to_text';
-  if (operations.includes('vision')) return 'vision';
-  if (operations.includes('embedding')) return 'embedding';
-  return 'chat';
+export async function getAvailableModels(operation?: string) {
+  return ensureAvailableModels(operation);
 }
-
-// ─── Generation Requests ─────────────────────────────────────────────────────
 
 export async function createGeneration(
   orgId: string,
@@ -109,51 +86,89 @@ export async function createGeneration(
     options?: Record<string, unknown>;
   }
 ): Promise<StudioGeneration> {
-  // Find an appropriate model for this generation type
+  const operation = normalizeOperation(data.type);
   let modelId = data.model;
-  if (!modelId) {
-    const models = await genxRegistry.getAvailableModels(data.type);
+
+  if (modelId) {
+    const model = await genxRegistry.getModelById(modelId);
+    if (!model || model.available === false || model.deprecated === true) {
+      throw new AppError(400, 'Selected GenX model is not available', 'MODEL_UNAVAILABLE');
+    }
+    if (!(model.operations || []).includes(operation)) {
+      throw new AppError(400, `Selected model does not support ${operation}`, 'MODEL_OPERATION_UNSUPPORTED');
+    }
+  } else {
+    const models = await ensureAvailableModels(operation);
     if (models.length === 0) {
-      const result = await query(
-        `INSERT INTO studio_generations (organization_id, user_id, type, model, prompt, negative_prompt, options, provider, status, error_code, error_message)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, 'genx', 'failed', 'NO_MODEL_AVAILABLE', 'No GenX model available for this generation type')
-         RETURNING *`,
-        [orgId, userId, data.type, null, data.prompt || null, data.negative_prompt || null, JSON.stringify(data.options || {})]
-      );
-      return mapGenerationRow(result.rows[0]);
+      throw new AppError(400, `No GenX model is available for ${operation}`, 'NO_MODEL_AVAILABLE');
     }
     modelId = models[0].id;
   }
 
-  // Create the generation record
+  const idempotencyKey =
+    typeof data.options?.idempotency_key === 'string'
+      ? data.options.idempotency_key
+      : crypto.randomUUID();
+
+  const existing = await query(
+    `SELECT * FROM studio_generations
+     WHERE organization_id = $1 AND idempotency_key = $2
+     LIMIT 1`,
+    [orgId, idempotencyKey]
+  );
+  if (existing.rows.length > 0) return mapGenerationRow(existing.rows[0]);
+
   const result = await query(
-    `INSERT INTO studio_generations (organization_id, user_id, type, model, prompt, negative_prompt, options, provider, status)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, 'genx', 'pending')
+    `INSERT INTO studio_generations (
+       organization_id, user_id, type, model, prompt, negative_prompt, options,
+       provider, status, idempotency_key
+     )
+     VALUES ($1, $2, $3, $4, $5, $6, $7, 'genx', 'pending', $8)
      RETURNING *`,
-    [orgId, userId, data.type, modelId, data.prompt || null, data.negative_prompt || null, JSON.stringify(data.options || {})]
+    [
+      orgId,
+      userId,
+      data.type,
+      modelId,
+      data.prompt || null,
+      data.negative_prompt || null,
+      JSON.stringify(data.options || {}),
+      idempotencyKey,
+    ]
   );
 
   const generation = mapGenerationRow(result.rows[0]);
+  const job = await generationQueue.add(
+    'studio-generate',
+    {
+      kind: 'studio',
+      generationId: generation.id,
+      organizationId: orgId,
+      userId,
+      type: data.type,
+      modelId,
+      prompt: data.prompt,
+      negativePrompt: data.negative_prompt,
+      options: data.options || {},
+    },
+    {
+      jobId: `studio:${generation.id}`,
+      // Control Centre approvals may be granted after the owner reviews the
+      // queued request. Retain the same job/idempotency key while it waits.
+      attempts: 60,
+      backoff: { type: 'fixed', delay: 30_000 },
+      removeOnComplete: { age: 86400 },
+      removeOnFail: { age: 604800 },
+    }
+  );
 
-  // Enqueue generation job
-  await generationQueue.add('generate', {
-    generationId: generation.id,
-    organizationId: orgId,
-    userId,
-    type: data.type,
-    modelId,
-    prompt: data.prompt,
-    negativePrompt: data.negative_prompt,
-    options: data.options,
-  }, {
-    attempts: 3,
-    backoff: { type: 'exponential', delay: 5000 },
-    removeOnComplete: { age: 86400 },
-    removeOnFail: { age: 604800 },
-  });
+  await query(
+    'UPDATE studio_generations SET queue_job_id = $1, updated_at = NOW() WHERE id = $2',
+    [String(job.id), generation.id]
+  );
 
   logger.info(`Generation queued: ${generation.id}`);
-  return generation;
+  return getGeneration(generation.id, orgId);
 }
 
 export async function getGeneration(id: string, orgId: string): Promise<StudioGeneration> {
@@ -165,48 +180,139 @@ export async function getGeneration(id: string, orgId: string): Promise<StudioGe
   return mapGenerationRow(result.rows[0]);
 }
 
-export async function listGenerations(orgId: string, userId?: string, limit: number = 50): Promise<StudioGeneration[]> {
+export async function retryGeneration(id: string, orgId: string, userId: string): Promise<StudioGeneration> {
+  const result = await query(
+    `SELECT * FROM studio_generations WHERE id=$1 AND organization_id=$2 FOR UPDATE`,
+    [id, orgId]
+  );
+  if (result.rows.length === 0) throw new NotFoundError('Generation');
+  const row = result.rows[0];
+  if (!['failed','cancelled'].includes(String(row.status))) return mapGenerationRow(row);
+  const options = typeof row.options === 'string' ? JSON.parse(row.options) : row.options || {};
+  const job = await generationQueue.add('studio-generate', {
+    kind: 'studio', generationId: id, organizationId: orgId, userId,
+    type: row.type, modelId: row.model, prompt: row.prompt,
+    negativePrompt: row.negative_prompt, options,
+  }, {
+    jobId: `studio:${id}:retry:${Number(row.attempt_count || 0) + 1}`,
+    attempts: 60, backoff: { type: 'fixed', delay: 30_000 },
+    removeOnComplete: { age: 86400 }, removeOnFail: { age: 604800 },
+  });
+  await query(
+    `UPDATE studio_generations SET status='pending',error_code=NULL,error_message=NULL,
+       cancellation_requested_at=NULL,queue_job_id=$1,updated_at=NOW() WHERE id=$2`,
+    [String(job.id), id]
+  );
+  return getGeneration(id, orgId);
+}
+
+export async function listGenerations(
+  orgId: string,
+  userId?: string,
+  limit: number = 50
+): Promise<StudioGeneration[]> {
+  const safeLimit = Math.max(1, Math.min(limit, 200));
   let sql = 'SELECT * FROM studio_generations WHERE organization_id = $1';
   const params: unknown[] = [orgId];
-  if (userId) { sql += ' AND user_id = $2'; params.push(userId); }
-  sql += ' ORDER BY created_at DESC LIMIT $' + (params.length + 1);
-  params.push(limit);
-
+  if (userId) {
+    sql += ' AND user_id = $2';
+    params.push(userId);
+  }
+  sql += ` ORDER BY created_at DESC LIMIT $${params.length + 1}`;
+  params.push(safeLimit);
   const result = await query(sql, params);
   return result.rows.map(mapGenerationRow);
 }
 
 export async function cancelGeneration(id: string, orgId: string): Promise<void> {
-  const gen = await getGeneration(id, orgId);
-  if (['completed', 'failed', 'cancelled'].includes(gen.status)) {
-    throw new AppError(400, 'Cannot cancel a completed generation', 'CANNOT_CANCEL');
+  const generation = await getGeneration(id, orgId);
+  if (['completed', 'failed', 'cancelled'].includes(generation.status)) {
+    throw new AppError(400, 'Generation is already in a terminal state', 'CANNOT_CANCEL');
   }
+
   await query(
-    "UPDATE studio_generations SET status = 'cancelled', updated_at = NOW() WHERE id = $1",
+    `UPDATE studio_generations
+     SET status = 'cancelled', cancellation_requested_at = NOW(), updated_at = NOW()
+     WHERE id = $1 AND organization_id = $2`,
+    [id, orgId]
+  );
+
+  const row = await query(
+    'SELECT queue_job_id, provider_job_id FROM studio_generations WHERE id = $1',
     [id]
   );
+  const queueJobId = row.rows[0]?.queue_job_id as string | undefined;
+  const providerJobId = row.rows[0]?.provider_job_id as string | undefined;
+
+  if (queueJobId) {
+    const job = await generationQueue.getJob(queueJobId);
+    if (job && !(await job.isActive())) await job.remove().catch(() => undefined);
+  }
+  if (providerJobId) {
+    await genxMultimodalProvider.cancelJob(providerJobId).catch((error) => {
+      logger.warn(`Provider cancellation failed for ${providerJobId}: ${error}`);
+    });
+  }
 }
 
-// ─── Uploads ─────────────────────────────────────────────────────────────────
-
-export async function createUpload(
+export async function createAsset(
   orgId: string,
   userId: string,
   file: { filename: string; originalName: string; mimeType: string; size: number; path: string }
-): Promise<{ id: string; url: string }> {
+): Promise<StudioAsset> {
   const result = await query(
-    `INSERT INTO studio_uploads (organization_id, user_id, filename, original_name, mime_type, size_bytes, storage_path)
-     VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
+    `INSERT INTO studio_assets (
+       organization_id, user_id, filename, original_name, mime_type,
+       size_bytes, storage_path, url
+     )
+     VALUES ($1, $2, $3, $4, $5, $6, $7, NULL)
+     RETURNING *`,
     [orgId, userId, file.filename, file.originalName, file.mimeType, file.size, file.path]
   );
-
-  return {
-    id: result.rows[0].id as string,
-    url: `/uploads/${file.filename}`,
-  };
+  const id = result.rows[0].id as string;
+  const url = `/api/v1/studio/assets/${id}`;
+  const updated = await query(
+    'UPDATE studio_assets SET url = $1, updated_at = NOW() WHERE id = $2 RETURNING *',
+    [url, id]
+  );
+  return mapAssetRow(updated.rows[0]);
 }
 
-// ─── Mapper ──────────────────────────────────────────────────────────────────
+export async function getAsset(id: string): Promise<StudioAsset> {
+  const result = await query(
+    'SELECT * FROM studio_assets WHERE id = $1 AND deleted_at IS NULL',
+    [id]
+  );
+  if (result.rows.length === 0) throw new NotFoundError('Asset');
+  return mapAssetRow(result.rows[0]);
+}
+
+export async function deleteAsset(id: string, orgId: string): Promise<void> {
+  const result = await query(
+    `UPDATE studio_assets SET deleted_at = NOW(), updated_at = NOW()
+     WHERE id = $1 AND organization_id = $2 AND deleted_at IS NULL
+     RETURNING storage_path`,
+    [id, orgId]
+  );
+  if (result.rows.length === 0) throw new NotFoundError('Asset');
+  await fs.unlink(result.rows[0].storage_path as string).catch(() => undefined);
+}
+
+function mapAssetRow(row: Record<string, unknown>): StudioAsset {
+  return {
+    id: row.id as string,
+    organization_id: row.organization_id as string,
+    user_id: row.user_id as string | null,
+    filename: row.filename as string,
+    original_name: row.original_name as string | null,
+    mime_type: row.mime_type as string,
+    size_bytes: Number(row.size_bytes || 0),
+    storage_path: row.storage_path as string,
+    url: (row.url as string) || `/api/v1/studio/assets/${row.id as string}`,
+    metadata: typeof row.metadata === 'string' ? JSON.parse(row.metadata) : (row.metadata as Record<string, unknown>) || {},
+    created_at: row.created_at as string,
+  };
+}
 
 function mapGenerationRow(row: Record<string, unknown>): StudioGeneration {
   const outputUrls = typeof row.output_urls === 'string' ? JSON.parse(row.output_urls) : (row.output_urls as string[]) || [];
@@ -222,7 +328,7 @@ function mapGenerationRow(row: Record<string, unknown>): StudioGeneration {
     provider: row.provider as string,
     provider_job_id: row.provider_job_id as string | null,
     status: row.status as string,
-    progress: parseInt(row.progress as string) || 0,
+    progress: Number(row.progress || 0),
     output_urls: outputUrls,
     primary_output_url: outputUrls[0] || null,
     error_code: row.error_code as string | null,
