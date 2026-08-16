@@ -12,6 +12,7 @@ case "${stage}" in
 esac
 
 bash "${SCRIPT_DIR}/vps-preflight.sh"
+bash "${SCRIPT_DIR}/vps-release-gate.sh"
 load_production_env
 
 on_error() {
