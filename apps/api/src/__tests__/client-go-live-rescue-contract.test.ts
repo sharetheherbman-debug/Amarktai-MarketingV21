@@ -18,6 +18,17 @@ describe('client go-live rescue contracts', () => {
     expect(migration).toMatch(/idx_tools_organization_name/i);
   });
 
+  test('tool catalogue and execution require verified organization membership', () => {
+    const tools = fs.readFileSync(path.join(apiRoot, 'routes/tools.ts'), 'utf8');
+    expect(tools).toContain("import { requireOrganizationMembership } from '../middleware/organization-access';");
+    expect(tools).toContain('router.use(requireOrganizationMembership);');
+    expect(tools).toContain('const orgId = req.organizationId;');
+    expect(tools).toContain('toolService.getByName(req.params.name, orgId)');
+    expect(tools).toContain('toolService.execute(req.params.name, input, orgId)');
+    expect(tools).not.toContain('organization_id || req.user?.userId');
+    expect(tools).not.toContain('toolService.execute(req.params.name, input, organization_id)');
+  });
+
   test('campaign reads and writes derive tenant from authenticated context', () => {
     const campaigns = fs.readFileSync(path.join(apiRoot, 'routes/campaigns.ts'), 'utf8');
     expect(campaigns).toContain('router.use(requireOrganizationMembership)');
