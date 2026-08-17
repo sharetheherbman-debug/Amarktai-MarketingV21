@@ -124,9 +124,9 @@ const faqs = [
       'Each AI agent is specialized for a specific marketing function. They work autonomously, collaborating through a shared knowledge base of your brand, goals, and performance data. You set the strategy; the agents execute.',
   },
   {
-    question: 'What AI providers do you support?',
+    question: 'How is AI generation provided?',
     answer:
-      'GenX is the only supported AI generation provider for this release. Provider credentials are configured in the deployment environment, never entered in customer onboarding.',
+      'Amarktai Network routes approved generation through vetted processing partners. Credentials and infrastructure stay server-side and never enter customer onboarding.',
   },
   {
     question: 'Is my data secure?',
@@ -404,30 +404,25 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* AI Providers */}
+      {/* AI Network */}
       <section className="border-t border-white/[0.06] py-20 sm:py-28">
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
           <div className="mx-auto max-w-2xl text-center">
             <h2 className="text-3xl font-bold tracking-tight text-white sm:text-4xl">
-              Powered by leading AI providers
+              Powered by Amarktai Network
             </h2>
             <p className="mt-4 text-lg text-zinc-400">
               One approved AI route, consistent governance, and clear credit controls.
             </p>
           </div>
           <div className="mt-12 flex flex-col items-center justify-center gap-6 sm:flex-row">
-            {['GenX'].map((provider) => (
-              <div
-                key={provider}
-                className="rounded-2xl border border-white/[0.06] bg-surface-100 px-8 py-6 text-center"
-              >
-                <div className="text-lg font-semibold text-white">{provider}</div>
-                <div className="mt-1 text-sm text-zinc-500">AI Provider</div>
-              </div>
-            ))}
+            <div className="rounded-2xl border border-white/[0.06] bg-surface-100 px-8 py-6 text-center">
+              <div className="text-lg font-semibold text-white">Amarktai Network</div>
+              <div className="mt-1 text-sm text-zinc-500">Governed AI generation</div>
+            </div>
           </div>
           <p className="mt-8 text-center text-sm text-zinc-500">
-            Generation fails closed if GenX is unavailable; no hidden provider fallback.
+            Generation fails closed when the approved network is unavailable; no unapproved fallback is used.
           </p>
         </div>
       </section>

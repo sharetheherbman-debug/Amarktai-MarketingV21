@@ -63,7 +63,7 @@ export class StudioClient {
   async createGeneration({ type, model, prompt, negative_prompt, options }) {
     const operation = options?.request_id ? 'video_extend' : type === 'cinema' ? 'text_to_video' : type;
     const resolvedModel = await this.resolveModel(operation, model);
-    if (!resolvedModel) throw new Error(`No live GenX model is available for ${operation}`);
+    if (!resolvedModel) throw new Error(`No Amarktai Network model is currently available for ${operation}`);
     const result = await this.request('POST', '/studio/generations', {
       organization_id: this.organizationId,
       type,

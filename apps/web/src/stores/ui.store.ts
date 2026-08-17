@@ -30,7 +30,7 @@ export const useUIStore = create<UIState>()(
   persist(
     (set, get) => ({
       sidebarOpen: true,
-      theme: 'dark',
+      theme: 'light',
       notifications: [],
 
       toggleSidebar: () => set((state) => ({ sidebarOpen: !state.sidebarOpen })),

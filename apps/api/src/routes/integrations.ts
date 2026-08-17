@@ -3,10 +3,11 @@ import { requireAuth, AuthRequest } from '../middleware/auth';
 import { ApiResponse } from '../types';
 import * as integrationService from '../services/integration.service';
 import * as externalService from '../services/external-integrations.service';
-import { requireOrganizationRole } from '../middleware/organization-access';
+import { requireOrganizationMembership, requireOrganizationRole } from '../middleware/organization-access';
 
 const router = Router();
 router.use(requireAuth);
+router.use(requireOrganizationMembership);
 
 function dateRange(input: Record<string, unknown>): { startDate: string; endDate: string } {
   const end = input.end_date ? new Date(String(input.end_date)) : new Date();

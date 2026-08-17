@@ -20,4 +20,26 @@ for (const file of securityFiles) {
   }
 }
 
+function sourceFiles(root) {
+  return fs.readdirSync(root, { withFileTypes: true }).flatMap((entry) => {
+    const fullPath = path.join(root, entry.name);
+    if (entry.isDirectory()) return sourceFiles(fullPath);
+    return /\.(?:js|jsx|ts|tsx)$/.test(entry.name) ? [fullPath] : [];
+  });
+}
+
+const browserRoots = [
+  path.join(__dirname, '..', 'apps', 'web', 'app'),
+  path.join(__dirname, '..', 'apps', 'web', 'src'),
+  path.join(__dirname, '..', 'packages', 'studio', 'src'),
+];
+for (const file of browserRoots.flatMap(sourceFiles)) {
+  const source = fs.readFileSync(file, 'utf8');
+  const insecureRemote = source.match(/(?:http|ws):\/\/(?!localhost|127\.0\.0\.1)[^'"`\s)]+/gi) || [];
+  if (insecureRemote.length > 0) {
+    console.error(`INSECURE BROWSER URL: ${path.relative(path.join(__dirname, '..'), file)} ${insecureRemote.join(', ')}`);
+    ok = false;
+  }
+}
+
 process.exit(ok ? 0 : 1);

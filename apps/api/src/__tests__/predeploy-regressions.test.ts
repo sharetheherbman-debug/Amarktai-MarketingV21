@@ -26,7 +26,7 @@ describe('pre-deployment runtime regressions', () => {
     expect(router).not.toContain('failover');
   });
 
-  test('the provider API is read-only and cannot accept credentials', () => {
+  test('the provider API is read-only and internal provider UI is not customer-accessible', () => {
     const route = read('apps/api/src/routes/providers.ts');
     const page = read('apps/web/app/(dashboard)/admin/providers/page.tsx');
 
@@ -39,7 +39,8 @@ describe('pre-deployment runtime regressions', () => {
     expect(page).not.toContain('API Key');
     expect(page).not.toContain('Together AI');
     expect(page).not.toContain('DeepInfra');
-    expect(page).toContain('Environment-only credentials');
+    expect(page).toContain("redirect('/dashboard')");
+    expect(page).not.toContain('/admin/genx');
   });
 
   test('tenant-scoped platform routes are mounted behind membership checks', () => {

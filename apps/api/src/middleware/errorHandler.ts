@@ -52,13 +52,20 @@ function formatZodError(error: ZodError): string {
   return error.errors.map((e) => `${e.path.join('.')}: ${e.message}`).join('; ');
 }
 
+function customerSafeMessage(message: string): string {
+  if (/relation\s+["']?\w+["']?\s+does not exist|database|postgres|sqlstate/i.test(message)) {
+    return 'This service is temporarily unavailable. Please try again shortly.';
+  }
+  return message.replace(/genx/gi, 'Amarktai Network');
+}
+
 export function errorHandler(err: Error, req: Request, res: Response<ApiResponse>, _next: NextFunction): void {
   if (err instanceof AppError) {
     logger.warn(`AppError: ${err.message}`, { statusCode: err.statusCode, code: err.code, path: req.path });
     res.status(err.statusCode).json({
       success: false,
       error: {
-        message: err.message,
+        message: customerSafeMessage(err.message),
         code: err.code,
       },
     });

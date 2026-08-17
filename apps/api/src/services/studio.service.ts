@@ -64,7 +64,7 @@ async function ensureAvailableModels(operation?: string) {
 
   const liveModels = await genxRegistry.fetchLiveModelCatalogue();
   if (liveModels.length === 0) {
-    throw new AppError(503, 'GenX model catalogue is unavailable', 'GENX_CATALOGUE_UNAVAILABLE');
+    throw new AppError(503, 'Amarktai Network is temporarily unavailable', 'GENX_CATALOGUE_UNAVAILABLE');
   }
   await genxRegistry.syncModelsToDatabase(liveModels);
   models = await genxRegistry.getAvailableModels(normalized);
@@ -92,7 +92,7 @@ export async function createGeneration(
   if (modelId) {
     const model = await genxRegistry.getModelById(modelId);
     if (!model || model.available === false || model.deprecated === true) {
-      throw new AppError(400, 'Selected GenX model is not available', 'MODEL_UNAVAILABLE');
+      throw new AppError(400, 'The selected Amarktai Network model is not available', 'MODEL_UNAVAILABLE');
     }
     if (!(model.operations || []).includes(operation)) {
       throw new AppError(400, `Selected model does not support ${operation}`, 'MODEL_OPERATION_UNSUPPORTED');
@@ -100,7 +100,7 @@ export async function createGeneration(
   } else {
     const models = await ensureAvailableModels(operation);
     if (models.length === 0) {
-      throw new AppError(400, `No GenX model is available for ${operation}`, 'NO_MODEL_AVAILABLE');
+      throw new AppError(400, `No Amarktai Network model is currently available for ${operation}`, 'NO_MODEL_AVAILABLE');
     }
     modelId = models[0].id;
   }
@@ -316,6 +316,12 @@ function mapAssetRow(row: Record<string, unknown>): StudioAsset {
 
 function mapGenerationRow(row: Record<string, unknown>): StudioGeneration {
   const outputUrls = typeof row.output_urls === 'string' ? JSON.parse(row.output_urls) : (row.output_urls as string[]) || [];
+  const errorCode = row.error_code as string | null;
+  const safeErrorMessage = errorCode === 'pending_control'
+    ? 'Generation is paused by your workspace safety controls.'
+    : row.error_message
+      ? 'Generation could not be completed. Please try again or choose another model.'
+      : null;
   return {
     id: row.id as string,
     organization_id: row.organization_id as string,
@@ -325,14 +331,14 @@ function mapGenerationRow(row: Record<string, unknown>): StudioGeneration {
     prompt: row.prompt as string | null,
     negative_prompt: row.negative_prompt as string | null,
     options: typeof row.options === 'string' ? JSON.parse(row.options) : (row.options as Record<string, unknown>) || {},
-    provider: row.provider as string,
+    provider: 'amarktai_network',
     provider_job_id: row.provider_job_id as string | null,
     status: row.status as string,
     progress: Number(row.progress || 0),
     output_urls: outputUrls,
     primary_output_url: outputUrls[0] || null,
-    error_code: row.error_code as string | null,
-    error_message: row.error_message as string | null,
+    error_code: errorCode,
+    error_message: safeErrorMessage,
     metadata: typeof row.metadata === 'string' ? JSON.parse(row.metadata) : (row.metadata as Record<string, unknown>) || {},
     created_at: row.created_at as string,
     updated_at: row.updated_at as string,

@@ -156,11 +156,10 @@ export default function PrivacyPage() {
                       AI Providers
                     </h3>
                     <p className="mt-2">
-                      To provide AI-powered marketing services, we process
-                      certain data through GenX, the sole supported AI generation
-                      provider for this release. Data sent to GenX is processed
-                      in accordance with the applicable privacy terms and data
-                      processing agreement.
+                      To provide AI-powered marketing services, Amarktai Network
+                      may send the minimum necessary data to vetted AI processing
+                      partners. That data is handled under the applicable privacy
+                      terms and data-processing agreements.
                     </p>
                   </div>
                   <div>

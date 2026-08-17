@@ -5,14 +5,11 @@ import { usePathname, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import {
   Menu,
-  Search,
-  Bell,
   ChevronDown,
   User,
   Settings,
   LogOut,
   Building2,
-  Plus,
   Check,
 } from 'lucide-react';
 import { useAuthStore, type Organization } from '@/stores/auth.store';
@@ -29,6 +26,11 @@ const breadcrumbMap: Record<string, string> = {
   admin: 'Admin',
   providers: 'Providers',
   users: 'Users',
+  connections: 'Connections',
+  'creative-studio': 'Create',
+  'content-studio': 'Content',
+  'relaunch-control': 'Automation & Safety',
+  billing: 'Credits',
 };
 
 export function DashboardHeader() {
@@ -36,14 +38,11 @@ export function DashboardHeader() {
   const router = useRouter();
   const { user, logout, organizations, currentOrganization, setCurrentOrganization } =
     useAuthStore();
-  const { toggleSidebar, notifications } = useUIStore();
+  const { toggleSidebar } = useUIStore();
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [orgDropdownOpen, setOrgDropdownOpen] = useState(false);
-  const [searchFocused, setSearchFocused] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const orgDropdownRef = useRef<HTMLDivElement>(null);
-
-  const unreadCount = notifications.filter((n) => !n.read).length;
 
   const segments = pathname?.split('/').filter(Boolean) ?? [];
   const breadcrumbs = segments.map((seg) => ({
@@ -70,11 +69,11 @@ export function DashboardHeader() {
   }
 
   return (
-    <header className="flex h-16 shrink-0 items-center gap-4 border-b border-white/[0.06] bg-[var(--color-bg)]/80 backdrop-blur-xl px-6">
+    <header className="flex h-16 shrink-0 items-center gap-4 border-b border-[#e0dbd3] bg-white/95 px-4 shadow-sm backdrop-blur-xl sm:px-6">
       <button
         type="button"
         onClick={toggleSidebar}
-        className="flex h-9 w-9 items-center justify-center rounded-lg text-zinc-400 transition-colors hover:bg-white/[0.06] hover:text-white lg:hidden"
+        className="flex h-9 w-9 items-center justify-center rounded-lg text-[#1a3a5c] transition-colors hover:bg-[#f0ece6] lg:hidden"
         aria-label="Toggle sidebar"
       >
         <Menu className="h-5 w-5" />
@@ -84,7 +83,7 @@ export function DashboardHeader() {
         <button
           type="button"
           onClick={() => setOrgDropdownOpen(!orgDropdownOpen)}
-          className="flex items-center gap-2 rounded-lg border border-white/[0.06] bg-white/[0.03] px-3 py-1.5 text-sm transition-colors hover:bg-white/[0.06]"
+          className="flex items-center gap-2 rounded-lg border border-[#e0dbd3] bg-[#f8f6f3] px-3 py-1.5 text-sm transition-colors hover:bg-[#f0ece6]"
         >
           {currentOrganization?.logo ? (
             <img
@@ -97,19 +96,19 @@ export function DashboardHeader() {
               <Building2 className="h-3 w-3 text-brand-400" />
             </div>
           )}
-          <span className="max-w-[140px] truncate text-sm font-medium text-white">
+          <span className="max-w-[140px] truncate text-sm font-medium text-[#1a2e3e]">
             {currentOrganization?.name ?? 'Select Workspace'}
           </span>
           <ChevronDown
             className={cn(
-              'h-3.5 w-3.5 text-zinc-400 transition-transform',
+                'h-3.5 w-3.5 text-[#5f6f7a] transition-transform',
               orgDropdownOpen && 'rotate-180'
             )}
           />
         </button>
 
         {orgDropdownOpen && (
-          <div className="animate-fade-in absolute left-0 top-full mt-2 w-64 rounded-xl border border-white/[0.06] bg-surface-200 p-1.5 shadow-xl z-50">
+          <div className="animate-fade-in absolute left-0 top-full z-50 mt-2 w-64 rounded-xl border border-[#e0dbd3] bg-white p-1.5 shadow-xl">
             <p className="px-3 py-1.5 text-[11px] font-medium uppercase tracking-wider text-zinc-500">
               Workspaces
             </p>
@@ -120,10 +119,10 @@ export function DashboardHeader() {
                   type="button"
                   onClick={() => handleSelectOrg(org)}
                   className={cn(
-                    'flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition-colors hover:bg-white/[0.06]',
+                    'flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition-colors hover:bg-[#f0ece6]',
                     currentOrganization?.id === org.id
                       ? 'text-brand-400'
-                      : 'text-zinc-300'
+                      : 'text-[#334955]'
                   )}
                 >
                   {org.logo ? (
@@ -133,7 +132,7 @@ export function DashboardHeader() {
                       className="h-5 w-5 rounded object-cover"
                     />
                   ) : (
-                    <div className="flex h-5 w-5 items-center justify-center rounded bg-white/[0.06]">
+                    <div className="flex h-5 w-5 items-center justify-center rounded bg-[#f0ece6]">
                       <Building2 className="h-3 w-3 text-zinc-400" />
                     </div>
                   )}
@@ -144,24 +143,13 @@ export function DashboardHeader() {
                 </button>
               ))
             ) : (
-              <p className="px-3 py-2 text-sm text-zinc-500">No organizations yet</p>
+              <p className="px-3 py-2 text-sm text-[#788791]">No workspace is available</p>
             )}
-            <div className="my-1.5 border-t border-white/[0.06]" />
-            <button
-              type="button"
-              onClick={() => {
-                setOrgDropdownOpen(false);
-                router.push('/settings?tab=organization');
-              }}
-              className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-zinc-300 transition-colors hover:bg-white/[0.06] hover:text-white"
-            >
-              <Plus className="h-4 w-4" />
-              Create Organization
-            </button>
+            <div className="my-1.5 border-t border-[#e0dbd3]" />
             <Link
               href="/settings"
               onClick={() => setOrgDropdownOpen(false)}
-              className="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-zinc-300 transition-colors hover:bg-white/[0.06] hover:text-white"
+              className="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-[#334955] transition-colors hover:bg-[#f0ece6]"
             >
               <Settings className="h-4 w-4" />
               Workspace Settings
@@ -173,11 +161,11 @@ export function DashboardHeader() {
       <nav className="hidden items-center gap-1.5 text-sm md:flex">
         {breadcrumbs.map((crumb, i) => (
           <span key={crumb.href} className="flex items-center gap-1.5">
-            {i > 0 && <span className="text-zinc-600">/</span>}
+            {i > 0 && <span className="text-[#b0aaa2]">/</span>}
             {i === breadcrumbs.length - 1 ? (
-              <span className="text-white font-medium">{crumb.label}</span>
+              <span className="font-medium text-[#1a2e3e]">{crumb.label}</span>
             ) : (
-              <Link href={crumb.href} className="text-zinc-400 transition-colors hover:text-white">
+              <Link href={crumb.href} className="text-[#5f6f7a] transition-colors hover:text-[#1a3a5c]">
                 {crumb.label}
               </Link>
             )}
@@ -185,43 +173,14 @@ export function DashboardHeader() {
         ))}
       </nav>
 
-      <div className="flex-1 flex justify-center px-4">
-        <div
-          className={cn(
-            'relative w-full max-w-md transition-all',
-            searchFocused && 'max-w-lg'
-          )}
-        >
-          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500" />
-          <input
-            type="text"
-            placeholder="Search campaigns, content, agents..."
-            onFocus={() => setSearchFocused(true)}
-            onBlur={() => setSearchFocused(false)}
-            className="h-9 w-full rounded-lg border border-white/[0.06] bg-white/[0.03] pl-10 pr-4 text-sm text-white placeholder-zinc-500 outline-none transition-colors focus:border-brand-500/50 focus:bg-white/[0.05]"
-          />
-        </div>
-      </div>
+      <div className="flex-1" />
 
       <div className="flex items-center gap-2">
-        <button
-          type="button"
-          className="relative flex h-9 w-9 items-center justify-center rounded-lg text-zinc-400 transition-colors hover:bg-white/[0.06] hover:text-white"
-          aria-label="Notifications"
-        >
-          <Bell className="h-5 w-5" />
-          {unreadCount > 0 && (
-            <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold text-white">
-              {unreadCount > 99 ? '99+' : unreadCount}
-            </span>
-          )}
-        </button>
-
         <div ref={dropdownRef} className="relative">
           <button
             type="button"
             onClick={() => setDropdownOpen(!dropdownOpen)}
-            className="flex items-center gap-2 rounded-lg p-1.5 transition-colors hover:bg-white/[0.06]"
+            className="flex items-center gap-2 rounded-lg p-1.5 transition-colors hover:bg-[#f0ece6]"
           >
             {user?.avatar ? (
               <img
@@ -236,22 +195,22 @@ export function DashboardHeader() {
             )}
             <ChevronDown
               className={cn(
-                'h-4 w-4 text-zinc-400 transition-transform',
+                'h-4 w-4 text-[#5f6f7a] transition-transform',
                 dropdownOpen && 'rotate-180'
               )}
             />
           </button>
 
           {dropdownOpen && (
-            <div className="animate-fade-in absolute right-0 top-full mt-2 w-56 rounded-xl border border-white/[0.06] bg-surface-200 p-1.5 shadow-xl">
-              <div className="border-b border-white/[0.06] px-3 py-2.5 mb-1.5">
-                <p className="text-sm font-medium text-white">{user?.name}</p>
-                <p className="text-xs text-zinc-500">{user?.email}</p>
+            <div className="animate-fade-in absolute right-0 top-full mt-2 w-56 rounded-xl border border-[#e0dbd3] bg-white p-1.5 shadow-xl">
+              <div className="mb-1.5 border-b border-[#e0dbd3] px-3 py-2.5">
+                <p className="text-sm font-medium text-[#1a2e3e]">{user?.name}</p>
+                <p className="text-xs text-[#788791]">{user?.email}</p>
               </div>
               <Link
                 href="/settings"
                 onClick={() => setDropdownOpen(false)}
-                className="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-zinc-300 transition-colors hover:bg-white/[0.06] hover:text-white"
+                className="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-[#334955] transition-colors hover:bg-[#f0ece6]"
               >
                 <User className="h-4 w-4" />
                 Profile
@@ -259,12 +218,12 @@ export function DashboardHeader() {
               <Link
                 href="/settings"
                 onClick={() => setDropdownOpen(false)}
-                className="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-zinc-300 transition-colors hover:bg-white/[0.06] hover:text-white"
+                className="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-[#334955] transition-colors hover:bg-[#f0ece6]"
               >
                 <Settings className="h-4 w-4" />
                 Settings
               </Link>
-              <div className="my-1.5 border-t border-white/[0.06]" />
+              <div className="my-1.5 border-t border-[#e0dbd3]" />
               <button
                 type="button"
                 onClick={() => {

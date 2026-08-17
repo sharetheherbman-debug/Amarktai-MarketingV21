@@ -186,8 +186,8 @@ export default function LongFormStudio({ studioClient }) {
     });
     setProject(result.project);
     await refreshScenes();
-    setMessage(result.generation?.method === "genx"
-      ? `Storyboard generated with ${result.generation.model_id}.`
+    setMessage(result.generation?.model_id
+      ? "Storyboard created through Amarktai Network. Review the scenes before rendering."
       : "Storyboard created with the deterministic fallback because no confirmed text model completed successfully.");
     setActiveTab("Storyboard");
   });

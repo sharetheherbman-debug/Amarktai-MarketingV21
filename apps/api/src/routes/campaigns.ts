@@ -5,25 +5,25 @@ import { createCampaignSchema, paginationSchema } from '../utils/validation';
 import { query, transaction } from '../config/database';
 import { NotFoundError } from '../middleware/errorHandler';
 import { ApiResponse, PaginatedResponse } from '../types';
+import { requireOrganizationMembership } from '../middleware/organization-access';
 
 const router = Router();
 
 router.use(requireAuth);
+router.use(requireOrganizationMembership);
 
 router.get('/', validateQuery(paginationSchema), async (req: AuthRequest, res: Response<PaginatedResponse<any>>, next: NextFunction) => {
   try {
     const { page, limit, sort, order, search } = req.query as any;
     const offset = (page - 1) * limit;
-    const orgId = req.query.organization_id as string;
+    const orgId = req.organizationId;
 
     let whereClause = 'WHERE c.deleted_at IS NULL';
     const params: any[] = [];
     let paramCount = 1;
 
-    if (orgId) {
-      whereClause += ` AND c.organization_id = $${paramCount++}`;
-      params.push(orgId);
-    }
+    whereClause += ` AND c.organization_id = $${paramCount++}`;
+    params.push(orgId);
 
     if (search) {
       whereClause += ` AND (c.name ILIKE $${paramCount} OR c.description ILIKE $${paramCount})`;
@@ -64,7 +64,7 @@ router.get('/', validateQuery(paginationSchema), async (req: AuthRequest, res: R
 router.post('/', validateBody(createCampaignSchema), async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction) => {
   try {
     const { name, description, type, project_id, config, schedule } = req.body;
-    const orgId = req.query.organization_id as string || req.body.organization_id;
+    const orgId = req.organizationId;
 
     const result = await query(
       `INSERT INTO campaigns (organization_id, project_id, name, description, type, config, schedule, created_by)

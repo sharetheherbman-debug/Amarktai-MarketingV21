@@ -15,6 +15,12 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const [authChecked, setAuthChecked] = useState(false);
 
   useEffect(() => {
+    if (window.matchMedia('(max-width: 1023px)').matches) {
+      useUIStore.getState().setSidebarOpen(false);
+    }
+  }, []);
+
+  useEffect(() => {
     let active = true;
     void checkAuth().finally(() => {
       if (active) setAuthChecked(true);
@@ -35,7 +41,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       <div className="flex h-screen items-center justify-center bg-[var(--color-bg)]">
         <div className="flex flex-col items-center gap-4">
           <div className="h-8 w-8 animate-spin rounded-full border-2 border-brand-500 border-t-transparent" />
-          <p className="text-sm text-zinc-400">Checking secure session...</p>
+          <p className="text-sm text-[#5f6f7a]">Checking your secure session...</p>
         </div>
       </div>
     );
@@ -51,13 +57,13 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       <div
         className={cn(
           'flex flex-1 flex-col overflow-hidden transition-all duration-300',
-          sidebarOpen ? 'ml-64' : 'ml-16'
+          sidebarOpen ? 'ml-0 lg:ml-64' : 'ml-0 lg:ml-16'
         )}
       >
         <DashboardHeader />
-        <main className="flex-1 overflow-y-auto p-6">
-          {children}
-          <footer className="mt-10 border-t border-white/[0.06] py-6 text-center text-xs text-zinc-600">
+        <main className="client-page flex-1 overflow-y-auto px-4 py-5 sm:px-6 lg:px-8">
+          <div className="mx-auto w-full max-w-[1500px]">{children}</div>
+          <footer className="mx-auto mt-10 max-w-[1500px] border-t border-[#e0dbd3] py-6 text-center text-xs text-[#788791]">
             © 2026 EquiProfile Marketing
           </footer>
         </main>

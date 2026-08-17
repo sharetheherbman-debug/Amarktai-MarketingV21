@@ -38,7 +38,7 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: '#050505',
+  themeColor: '#f8f6f3',
   width: 'device-width',
   initialScale: 1,
 };
@@ -47,7 +47,7 @@ const themeScript = `
   (function() {
     try {
       var stored = JSON.parse(localStorage.getItem('ui-storage'));
-      var theme = stored?.state?.theme || 'dark';
+      var theme = stored?.state?.theme || 'light';
       var root = document.documentElement;
       if (theme === 'system') {
         var sys = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
@@ -56,7 +56,7 @@ const themeScript = `
         root.classList.add(theme);
       }
     } catch(e) {
-      document.documentElement.classList.add('dark');
+      document.documentElement.classList.add('light');
     }
   })();
 `;
