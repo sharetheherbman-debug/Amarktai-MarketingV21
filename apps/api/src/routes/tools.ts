@@ -1,5 +1,6 @@
 import { Router, Response, NextFunction } from 'express';
 import { requireAuth, AuthRequest } from '../middleware/auth';
+import { requireOrganizationMembership } from '../middleware/organization-access';
 import { validateBody, validateQuery } from '../middleware/validator';
 import { z } from 'zod';
 import { toolService } from '../services/tool.service';
@@ -8,6 +9,7 @@ import { ApiResponse } from '../types';
 const router = Router();
 
 router.use(requireAuth);
+router.use(requireOrganizationMembership);
 
 const listToolsSchema = z.object({
   category: z.string().optional(),
@@ -21,8 +23,8 @@ const executeToolSchema = z.object({
 
 router.get('/', validateQuery(listToolsSchema), async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction) => {
   try {
-    const { category, organization_id } = req.query as { category?: string; organization_id?: string };
-    const orgId = organization_id || req.user?.userId;
+    const { category } = req.query as { category?: string; organization_id?: string };
+    const orgId = req.organizationId;
 
     if (!orgId) {
       res.status(400).json({
@@ -45,7 +47,16 @@ router.get('/', validateQuery(listToolsSchema), async (req: AuthRequest, res: Re
 
 router.get('/:name', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction) => {
   try {
-    const tool = await toolService.getByName(req.params.name);
+    const orgId = req.organizationId;
+    if (!orgId) {
+      res.status(400).json({
+        success: false,
+        error: { message: 'Organization ID required', code: 'BAD_REQUEST' },
+      });
+      return;
+    }
+
+    const tool = await toolService.getByName(req.params.name, orgId);
 
     if (!tool) {
       res.status(404).json({
@@ -66,9 +77,18 @@ router.get('/:name', async (req: AuthRequest, res: Response<ApiResponse>, next: 
 
 router.post('/:name/execute', validateBody(executeToolSchema), async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction) => {
   try {
-    const { input, organization_id } = req.body;
+    const { input } = req.body;
+    const orgId = req.organizationId;
 
-    const result = await toolService.execute(req.params.name, input, organization_id);
+    if (!orgId) {
+      res.status(400).json({
+        success: false,
+        error: { message: 'Organization ID required', code: 'BAD_REQUEST' },
+      });
+      return;
+    }
+
+    const result = await toolService.execute(req.params.name, input, orgId);
 
     res.json({
       success: result.success,
