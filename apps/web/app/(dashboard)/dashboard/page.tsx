@@ -5,7 +5,13 @@ import Link from 'next/link';
 import { AlertTriangle, Coins, Loader2, Megaphone, Plug, ShieldCheck, Sparkles } from 'lucide-react';
 import { useAuthStore } from '@/stores/auth.store';
 
-const API_URL = String(process.env.NEXT_PUBLIC_API_URL || '/api/v1').replace(/\/+$/, '');
+function normalizeApiBaseUrl(value: string | undefined): string {
+  const trimmed = String(value || '').trim().replace(/\/+$/, '');
+  if (!trimmed || trimmed === '/api') return '/api/v1';
+  return trimmed;
+}
+
+const API_URL = normalizeApiBaseUrl(process.env.NEXT_PUBLIC_API_URL);
 
 type Summary = {
   control?: Record<string, unknown>;
