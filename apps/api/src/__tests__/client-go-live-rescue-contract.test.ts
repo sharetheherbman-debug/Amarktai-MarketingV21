@@ -18,8 +18,9 @@ describe('client go-live rescue contracts', () => {
     expect(migration).toMatch(/idx_tools_organization_name/i);
   });
 
-  test('tool catalogue and execution require verified organization membership', () => {
+  test('tool catalogue and execution require verified organization membership and are mounted', () => {
     const tools = fs.readFileSync(path.join(apiRoot, 'routes/tools.ts'), 'utf8');
+    const server = fs.readFileSync(path.join(apiRoot, 'server.ts'), 'utf8');
     expect(tools).toContain("import { requireOrganizationMembership } from '../middleware/organization-access';");
     expect(tools).toContain('router.use(requireOrganizationMembership);');
     expect(tools).toContain('const orgId = req.organizationId;');
@@ -27,6 +28,8 @@ describe('client go-live rescue contracts', () => {
     expect(tools).toContain('toolService.execute(req.params.name, input, orgId)');
     expect(tools).not.toContain('organization_id || req.user?.userId');
     expect(tools).not.toContain('toolService.execute(req.params.name, input, organization_id)');
+    expect(server).toContain("import toolRoutes from './routes/tools';");
+    expect(server).toContain("app.use('/api/v1/tools', toolRoutes);");
   });
 
   test('campaign reads and writes derive tenant from authenticated context', () => {
