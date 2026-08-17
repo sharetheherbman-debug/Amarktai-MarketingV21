@@ -17,7 +17,13 @@ interface RedeemResponse {
   error?: { message?: string };
 }
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api/v1';
+function normalizeApiBaseUrl(value: string | undefined): string {
+  const trimmed = String(value || '').trim().replace(/\/+$/, '');
+  if (!trimmed || trimmed === '/api') return '/api/v1';
+  return trimmed;
+}
+
+const API_URL = normalizeApiBaseUrl(process.env.NEXT_PUBLIC_API_URL);
 
 function ConnectorSsoContent() {
   const router = useRouter();
