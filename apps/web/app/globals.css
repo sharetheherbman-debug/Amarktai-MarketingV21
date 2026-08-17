@@ -19,14 +19,14 @@
 }
 
 .dark {
-  color-scheme: dark;
-  --color-bg: #101820;
-  --color-surface: #17232d;
-  --color-surface-2: #1e2d39;
-  --color-muted: #293a47;
-  --color-border: #354957;
-  --color-text: #f8fafc;
-  --color-text-secondary: #c3cdd4;
+  color-scheme: light;
+  --color-bg: #f7f5f1;
+  --color-surface: #ffffff;
+  --color-surface-2: #f1eee8;
+  --color-muted: #e9e4dc;
+  --color-border: #ded8cf;
+  --color-text: #172c3d;
+  --color-text-secondary: #61727d;
 }
 
 @layer base {
@@ -54,4 +54,31 @@
   .ep-input { width: 100%; border: 1px solid #d8d1c8; border-radius: .75rem; background: #fff; color: #172c3d; }
   .ep-input::placeholder { color: #8a969e; }
   .ep-input:focus { border-color: #6fa1c8; box-shadow: 0 0 0 3px rgba(46,109,164,.12); }
+
+  /* Legacy launch pages are normalized here while each route is migrated to the native EquiProfile components.
+     Unlike the rejected rescue CSS, this does not invert arbitrary black surfaces or touch fixed-position studio canvases. */
+  .ep-workspace .bg-surface-100 { background-color: #fff !important; }
+  .ep-workspace .bg-surface-200 { background-color: #f3f0eb !important; }
+  .ep-workspace [class*="border-white"] { border-color: #e1dbd2 !important; }
+  .ep-workspace [class*="divide-white"] > :not([hidden]) ~ :not([hidden]) { border-color: #e7e1d9 !important; }
+  .ep-workspace [class*="bg-white/"] { background-color: #f7f5f1 !important; }
+  .ep-workspace .text-white { color: #172c3d !important; }
+  .ep-workspace .text-zinc-200,
+  .ep-workspace .text-zinc-300 { color: #405968 !important; }
+  .ep-workspace .text-zinc-400 { color: #61727d !important; }
+  .ep-workspace .text-zinc-500,
+  .ep-workspace .text-zinc-600 { color: #7b8991 !important; }
+  .ep-workspace input:not([type="checkbox"]):not([type="radio"]),
+  .ep-workspace textarea,
+  .ep-workspace select {
+    background-color: #fff !important;
+    border-color: #d8d1c8 !important;
+    color: #172c3d !important;
+  }
+  .ep-workspace input::placeholder,
+  .ep-workspace textarea::placeholder { color: #8b979e !important; }
+  .ep-workspace [class*="bg-brand-500"].text-white,
+  .ep-workspace [class*="bg-red-500"].text-white,
+  .ep-workspace a[class*="bg-brand-500"],
+  .ep-workspace button[class*="bg-brand-500"] { color: #fff !important; }
 }

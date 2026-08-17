@@ -14,7 +14,10 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const { sidebarOpen } = useUIStore();
   const [authChecked, setAuthChecked] = useState(false);
 
-  useEffect(() => { if (window.matchMedia('(max-width: 1023px)').matches) useUIStore.getState().setSidebarOpen(false); }, []);
+  useEffect(() => {
+    useUIStore.getState().setTheme('light');
+    if (window.matchMedia('(max-width: 1023px)').matches) useUIStore.getState().setSidebarOpen(false);
+  }, []);
   useEffect(() => { let active = true; void checkAuth().finally(() => { if (active) setAuthChecked(true); }); return () => { active = false; }; }, [checkAuth]);
   useEffect(() => { if (authChecked && !isLoading && !isAuthenticated) router.replace('/login'); }, [authChecked, isLoading, isAuthenticated, router]);
 
@@ -26,7 +29,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       <DashboardSidebar />
       <div className={cn('flex min-h-screen min-w-0 flex-col transition-[margin] duration-300', sidebarOpen ? 'lg:ml-[272px]' : 'lg:ml-[76px]')}>
         <DashboardHeader />
-        <main className="min-w-0 flex-1 px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
+        <main className="ep-workspace min-w-0 flex-1 px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
           <div className="mx-auto w-full max-w-[1480px] min-w-0">{children}</div>
         </main>
         <footer className="px-6 pb-6 text-center text-[11px] text-[#87939a]">© 2026 EquiProfile Marketing</footer>
