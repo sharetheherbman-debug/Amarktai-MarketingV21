@@ -5,7 +5,13 @@ import { useRouter } from 'next/navigation';
 import { AuthCard } from '@/components/auth/AuthCard';
 import { useAuthStore } from '@/stores/auth.store';
 
-const API_URL = String(process.env.NEXT_PUBLIC_API_URL || '/api/v1').replace(/\/+$/, '');
+function normalizeApiBaseUrl(value: string | undefined): string {
+  const trimmed = String(value || '').trim().replace(/\/+$/, '');
+  if (!trimmed || trimmed === '/api') return '/api/v1';
+  return trimmed;
+}
+
+const API_URL = normalizeApiBaseUrl(process.env.NEXT_PUBLIC_API_URL);
 
 export default function MfaSetupPage() {
   const router = useRouter();
