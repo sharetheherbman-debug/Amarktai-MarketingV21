@@ -1,7 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-const OWNER_ONLY_REDIRECT_PREFIXES = [
-  '/',
+/**
+ * Historical public product/marketing pages are not part of the owner-only
+ * EquiProfile Marketing application. Keep those URLs closed without
+ * classifying authenticated application routes (for example /integrations)
+ * as public legacy pages.
+ */
+const LEGACY_PUBLIC_PATHS = new Set([
   '/register',
   '/pricing',
   '/features',
@@ -12,14 +17,11 @@ const OWNER_ONLY_REDIRECT_PREFIXES = [
   '/docs',
   '/compare',
   '/use-cases',
-  '/integrations',
-];
+]);
 
 function isLegacyPublicMarketingPath(pathname: string): boolean {
   if (pathname === '/') return true;
-  return OWNER_ONLY_REDIRECT_PREFIXES
-    .filter((prefix) => prefix !== '/')
-    .some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
+  return LEGACY_PUBLIC_PATHS.has(pathname);
 }
 
 export function middleware(request: NextRequest) {
@@ -30,5 +32,5 @@ export function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/((?!api|_next/static|_next/image|favicon.svg|og-image.png).*)'],
+  matcher: ['/((?!api|_next/static|_next/image|favicon.ico|favicon.svg|apple-touch-icon.png|og-image.png).*)'],
 };
