@@ -126,7 +126,7 @@ const faqs = [
   {
     question: 'How is AI generation provided?',
     answer:
-      'Amarktai Network routes approved generation through vetted processing partners. Credentials and infrastructure stay server-side and never enter customer onboarding.',
+      'Approved generation is routed through vetted processing partners. Credentials and infrastructure stay server-side and never enter customer onboarding.',
   },
   {
     question: 'Is my data secure?',
@@ -404,12 +404,12 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* AI Network */}
+      {/* Governed generation */}
       <section className="border-t border-white/[0.06] py-20 sm:py-28">
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
           <div className="mx-auto max-w-2xl text-center">
             <h2 className="text-3xl font-bold tracking-tight text-white sm:text-4xl">
-              Powered by Amarktai Network
+              Governed AI generation
             </h2>
             <p className="mt-4 text-lg text-zinc-400">
               One approved AI route, consistent governance, and clear credit controls.
@@ -417,12 +417,12 @@ export default function LandingPage() {
           </div>
           <div className="mt-12 flex flex-col items-center justify-center gap-6 sm:flex-row">
             <div className="rounded-2xl border border-white/[0.06] bg-surface-100 px-8 py-6 text-center">
-              <div className="text-lg font-semibold text-white">Amarktai Network</div>
+              <div className="text-lg font-semibold text-white">Approved generation route</div>
               <div className="mt-1 text-sm text-zinc-500">Governed AI generation</div>
             </div>
           </div>
           <p className="mt-8 text-center text-sm text-zinc-500">
-            Generation fails closed when the approved network is unavailable; no unapproved fallback is used.
+            Generation fails closed when the approved route is unavailable; no unapproved fallback is used.
           </p>
         </div>
       </section>
