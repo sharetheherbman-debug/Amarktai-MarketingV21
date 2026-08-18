@@ -1,225 +1,41 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
-import {
-  Search,
-  Globe,
-  BarChart3,
-  Loader2,
-  AlertCircle,
-  X,
-  Plus,
-  Sparkles,
-  Link2,
-  FileText,
-  TrendingUp,
-} from 'lucide-react';
+import { useCallback, useEffect, useState } from 'react';
+import { AlertCircle, BarChart3, Globe2, Loader2, Save, Search, Sparkles, X } from 'lucide-react';
 import { api } from '@/lib/api';
 import type { ApiResponse } from '@/types';
 
-interface SeoKeyword { id: string; keyword: string; search_volume: number; difficulty: number; intent: string | null; }
-interface SeoAudit { id: string; url: string; score: number; issues: Array<{ type: string; severity: string; message: string }>; suggestions: string[]; created_at: string; }
+type Tab = 'keywords' | 'audit';
+interface SeoKeyword { id:string; keyword:string; search_volume:number; difficulty:number; intent:string|null }
+interface SeoAudit { id:string; url:string; score:number; issues:Array<{type:string;severity:string;message:string}>; suggestions:string[]; created_at:string }
+type ResearchKeyword = { keyword:string; search_volume:number; difficulty:number; intent:string };
+const inputClass='ep-input min-h-11 px-3 py-2.5 text-sm';
 
-export default function SeoPage() {
-  const [tab, setTab] = useState<'keywords' | 'audit' | 'meta'>('keywords');
-  const [keywords, setKeywords] = useState<SeoKeyword[]>([]);
-  const [audits, setAudits] = useState<SeoAudit[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [researchSeed, setResearchSeed] = useState('');
-  const [researching, setResearching] = useState(false);
-  const [researchResults, setResearchResults] = useState<Array<{ keyword: string; search_volume: number; difficulty: number; intent: string }>>([]);
-  const [auditUrl, setAuditUrl] = useState('');
-  const [auditing, setAuditing] = useState(false);
+export default function SeoPage(){
+  const [tab,setTab]=useState<Tab>('keywords');
+  const [keywords,setKeywords]=useState<SeoKeyword[]>([]); const [audits,setAudits]=useState<SeoAudit[]>([]); const [loading,setLoading]=useState(true); const [error,setError]=useState<string|null>(null);
+  const [seed,setSeed]=useState(''); const [researching,setResearching]=useState(false); const [results,setResults]=useState<ResearchKeyword[]>([]); const [saving,setSaving]=useState(false);
+  const [auditUrl,setAuditUrl]=useState(''); const [auditing,setAuditing]=useState(false);
+  const orgId=typeof window!=='undefined'?localStorage.getItem('org_id')||'':'';
 
-  const orgId = typeof window !== 'undefined' ? localStorage.getItem('org_id') || '' : '';
+  const load=useCallback(async()=>{if(!orgId){setLoading(false);return;}setLoading(true);setError(null);try{const [keywordResponse,auditResponse]=await Promise.all([api.get<ApiResponse<SeoKeyword[]>>('/seo/keywords',{params:{organization_id:orgId}}),api.get<ApiResponse<SeoAudit[]>>('/seo/audits',{params:{organization_id:orgId}})]);setKeywords(keywordResponse.data||[]);setAudits(auditResponse.data||[]);}catch(caught){setError(caught instanceof Error?caught.message:'SEO intelligence could not be loaded.');}finally{setLoading(false);}},[orgId]);
+  useEffect(()=>{void load();},[load]);
 
-  const fetchData = useCallback(async () => {
-    if (!orgId) return;
-    try {
-      setLoading(true);
-      const [kwRes, auditRes] = await Promise.all([
-        api.get<ApiResponse<SeoKeyword[]>>('/seo/keywords', { params: { organization_id: orgId } }),
-        api.get<ApiResponse<SeoAudit[]>>('/seo/audits', { params: { organization_id: orgId } }),
-      ]);
-      setKeywords(kwRes.data);
-      setAudits(auditRes.data);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load SEO data');
-    } finally {
-      setLoading(false);
-    }
-  }, [orgId]);
+  const research=async()=>{if(!seed.trim()||!orgId)return;setResearching(true);setError(null);try{const response=await api.post<ApiResponse<ResearchKeyword[]>>('/seo/keywords/research',{body:{organization_id:orgId,seed:seed.trim(),count:15}});setResults(response.data||[]);}catch(caught){setError(caught instanceof Error?caught.message:'Keyword research failed.');}finally{setResearching(false);}};
+  const saveKeywords=async()=>{if(!results.length||!orgId)return;setSaving(true);setError(null);try{await api.post('/seo/keywords/save',{body:{organization_id:orgId,keywords:results}});setResults([]);await load();}catch(caught){setError(caught instanceof Error?caught.message:'Keywords could not be saved.');}finally{setSaving(false);}};
+  const audit=async()=>{if(!auditUrl.trim()||!orgId)return;setAuditing(true);setError(null);try{await api.post('/seo/audit',{body:{organization_id:orgId,url:auditUrl.trim()}});setAuditUrl('');await load();}catch(caught){setError(caught instanceof Error?caught.message:'Site audit failed.');}finally{setAuditing(false);}};
 
-  useEffect(() => { fetchData(); }, [fetchData]);
+  return <div className="space-y-6">
+    <header className="ep-panel p-6 sm:p-8"><p className="ep-section-label">Research & Intelligence · SEO</p><h1 className="ep-page-title mt-2">Turn search evidence into better campaign and content decisions.</h1><p className="ep-page-copy mt-3 max-w-3xl text-sm leading-6 sm:text-base">Research keywords, keep useful search terms and audit public pages. Values shown here come from the configured SEO capability; unavailable data stays unavailable rather than being fabricated.</p></header>
+    {error&&<div className="ep-status-danger flex items-start gap-3 rounded-xl border px-4 py-3 text-sm"><AlertCircle className="mt-0.5 h-4 w-4 shrink-0"/><span className="flex-1">{error}</span><button type="button" onClick={()=>setError(null)}><X className="h-4 w-4"/></button></div>}
+    <div className="ep-card flex gap-1 p-1.5">{([['keywords','Keyword research',Search],['audit','Site audits',Globe2]] as const).map(([value,label,Icon])=><button type="button" key={value} onClick={()=>setTab(value)} className={tab===value?'flex items-center gap-2 rounded-lg bg-[var(--ep-navy)] px-4 py-2.5 text-sm font-extrabold text-white':'flex items-center gap-2 rounded-lg px-4 py-2.5 text-sm font-bold text-[var(--ep-text-muted)] hover:bg-[var(--ep-blue-soft)]'}><Icon className="h-4 w-4"/>{label}</button>)}</div>
 
-  const handleResearch = async () => {
-    if (!researchSeed || !orgId) return;
-    try {
-      setResearching(true);
-      const res = await api.post<ApiResponse<Array<{ keyword: string; search_volume: number; difficulty: number; intent: string }>>>('/seo/keywords/research', {
-        body: { organization_id: orgId, seed: researchSeed, count: 15 },
-      });
-      setResearchResults(res.data);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Research failed');
-    } finally {
-      setResearching(false);
-    }
-  };
-
-  const handleSaveKeywords = async () => {
-    if (!orgId || researchResults.length === 0) return;
-    try {
-      await api.post('/seo/keywords/save', { body: { organization_id: orgId, keywords: researchResults } });
-      setResearchResults([]);
-      fetchData();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Save failed');
-    }
-  };
-
-  const handleAudit = async () => {
-    if (!auditUrl || !orgId) return;
-    try {
-      setAuditing(true);
-      await api.post('/seo/audit', { body: { organization_id: orgId, url: auditUrl } });
-      setAuditUrl('');
-      fetchData();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Audit failed');
-    } finally {
-      setAuditing(false);
-    }
-  };
-
-  return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-white">SEO Intelligence</h1>
-        <p className="mt-1 text-sm text-zinc-400">Keyword research, site audits, and content optimization.</p>
-      </div>
-
-      {error && (
-        <div className="flex items-center gap-3 rounded-lg border border-red-500/20 bg-red-500/5 px-4 py-3">
-          <AlertCircle className="h-4 w-4 text-red-400" /><p className="text-sm text-red-300">{error}</p>
-          <button onClick={() => setError(null)} className="ml-auto text-red-400 hover:text-red-300"><X className="h-4 w-4" /></button>
-        </div>
-      )}
-
-      <div className="flex items-center gap-1 rounded-lg bg-white/[0.03] p-1">
-        {([['keywords', 'Keywords', Search], ['audit', 'Site Audit', Globe], ['meta', 'Meta Generator', FileText]] as const).map(([key, label, Icon]) => (
-          <button key={key} onClick={() => setTab(key as typeof tab)}
-            className={`flex items-center gap-2 rounded-md px-4 py-2 text-sm font-medium transition-colors ${tab === key ? 'bg-brand-500/10 text-brand-400' : 'text-zinc-400 hover:text-white'}`}>
-            <Icon className="h-4 w-4" />{label}
-          </button>
-        ))}
-      </div>
-
-      {tab === 'keywords' && (
-        <div className="space-y-6">
-          <div className="rounded-xl border border-white/[0.06] bg-surface-100 p-6">
-            <h2 className="text-lg font-semibold text-white mb-4">AI Keyword Research</h2>
-            <div className="flex gap-3">
-              <input type="text" value={researchSeed} onChange={e => setResearchSeed(e.target.value)} placeholder="Enter a seed keyword..."
-                className="flex-1 h-10 rounded-lg border border-white/[0.06] bg-white/[0.03] px-4 text-sm text-white placeholder-zinc-500 outline-none focus:border-brand-500/50" />
-              <button onClick={handleResearch} disabled={researching || !researchSeed}
-                className="inline-flex items-center gap-2 rounded-lg bg-brand-500 px-4 py-2.5 text-sm font-semibold text-white hover:bg-brand-400 disabled:opacity-50">
-                {researching ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}Research
-              </button>
-            </div>
-            {researchResults.length > 0 && (
-              <div className="mt-4 space-y-2">
-                <div className="flex items-center justify-between">
-                  <p className="text-sm text-zinc-300">Found {researchResults.length} keywords</p>
-                  <button onClick={handleSaveKeywords} className="text-sm font-medium text-brand-400 hover:text-brand-300">Save All</button>
-                </div>
-                {researchResults.map((kw, i) => (
-                  <div key={i} className="flex items-center justify-between rounded-lg bg-white/[0.02] px-4 py-2.5">
-                    <span className="text-sm text-white">{kw.keyword}</span>
-                    <div className="flex items-center gap-4 text-xs text-zinc-400">
-                      <span>{kw.search_volume}/mo</span>
-                      <span>Diff: {kw.difficulty}</span>
-                      <span className="rounded-full bg-brand-500/10 px-2 py-0.5 text-brand-300">{kw.intent}</span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
-          <div className="rounded-xl border border-white/[0.06] bg-surface-100">
-            <div className="border-b border-white/[0.06] px-6 py-4">
-              <h2 className="text-sm font-semibold text-white">Saved Keywords ({keywords.length})</h2>
-            </div>
-            {loading ? (
-              <div className="flex items-center justify-center py-12"><Loader2 className="h-6 w-6 animate-spin text-brand-400" /></div>
-            ) : keywords.length === 0 ? (
-              <div className="py-12 text-center text-sm text-zinc-500">No keywords saved yet.</div>
-            ) : (
-              <div className="divide-y divide-white/[0.06]">
-                {keywords.map(kw => (
-                  <div key={kw.id} className="flex items-center justify-between px-6 py-3">
-                    <span className="text-sm text-white">{kw.keyword}</span>
-                    <div className="flex items-center gap-4 text-xs text-zinc-400">
-                      <span>{kw.search_volume}/mo</span>
-                      <span>Diff: {Math.round(kw.difficulty)}</span>
-                      {kw.intent && <span className="rounded-full bg-brand-500/10 px-2 py-0.5 text-brand-300">{kw.intent}</span>}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {tab === 'audit' && (
-        <div className="space-y-6">
-          <div className="rounded-xl border border-white/[0.06] bg-surface-100 p-6">
-            <h2 className="text-lg font-semibold text-white mb-4">Site Audit</h2>
-            <div className="flex gap-3">
-              <input type="url" value={auditUrl} onChange={e => setAuditUrl(e.target.value)} placeholder="https://example.com"
-                className="flex-1 h-10 rounded-lg border border-white/[0.06] bg-white/[0.03] px-4 text-sm text-white placeholder-zinc-500 outline-none focus:border-brand-500/50" />
-              <button onClick={handleAudit} disabled={auditing || !auditUrl}
-                className="inline-flex items-center gap-2 rounded-lg bg-brand-500 px-4 py-2.5 text-sm font-semibold text-white hover:bg-brand-400 disabled:opacity-50">
-                {auditing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Globe className="h-4 w-4" />}Audit
-              </button>
-            </div>
-          </div>
-
-          {audits.map(audit => (
-            <div key={audit.id} className="rounded-xl border border-white/[0.06] bg-surface-100 p-6">
-              <div className="flex items-center justify-between mb-4">
-                <div>
-                  <h3 className="text-sm font-semibold text-white">{audit.url}</h3>
-                  <p className="text-xs text-zinc-500">{new Date(audit.created_at).toLocaleDateString()}</p>
-                </div>
-                <div className={`text-2xl font-bold ${audit.score >= 80 ? 'text-emerald-400' : audit.score >= 50 ? 'text-amber-400' : 'text-red-400'}`}>
-                  {Math.round(audit.score)}
-                </div>
-              </div>
-              {audit.issues.length > 0 && (
-                <div className="space-y-2">
-                  {audit.issues.slice(0, 5).map((issue, i) => (
-                    <div key={i} className="flex items-center gap-2 text-xs">
-                      <span className={`h-2 w-2 rounded-full ${issue.severity === 'error' ? 'bg-red-400' : issue.severity === 'warning' ? 'bg-amber-400' : 'bg-blue-400'}`} />
-                      <span className="text-zinc-300">{issue.message}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
-      )}
-
-      {tab === 'meta' && (
-        <div className="rounded-xl border border-white/[0.06] bg-surface-100 py-16 text-center">
-          <FileText className="mx-auto h-8 w-8 text-zinc-500" />
-          <p className="mt-4 text-sm text-zinc-400">Meta title and description generator coming soon. Use the API endpoint directly.</p>
-        </div>
-      )}
-    </div>
-  );
+    {tab==='keywords'?<div className="space-y-5">
+      <section className="ep-card p-5 sm:p-6"><p className="ep-section-label">Discover</p><h2 className="mt-1 text-lg font-extrabold text-[var(--ep-navy)]">Research a topic</h2><div className="mt-4 flex flex-col gap-2 sm:flex-row"><input value={seed} onChange={(event)=>setSeed(event.target.value)} onKeyDown={(event)=>{if(event.key==='Enter')void research();}} placeholder="Enter a product, service or search topic" className={`${inputClass} min-w-0 flex-1`}/><button type="button" onClick={()=>void research()} disabled={researching||!seed.trim()} className="ep-button-primary px-4 py-2.5 text-sm">{researching?<Loader2 className="h-4 w-4 animate-spin"/>:<Sparkles className="h-4 w-4"/>} Research</button></div>{results.length>0&&<div className="mt-5"><div className="mb-3 flex items-center justify-between"><p className="text-sm font-extrabold text-[var(--ep-navy)]">Research results</p><button type="button" onClick={()=>void saveKeywords()} disabled={saving} className="ep-button-secondary px-3 py-2 text-xs">{saving?<Loader2 className="h-3.5 w-3.5 animate-spin"/>:<Save className="h-3.5 w-3.5"/>} Save all</button></div><div className="overflow-x-auto rounded-xl border border-[var(--ep-border)]"><table className="min-w-full text-left text-sm"><thead className="bg-[var(--ep-surface-subtle)] text-xs text-[var(--ep-text-muted)]"><tr><th className="px-4 py-3">Keyword</th><th className="px-4 py-3">Volume</th><th className="px-4 py-3">Difficulty</th><th className="px-4 py-3">Intent</th></tr></thead><tbody className="divide-y divide-[var(--ep-border)]">{results.map((keyword)=><tr key={keyword.keyword}><td className="px-4 py-3 font-bold text-[var(--ep-navy)]">{keyword.keyword}</td><td className="px-4 py-3 text-[var(--ep-text-muted)]">{Number(keyword.search_volume||0).toLocaleString()}</td><td className="px-4 py-3 text-[var(--ep-text-muted)]">{Number(keyword.difficulty||0).toFixed(0)}</td><td className="px-4 py-3 capitalize text-[var(--ep-text-muted)]">{keyword.intent||'—'}</td></tr>)}</tbody></table></div></div>}</section>
+      <section className="ep-card overflow-hidden"><div className="border-b border-[var(--ep-border)] px-5 py-4"><p className="ep-section-label">Saved evidence</p><h2 className="mt-1 text-lg font-extrabold text-[var(--ep-navy)]">Keywords</h2></div>{loading?<div className="flex justify-center py-14"><Loader2 className="h-6 w-6 animate-spin text-[var(--ep-blue)]"/></div>:keywords.length===0?<div className="py-14 text-center text-sm text-[var(--ep-text-muted)]">No saved keywords yet.</div>:<div className="divide-y divide-[var(--ep-border)]">{keywords.map((keyword)=><div key={keyword.id} className="grid gap-2 px-5 py-4 sm:grid-cols-[1fr_auto_auto_auto] sm:items-center"><span className="font-extrabold text-[var(--ep-navy)]">{keyword.keyword}</span><span className="text-xs text-[var(--ep-text-muted)]">{Number(keyword.search_volume||0).toLocaleString()} / mo</span><span className="text-xs text-[var(--ep-text-muted)]">Difficulty {Math.round(Number(keyword.difficulty||0))}</span><span className="text-xs capitalize text-[var(--ep-text-muted)]">{keyword.intent||'—'}</span></div>)}</div>}</section>
+    </div>:<div className="space-y-5">
+      <section className="ep-card p-5 sm:p-6"><p className="ep-section-label">Public page audit</p><h2 className="mt-1 text-lg font-extrabold text-[var(--ep-navy)]">Audit a URL</h2><div className="mt-4 flex flex-col gap-2 sm:flex-row"><input type="url" value={auditUrl} onChange={(event)=>setAuditUrl(event.target.value)} placeholder="https://example.com/page" className={`${inputClass} min-w-0 flex-1`}/><button type="button" onClick={()=>void audit()} disabled={auditing||!auditUrl.trim()} className="ep-button-primary px-4 py-2.5 text-sm">{auditing?<Loader2 className="h-4 w-4 animate-spin"/>:<Globe2 className="h-4 w-4"/>} Run audit</button></div></section>
+      {audits.length===0?<div className="ep-card py-14 text-center"><BarChart3 className="mx-auto h-8 w-8 text-[var(--ep-text-soft)]"/><p className="mt-3 text-sm font-semibold text-[var(--ep-text-muted)]">No site audits yet.</p></div>:<div className="space-y-4">{audits.map((entry)=><article key={entry.id} className="ep-card p-5 sm:p-6"><div className="flex flex-wrap items-start justify-between gap-3"><div className="min-w-0"><h3 className="break-all font-extrabold text-[var(--ep-navy)]">{entry.url}</h3><p className="mt-1 text-xs text-[var(--ep-text-soft)]">{new Date(entry.created_at).toLocaleString()}</p></div><div className="rounded-xl bg-[var(--ep-blue-soft)] px-4 py-3 text-center"><p className="text-[10px] font-bold uppercase text-[var(--ep-text-muted)]">SEO score</p><p className="mt-1 text-2xl font-extrabold text-[var(--ep-navy)]">{Math.round(Number(entry.score||0))}</p></div></div>{entry.issues?.length>0&&<div className="mt-5 space-y-2">{entry.issues.slice(0,8).map((issue,index)=><div key={`${issue.message}-${index}`} className="rounded-xl bg-[var(--ep-surface-subtle)] px-4 py-3"><div className="flex items-center gap-2"><span className="text-[10px] font-extrabold uppercase text-[var(--ep-blue)]">{issue.severity}</span><p className="text-sm font-semibold text-[var(--ep-navy)]">{issue.message}</p></div></div>)}</div>}{entry.suggestions?.length>0&&<div className="mt-5"><p className="text-xs font-extrabold text-[var(--ep-text-muted)]">Recommended improvements</p><ul className="mt-2 space-y-2">{entry.suggestions.slice(0,8).map((suggestion)=><li key={suggestion} className="text-sm leading-6 text-[var(--ep-text-muted)]">• {suggestion}</li>)}</ul></div>}</article>)}</div>}
+    </div>}
+  </div>;
 }
