@@ -1,5 +1,13 @@
 import type { Config } from 'tailwindcss';
 
+/**
+ * Canonical EquiProfile Marketing palette.
+ *
+ * The primary navy/blue pair is grounded in the real EquiProfile logo artwork
+ * rather than the rejected cream/teal/gold rescue theme. Customer pages should
+ * prefer the CSS semantic tokens in globals.css; these named colours remain for
+ * existing Tailwind utilities while legacy pages are replaced.
+ */
 const config: Config = {
   content: ['./src/**/*.{ts,tsx}', './app/**/*.{ts,tsx}'],
   darkMode: 'class',
@@ -7,47 +15,46 @@ const config: Config = {
     extend: {
       colors: {
         brand: {
-          50: '#eef6fb',
-          100: '#d9ecf6',
-          200: '#b8dbea',
-          300: '#87c3db',
-          400: '#4a9eca',
-          500: '#2e6da4',
-          600: '#275e8d',
-          700: '#214d74',
-          800: '#1a3a5c',
-          900: '#1a2e3e',
-          950: '#101f2b',
+          50: '#eef7fd',
+          100: '#d9eefb',
+          200: '#b8def5',
+          300: '#86c8ed',
+          400: '#4aa9df',
+          500: '#167cc1',
+          600: '#1069a7',
+          700: '#0c5689',
+          800: '#08436d',
+          900: '#052b57',
+          950: '#031a35',
         },
         accent: {
-          50: '#fffbeb',
-          100: '#fef3c7',
-          200: '#fde68a',
-          300: '#fcd34d',
-          400: '#fbbf24',
-          500: '#c5a55a',
-          600: '#ad8d45',
-          700: '#8b7038',
-          800: '#6d592f',
-          900: '#584928',
-          950: '#332816',
+          50: '#f0f8ff',
+          100: '#ddecff',
+          200: '#c2dcff',
+          300: '#97c4ff',
+          400: '#65a6ff',
+          500: '#3786e8',
+          600: '#226aca',
+          700: '#1d55a4',
+          800: '#1d4783',
+          900: '#1c3d6d',
+          950: '#122746',
         },
         surface: {
           DEFAULT: '#ffffff',
-          50: '#f8f6f3',
+          50: '#f5f8fc',
           100: '#ffffff',
-          200: '#f0ece6',
-          300: '#e8e3db',
-          400: '#e0dbd3',
+          200: '#eef3f8',
+          300: '#e4ebf2',
+          400: '#d7e0ea',
         },
       },
       fontFamily: {
-        sans: ['var(--font-inter)', 'system-ui', 'sans-serif'],
+        sans: ['Inter', 'ui-sans-serif', 'system-ui', 'sans-serif'],
       },
       animation: {
-        'fade-in': 'fadeIn 0.3s ease-in-out',
-        'slide-up': 'slideUp 0.3s ease-out',
-        'pulse-glow': 'pulseGlow 2s ease-in-out infinite',
+        'fade-in': 'fadeIn 0.2s ease-out',
+        'slide-up': 'slideUp 0.2s ease-out',
       },
       keyframes: {
         fadeIn: {
@@ -55,12 +62,8 @@ const config: Config = {
           '100%': { opacity: '1' },
         },
         slideUp: {
-          '0%': { opacity: '0', transform: 'translateY(10px)' },
+          '0%': { opacity: '0', transform: 'translateY(8px)' },
           '100%': { opacity: '1', transform: 'translateY(0)' },
-        },
-        pulseGlow: {
-          '0%, 100%': { boxShadow: '0 0 15px rgba(46, 109, 164, 0.2)' },
-          '50%': { boxShadow: '0 0 30px rgba(46, 109, 164, 0.35)' },
         },
       },
     },
