@@ -79,5 +79,9 @@ export function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/((?!api|_next/static|_next/image|favicon.ico|favicon.svg|apple-touch-icon.png|og-image.png).*)'],
+  // Static brand assets must remain reachable before authentication because
+  // the login/dashboard shells render them independently of application
+  // session cookies. Protected application routes still pass through the
+  // middleware and require an accessToken or refreshToken.
+  matcher: ['/((?!api|_next/static|_next/image|favicon.ico|favicon.svg|apple-touch-icon.png|og-image.png|logo.png).*)'],
 };
