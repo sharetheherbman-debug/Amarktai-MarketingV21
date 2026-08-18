@@ -14,6 +14,13 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY --from=deps /app/apps/web/node_modules ./apps/web/node_modules
 COPY . .
 
+# Bundle the exact Management logo into Marketing so the dashboard never
+# depends on a cross-origin production URL for its own brand identity.
+RUN mkdir -p apps/web/public && \
+    wget -qO apps/web/public/logo.png \
+      https://raw.githubusercontent.com/sharetheherbman-debug/Equiprofile-Marketing/01ea518f0e3e5cbc25df61b423e1341f0639af67/client/public/logo.png && \
+    test -s apps/web/public/logo.png
+
 ARG NEXT_PUBLIC_API_URL=/api
 ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
 ENV NEXT_TELEMETRY_DISABLED=1
