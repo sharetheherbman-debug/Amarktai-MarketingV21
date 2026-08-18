@@ -20,7 +20,7 @@ RUN apk add --no-cache ffmpeg && \
     adduser --system --uid 1001 apiuser
 
 COPY --from=build /app/apps/api/dist ./dist
-COPY --from=build /app/apps/api/src/db/migrations ./dist/db/migrations
+COPY --from=build --chown=apiuser:nodejs /app/apps/api/src/db/migrations ./dist/db/migrations
 COPY --from=build /app/apps/api/package.json ./package.json
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/version.json ./version.json
