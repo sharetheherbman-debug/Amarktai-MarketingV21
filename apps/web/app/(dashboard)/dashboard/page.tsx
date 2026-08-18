@@ -2,76 +2,229 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { AlertTriangle, ArrowRight, CalendarDays, CheckCircle2, Coins, FileText, Loader2, Megaphone, Plug, ShieldCheck, Sparkles } from 'lucide-react';
+import {
+  ArrowRight,
+  BarChart3,
+  BrainCircuit,
+  CalendarRange,
+  CheckCircle2,
+  CircleDollarSign,
+  FileCheck2,
+  Loader2,
+  Megaphone,
+  Plug,
+  Send,
+  ShieldCheck,
+  Sparkles,
+  TriangleAlert,
+  UsersRound,
+} from 'lucide-react';
 import { useAuthStore } from '@/stores/auth.store';
+import { api } from '@/lib/api';
+import type { ApiResponse } from '@/types';
 
-function normalizeApiBaseUrl(value: string | undefined): string {
-  const trimmed = String(value || '').trim().replace(/\/+$/, '');
-  if (!trimmed || trimmed === '/api') return '/api/v1';
-  return trimmed;
+type Row = Record<string, any>;
+type BrandDNA = {
+  companyName?: string;
+  description?: string;
+  products?: string[];
+  voiceDescription?: string;
+  demographics?: string;
+  psychographics?: string;
+  goals?: string[];
+};
+
+type Summary = {
+  control: Row;
+  wallet: Row;
+  campaigns: Row[];
+  connections: Row[];
+  content: Row[];
+  knowledge: Row;
+  brand: BrandDNA;
+  director: Row;
+};
+
+const emptySummary: Summary = {
+  control: {}, wallet: {}, campaigns: [], connections: [], content: [], knowledge: {}, brand: {}, director: {},
+};
+
+function rows(payload: any): Row[] {
+  const value = payload?.data;
+  if (Array.isArray(value)) return value;
+  if (Array.isArray(value?.items)) return value.items;
+  if (Array.isArray(value?.data)) return value.data;
+  return [];
 }
-const API_URL = normalizeApiBaseUrl(process.env.NEXT_PUBLIC_API_URL);
-type RecordValue = Record<string, unknown>;
-type Summary = { control?: RecordValue; wallet?: RecordValue; campaigns: RecordValue[]; connections: RecordValue[]; content: RecordValue[] };
-function rows(payload: any): RecordValue[] { const value = payload?.data; if (Array.isArray(value)) return value; if (Array.isArray(value?.items)) return value.items; if (Array.isArray(value?.data)) return value.data; return []; }
-function automationLabel(control: RecordValue): string { if (control.emergency_stop === true) return 'Paused for launch safety'; if (control.operating_mode === 'autonomous') return 'Active within limits'; if (control.operating_mode === 'approval') return 'Approval required'; if (control.operating_mode === 'manual') return 'Manual control'; return 'Status unavailable'; }
+
+function number(value: unknown) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed.toLocaleString() : '—';
+}
+
+function statusWord(value: unknown, fallback: string) {
+  const text = String(value || '').trim();
+  return text ? text.replaceAll('_', ' ') : fallback;
+}
 
 export default function DashboardPage() {
-  const { user, token, currentOrganization } = useAuthStore();
-  const [summary, setSummary] = useState<Summary>({ campaigns: [], connections: [], content: [] });
+  const { user, currentOrganization } = useAuthStore();
+  const [summary, setSummary] = useState<Summary>(emptySummary);
   const [loading, setLoading] = useState(true);
   const [partial, setPartial] = useState(false);
 
   useEffect(() => {
-    if (!token || !currentOrganization) { setLoading(false); return; }
+    const orgId = currentOrganization?.id;
+    if (!orgId) { setLoading(false); return; }
     let active = true;
-    const headers = { Authorization: `Bearer ${token}`, 'x-organization-id': currentOrganization.id };
-    const get = async (path: string) => { const response = await fetch(`${API_URL}${path}`, { credentials: 'include', headers }); if (!response.ok) throw new Error('Dashboard information is temporarily unavailable.'); return response.json(); };
-    void Promise.allSettled([get('/relaunch-control'), get('/generation-credits/wallet'), get('/campaigns?limit=100'), get('/integrations/connections'), get('/content-studio?limit=100')]).then((results) => {
+
+    const run = async () => {
+      setLoading(true);
+      const results = await Promise.allSettled([
+        api.get<ApiResponse<Row>>('/relaunch-control'),
+        api.get<ApiResponse<Row>>('/generation-credits/wallet'),
+        api.get<ApiResponse<Row[]>>('/campaigns', { params: { limit: '100' } }),
+        api.get<ApiResponse<Row[]>>('/integrations/connections'),
+        api.get<ApiResponse<Row[]>>('/content-studio', { params: { organization_id: orgId } }),
+        api.get<ApiResponse<Row>>('/knowledge/stats'),
+        api.get<ApiResponse<BrandDNA>>('/brand-dna'),
+        api.get<ApiResponse<Row>>('/growth-director/status'),
+      ]);
       if (!active) return;
-      const value = (index: number) => results[index].status === 'fulfilled' ? (results[index] as PromiseFulfilledResult<any>).value : undefined;
-      setSummary({ control: value(0)?.data, wallet: value(1)?.data, campaigns: rows(value(2)), connections: rows(value(3)), content: rows(value(4)) });
-      setPartial(results.some((item) => item.status === 'rejected')); setLoading(false);
-    });
+      const value = (index: number) => results[index].status === 'fulfilled'
+        ? (results[index] as PromiseFulfilledResult<any>).value
+        : undefined;
+
+      setSummary({
+        control: value(0)?.data || {},
+        wallet: value(1)?.data || {},
+        campaigns: rows(value(2)),
+        connections: rows(value(3)),
+        content: rows(value(4)),
+        knowledge: value(5)?.data || {},
+        brand: value(6)?.data || {},
+        director: value(7)?.data || {},
+      });
+      setPartial(results.some((result) => result.status === 'rejected'));
+      setLoading(false);
+    };
+
+    void run();
     return () => { active = false; };
-  }, [token, currentOrganization]);
+  }, [currentOrganization]);
 
   const metrics = useMemo(() => {
-    const activeCampaigns = summary.campaigns.filter((item) => item.status === 'active').length;
-    const draftCampaigns = summary.campaigns.filter((item) => item.status === 'draft').length;
+    const activeCampaigns = summary.campaigns.filter((item) => ['active', 'running', 'production'].includes(String(item.status))).length;
+    const draftCampaigns = summary.campaigns.filter((item) => ['draft', 'planning'].includes(String(item.status))).length;
+    const approvals = summary.content.filter((item) => item.status === 'review').length;
     const drafts = summary.content.filter((item) => item.status === 'draft').length;
-    const review = summary.content.filter((item) => item.status === 'review').length;
     const approved = summary.content.filter((item) => item.status === 'approved').length;
+    const scheduled = summary.content.filter((item) => item.status === 'scheduled' || item.scheduled_at).length;
     const connected = summary.connections.filter((item) => item.status === 'active' || item.health_status === 'healthy').length;
-    const attention = summary.connections.filter((item) => item.health_status === 'unhealthy' || item.status === 'error').length;
-    return { activeCampaigns, draftCampaigns, drafts, review, approved, connected, attention };
+    const connectionAlerts = summary.connections.filter((item) => item.status === 'error' || item.health_status === 'unhealthy').length;
+
+    const brandChecks = [
+      Boolean(summary.brand.companyName),
+      Boolean(summary.brand.description),
+      Boolean(summary.brand.products?.length),
+      Boolean(summary.brand.voiceDescription),
+      Boolean(summary.brand.demographics || summary.brand.psychographics),
+      Boolean(summary.brand.goals?.length),
+      Number(summary.knowledge.item_count ?? summary.knowledge.items ?? 0) > 0,
+    ];
+    const brainPercent = Math.round((brandChecks.filter(Boolean).length / brandChecks.length) * 100);
+
+    return { activeCampaigns, draftCampaigns, approvals, drafts, approved, scheduled, connected, connectionAlerts, brainPercent };
   }, [summary]);
 
-  if (loading) return <div className="flex min-h-[55vh] items-center justify-center"><Loader2 className="h-8 w-8 animate-spin text-[#2e6da4]" /></div>;
-  const control = summary.control || {}; const wallet = summary.wallet || {}; const stopped = control.emergency_stop === true;
+  if (loading) return <div className="flex min-h-[55vh] items-center justify-center"><Loader2 className="h-8 w-8 animate-spin text-[var(--ep-blue)]" /></div>;
 
-  return <div className="space-y-7">
-    <section className="overflow-hidden rounded-[24px] border border-[#d9e1e7] bg-[linear-gradient(135deg,#ffffff_0%,#f3f8fb_62%,#eef6f3_100%)] p-6 shadow-[0_18px_50px_rgba(23,44,61,0.07)] sm:p-8">
-      <div className="flex flex-col gap-6 xl:flex-row xl:items-center xl:justify-between">
-        <div className="max-w-3xl"><div className="mb-3 flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.16em] text-[#2e6da4]"><span className="h-2 w-2 rounded-full bg-[#348d82]" /> Workspace overview</div><h1 className="font-serif text-3xl font-semibold tracking-tight text-[#172c3d] sm:text-4xl">Welcome back{user?.name ? `, ${user.name.split(' ')[0]}` : ''}.</h1><p className="mt-3 max-w-2xl text-sm leading-6 text-[#61727d] sm:text-base">Plan campaigns, create assets, review content and manage publishing from one controlled EquiProfile workspace.</p></div>
-        <div className="flex flex-wrap gap-3"><Link href="/campaigns/new" className="inline-flex items-center justify-center gap-2 rounded-xl border border-[#cfd9e0] bg-white px-4 py-3 text-sm font-bold text-[#244459] shadow-sm transition hover:border-[#9fb7c8]"><Megaphone className="h-4 w-4" /> New campaign</Link><Link href="/creative-studio" className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#2e6da4] px-4 py-3 text-sm font-bold text-white shadow-sm transition hover:bg-[#255d8e]"><Sparkles className="h-4 w-4" /> Open Studio</Link></div>
-      </div>
-    </section>
-    {partial && <div className="rounded-xl border border-[#e2c785] bg-[#fff9ea] px-4 py-3 text-sm font-medium text-[#75531c]">Some live workspace details could not be refreshed. Existing work is unaffected.</div>}
-    <section className={stopped ? 'rounded-2xl border border-[#ead39a] bg-[#fff9ea] p-5' : 'rounded-2xl border border-[#cfe2dd] bg-[#f1f8f6] p-5'}><div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between"><div className="flex items-start gap-3"><div className={stopped ? 'rounded-xl bg-[#f8e8bd] p-2.5 text-[#8b641e]' : 'rounded-xl bg-white p-2.5 text-[#348d82] shadow-sm'}>{stopped ? <AlertTriangle className="h-5 w-5" /> : <ShieldCheck className="h-5 w-5" />}</div><div><p className="text-[10px] font-bold uppercase tracking-[0.16em] text-[#75838b]">Automation & safety</p><h2 className="mt-1 text-lg font-bold text-[#172c3d]">{automationLabel(control)}</h2><p className="mt-1 text-sm leading-5 text-[#61727d]">{stopped ? 'Automated execution and generation remain safely paused while launch acceptance is in progress.' : 'Workspace approval and spending controls remain in force.'}</p></div></div><Link href="/relaunch-control" className="inline-flex items-center gap-1.5 text-sm font-bold text-[#2e6da4] hover:text-[#1a3a5c]">Review controls <ArrowRight className="h-4 w-4" /></Link></div></section>
-    <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-      {[
-        { label:'Generation credits', value:wallet.available_credits == null ? '—' : Number(wallet.available_credits).toLocaleString(), detail:'Available balance', icon:Coins, tone:'text-[#a17e35] bg-[#fbf4e5]' },
-        { label:'Campaigns', value:`${metrics.activeCampaigns} active`, detail:`${metrics.draftCampaigns} draft`, icon:Megaphone, tone:'text-[#2e6da4] bg-[#edf4f9]' },
-        { label:'Content', value:`${metrics.review} to review`, detail:`${metrics.drafts} draft · ${metrics.approved} approved`, icon:FileText, tone:'text-[#348d82] bg-[#edf7f4]' },
-        { label:'Connections', value:`${metrics.connected} connected`, detail:metrics.attention ? `${metrics.attention} need attention` : 'No connection alerts', icon:Plug, tone:'text-[#516f83] bg-[#eef3f6]' },
-      ].map(({label,value,detail,icon:Icon,tone}) => <article key={label} className="ep-card min-w-0 p-5"><div className="flex items-center justify-between gap-3"><span className="text-sm font-semibold text-[#61727d]">{label}</span><span className={`rounded-xl p-2 ${tone}`}><Icon className="h-4 w-4" /></span></div><p className="mt-4 truncate text-2xl font-bold text-[#172c3d]">{value}</p><p className="mt-1 truncate text-xs text-[#7c8991]">{detail}</p></article>)}
-    </section>
-    <section className="grid gap-5 xl:grid-cols-[1.25fr_.75fr]">
-      <div className="ep-card p-5 sm:p-6"><p className="text-[10px] font-bold uppercase tracking-[0.16em] text-[#7a8992]">Workflow</p><h2 className="mt-1 text-lg font-bold text-[#172c3d]">Continue your marketing work</h2><div className="mt-5 grid gap-3 sm:grid-cols-2">{[
-        { href:'/campaigns/new', title:'Plan a campaign', description:'Build a governed brief and campaign plan.', icon:Megaphone }, { href:'/creative-studio', title:'Create assets', description:'Use the clean Image and Video Studio.', icon:Sparkles }, { href:'/content-studio', title:'Review content', description:'Move drafts through owner review.', icon:CheckCircle2 }, { href:'/content-studio/calendar', title:'Open calendar', description:'See scheduled content and timing.', icon:CalendarDays },
-      ].map(({href,title,description,icon:Icon}) => <Link key={href} href={href} className="group rounded-2xl border border-[#e4ded6] bg-[#fbfaf8] p-4 transition hover:border-[#a9c1d1] hover:bg-white"><div className="flex items-start gap-3"><span className="rounded-xl bg-white p-2 text-[#2e6da4] shadow-sm"><Icon className="h-4 w-4" /></span><div><p className="font-bold text-[#233e50]">{title}</p><p className="mt-1 text-sm leading-5 text-[#687983]">{description}</p></div></div></Link>)}</div></div>
-      <div className="ep-card p-5 sm:p-6"><p className="text-[10px] font-bold uppercase tracking-[0.16em] text-[#7a8992]">Workspace health</p><h2 className="mt-1 text-lg font-bold text-[#172c3d]">Launch controls are visible</h2><div className="mt-5 space-y-3"><div className="flex items-center justify-between rounded-xl bg-[#f5f8fa] px-4 py-3"><span className="text-sm font-medium text-[#526a79]">Safety state</span><span className="text-sm font-bold text-[#75531c]">{stopped ? 'Paused' : 'Active'}</span></div><div className="flex items-center justify-between rounded-xl bg-[#f5f8fa] px-4 py-3"><span className="text-sm font-medium text-[#526a79]">Connections</span><span className="text-sm font-bold text-[#233e50]">{metrics.connected}</span></div><div className="flex items-center justify-between rounded-xl bg-[#f5f8fa] px-4 py-3"><span className="text-sm font-medium text-[#526a79]">Items awaiting review</span><span className="text-sm font-bold text-[#233e50]">{metrics.review}</span></div></div><Link href="/connections" className="mt-5 inline-flex items-center gap-1.5 text-sm font-bold text-[#2e6da4]">Manage connections <ArrowRight className="h-4 w-4" /></Link></div>
-    </section>
-  </div>;
+  const paused = summary.control.emergency_stop === true;
+  const mode = statusWord(summary.control.operating_mode, 'unavailable');
+  const availableCredits = summary.wallet.available_credits ?? summary.wallet.balance;
+  const directorState = statusWord(
+    summary.director.status ?? summary.director.state ?? summary.director.phase ?? summary.director.current_phase,
+    'Ready to coordinate'
+  );
+
+  const quickActions = [
+    { href: '/business-brain', title: 'Analyse website', description: 'Build or refresh the Business Brain.', icon: BrainCircuit },
+    { href: '/campaigns/new', title: 'Plan campaign', description: 'Start with strategy, audience and objectives.', icon: Megaphone },
+    { href: '/content-studio/generate', title: 'Create content', description: 'Generate governed written marketing content.', icon: Sparkles },
+    { href: '/creative-studio', title: 'Creative Studio', description: 'Build visual, video and long-form assets.', icon: Sparkles },
+    { href: '/approvals', title: 'Review approvals', description: `${metrics.approvals} item${metrics.approvals === 1 ? '' : 's'} waiting for owner review.`, icon: FileCheck2 },
+    { href: '/connections', title: 'Connect channel', description: 'Connect publishing and measurement services.', icon: Plug },
+  ];
+
+  return (
+    <div className="space-y-6">
+      <header className="ep-panel overflow-hidden p-6 sm:p-8">
+        <div className="flex flex-col gap-6 xl:flex-row xl:items-end xl:justify-between">
+          <div className="max-w-3xl">
+            <p className="ep-section-label">Command Centre</p>
+            <h1 className="ep-page-title mt-2">{user?.name ? `Good to see you, ${user.name.split(' ')[0]}.` : 'Your marketing operation at a glance.'}</h1>
+            <p className="ep-page-copy mt-3 max-w-2xl text-sm leading-6 sm:text-base">Understand the business, plan campaigns, coordinate production, approve customer-facing work, publish through governed channels and learn from results.</p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Link href="/campaigns/new" className="ep-button-secondary px-4 py-2.5 text-sm"><Megaphone className="h-4 w-4" /> New campaign</Link>
+            <Link href="/business-brain" className="ep-button-primary px-4 py-2.5 text-sm"><BrainCircuit className="h-4 w-4" /> Business Brain</Link>
+          </div>
+        </div>
+      </header>
+
+      {partial && <div className="ep-status-warning flex items-start gap-3 rounded-xl border px-4 py-3 text-sm"><TriangleAlert className="mt-0.5 h-4 w-4 shrink-0" />Some Command Centre information could not be refreshed. Existing work was not changed.</div>}
+
+      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <Link href="/business-brain" className="ep-card group p-5"><div className="flex items-center justify-between"><span className="text-sm font-bold text-[var(--ep-text-muted)]">Business Brain</span><BrainCircuit className="h-5 w-5 text-[var(--ep-blue)]" /></div><p className="mt-4 text-3xl font-extrabold text-[var(--ep-navy)]">{metrics.brainPercent}%</p><p className="mt-1 text-xs text-[var(--ep-text-soft)]">Core business signals ready</p></Link>
+        <Link href="/campaigns" className="ep-card group p-5"><div className="flex items-center justify-between"><span className="text-sm font-bold text-[var(--ep-text-muted)]">Campaigns</span><Megaphone className="h-5 w-5 text-[var(--ep-blue)]" /></div><p className="mt-4 text-3xl font-extrabold text-[var(--ep-navy)]">{metrics.activeCampaigns}</p><p className="mt-1 text-xs text-[var(--ep-text-soft)]">Active · {metrics.draftCampaigns} planning/draft</p></Link>
+        <Link href="/approvals" className="ep-card group p-5"><div className="flex items-center justify-between"><span className="text-sm font-bold text-[var(--ep-text-muted)]">Owner approvals</span><FileCheck2 className="h-5 w-5 text-[var(--ep-blue)]" /></div><p className="mt-4 text-3xl font-extrabold text-[var(--ep-navy)]">{metrics.approvals}</p><p className="mt-1 text-xs text-[var(--ep-text-soft)]">Exact content versions waiting</p></Link>
+        <Link href="/usage-safety" className="ep-card group p-5"><div className="flex items-center justify-between"><span className="text-sm font-bold text-[var(--ep-text-muted)]">Generation Credits</span><CircleDollarSign className="h-5 w-5 text-[var(--ep-blue)]" /></div><p className="mt-4 text-3xl font-extrabold text-[var(--ep-navy)]">{number(availableCredits)}</p><p className="mt-1 text-xs text-[var(--ep-text-soft)]">Available balance</p></Link>
+      </section>
+
+      <section className="grid gap-5 xl:grid-cols-[1.3fr_.7fr]">
+        <div className="ep-card p-5 sm:p-6">
+          <div className="flex items-center justify-between gap-3"><div><p className="ep-section-label">Do next</p><h2 className="mt-1 text-lg font-extrabold text-[var(--ep-navy)]">Continue the marketing workflow</h2></div><ArrowRight className="h-5 w-5 text-[var(--ep-text-soft)]" /></div>
+          <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            {quickActions.map(({ href, title, description, icon: Icon }) => (
+              <Link key={href} href={href} className="group rounded-xl border border-[var(--ep-border)] bg-[var(--ep-surface)] p-4 transition hover:border-[#9fb4c8] hover:bg-[var(--ep-blue-soft)]">
+                <Icon className="h-4 w-4 text-[var(--ep-blue)]" /><p className="mt-3 font-extrabold text-[var(--ep-navy)]">{title}</p><p className="mt-1 text-xs leading-5 text-[var(--ep-text-muted)]">{description}</p>
+              </Link>
+            ))}
+          </div>
+        </div>
+
+        <div className="ep-card p-5 sm:p-6">
+          <p className="ep-section-label">Marketing Director</p>
+          <div className="mt-4 flex items-start gap-3"><div className="rounded-xl bg-[var(--ep-blue-soft)] p-2.5 text-[var(--ep-blue)]"><UsersRound className="h-5 w-5" /></div><div><h2 className="font-extrabold capitalize text-[var(--ep-navy)]">{directorState}</h2><p className="mt-1 text-sm leading-5 text-[var(--ep-text-muted)]">Coordinates the existing specialist workforce around business context, campaigns and owner decisions.</p></div></div>
+          <Link href="/marketing-team" className="mt-5 inline-flex items-center gap-1.5 text-sm font-extrabold text-[var(--ep-blue)]">Open Marketing Team <ArrowRight className="h-4 w-4" /></Link>
+        </div>
+      </section>
+
+      <section className="grid gap-5 lg:grid-cols-3">
+        <div className="ep-card p-5">
+          <div className="flex items-center justify-between"><p className="ep-section-label">Production</p><CalendarRange className="h-4 w-4 text-[var(--ep-blue)]" /></div>
+          <div className="mt-4 grid grid-cols-3 gap-2 text-center"><div className="rounded-xl bg-[var(--ep-surface-subtle)] p-3"><p className="text-xl font-extrabold text-[var(--ep-navy)]">{metrics.drafts}</p><p className="mt-1 text-[10px] font-bold text-[var(--ep-text-muted)]">Draft</p></div><div className="rounded-xl bg-[var(--ep-surface-subtle)] p-3"><p className="text-xl font-extrabold text-[var(--ep-navy)]">{metrics.approved}</p><p className="mt-1 text-[10px] font-bold text-[var(--ep-text-muted)]">Approved</p></div><div className="rounded-xl bg-[var(--ep-surface-subtle)] p-3"><p className="text-xl font-extrabold text-[var(--ep-navy)]">{metrics.scheduled}</p><p className="mt-1 text-[10px] font-bold text-[var(--ep-text-muted)]">Scheduled</p></div></div>
+          <Link href="/content-studio" className="mt-4 inline-flex items-center gap-1 text-xs font-extrabold text-[var(--ep-blue)]">Open Content Studio <ArrowRight className="h-3.5 w-3.5" /></Link>
+        </div>
+
+        <div className="ep-card p-5">
+          <div className="flex items-center justify-between"><p className="ep-section-label">Channels</p><Send className="h-4 w-4 text-[var(--ep-blue)]" /></div>
+          <p className="mt-4 text-2xl font-extrabold text-[var(--ep-navy)]">{metrics.connected} connected</p>
+          <p className="mt-1 text-sm text-[var(--ep-text-muted)]">{metrics.connectionAlerts ? `${metrics.connectionAlerts} connection${metrics.connectionAlerts === 1 ? '' : 's'} need attention.` : 'No connection health alerts in the current data.'}</p>
+          <Link href="/connections" className="mt-4 inline-flex items-center gap-1 text-xs font-extrabold text-[var(--ep-blue)]">Manage connections <ArrowRight className="h-3.5 w-3.5" /></Link>
+        </div>
+
+        <div className="ep-card p-5">
+          <div className="flex items-center justify-between"><p className="ep-section-label">Control Centre</p><ShieldCheck className="h-4 w-4 text-[var(--ep-blue)]" /></div>
+          <p className="mt-4 text-2xl font-extrabold capitalize text-[var(--ep-navy)]">{paused ? 'Paused' : mode}</p>
+          <p className="mt-1 text-sm leading-5 text-[var(--ep-text-muted)]">{paused ? 'External generation and execution are blocked by Emergency Stop.' : `Operating mode is ${mode}; fresh policy decisions still apply.`}</p>
+          <Link href="/usage-safety" className="mt-4 inline-flex items-center gap-1 text-xs font-extrabold text-[var(--ep-blue)]">Review usage & safety <ArrowRight className="h-3.5 w-3.5" /></Link>
+        </div>
+      </section>
+
+      <section className="ep-card p-5 sm:p-6">
+        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between"><div><p className="ep-section-label">Measure & improve</p><h2 className="mt-1 text-lg font-extrabold text-[var(--ep-navy)]">Performance should feed the next decision.</h2><p className="mt-2 max-w-3xl text-sm leading-6 text-[var(--ep-text-muted)]">Use analytics, conversions and bounded recommendations to understand what worked. The system should not silently change an approved offer or bypass owner/policy controls.</p></div><Link href="/analytics" className="ep-button-secondary shrink-0 px-4 py-2.5 text-sm"><BarChart3 className="h-4 w-4" /> Analytics & optimisation</Link></div>
+      </section>
+    </div>
+  );
 }
