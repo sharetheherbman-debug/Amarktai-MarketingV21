@@ -1,451 +1,70 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
-import {
-  TrendingUp,
-  Plus,
-  Trash2,
-  RefreshCw,
-  Loader2,
-  AlertCircle,
-  Bell,
-  X,
-  ExternalLink,
-  Bookmark,
-  BookmarkCheck,
-  Eye,
-} from 'lucide-react';
+import { useCallback, useEffect, useState } from 'react';
+import { AlertCircle, Bell, Bookmark, BookmarkCheck, ExternalLink, Loader2, Plus, RefreshCw, Trash2, TrendingUp, X } from 'lucide-react';
 import { api } from '@/lib/api';
-import type { TrendMonitor, TrendItem, ApiResponse } from '@/types';
+import type { ApiResponse, TrendItem, TrendMonitor } from '@/types';
+
+const inputClass = 'ep-input min-h-11 px-3 py-2.5 text-sm';
+type Tab = 'monitors' | 'alerts' | 'items';
 
 export default function TrendsPage() {
   const [monitors, setMonitors] = useState<TrendMonitor[]>([]);
   const [items, setItems] = useState<TrendItem[]>([]);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [tab, setTab] = useState<Tab>('monitors');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
   const [creating, setCreating] = useState(false);
   const [checking, setChecking] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<'monitors' | 'alerts' | 'items'>('monitors');
-  const [unreadCount, setUnreadCount] = useState(0);
-  const [newMonitor, setNewMonitor] = useState({
-    topic: '',
-    description: '',
-    keywords: '',
-    sources: '',
-  });
-
+  const [form, setForm] = useState({ topic: '', description: '', keywords: '', sources: '' });
   const orgId = typeof window !== 'undefined' ? localStorage.getItem('org_id') || '' : '';
 
-  const fetchMonitors = useCallback(async () => {
-    if (!orgId) return;
-    try {
-      setLoading(true);
-      const res = await api.get<ApiResponse<TrendMonitor[]>>('/trends', {
-        params: { organization_id: orgId },
-      });
-      setMonitors(res.data);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load monitors');
-    } finally {
-      setLoading(false);
-    }
+  const load = useCallback(async () => {
+    if (!orgId) { setLoading(false); return; }
+    setLoading(true); setError(null);
+    const [monitorResult, itemResult, unreadResult] = await Promise.allSettled([
+      api.get<ApiResponse<TrendMonitor[]>>('/trends', { params: { organization_id: orgId } }),
+      api.get<ApiResponse<TrendItem[]>>('/trends/alerts', { params: { organization_id: orgId } }),
+      api.get<ApiResponse<{ count: number }>>('/trends/unread-count', { params: { organization_id: orgId } }),
+    ]);
+    if (monitorResult.status === 'fulfilled') setMonitors(monitorResult.value.data || []);
+    else setError(monitorResult.reason instanceof Error ? monitorResult.reason.message : 'Trend monitors could not be loaded.');
+    if (itemResult.status === 'fulfilled') setItems(itemResult.value.data || []);
+    if (unreadResult.status === 'fulfilled') setUnreadCount(Number(unreadResult.value.data?.count || 0));
+    setLoading(false);
   }, [orgId]);
 
-  const fetchItems = useCallback(async () => {
-    if (!orgId) return;
-    try {
-      const res = await api.get<ApiResponse<TrendItem[]>>('/trends/alerts', {
-        params: { organization_id: orgId },
-      });
-      setItems(res.data);
-    } catch {
-      // silently fail
-    }
-  }, [orgId]);
+  useEffect(() => { void load(); }, [load]);
 
-  const fetchUnreadCount = useCallback(async () => {
-    if (!orgId) return;
+  const create = async () => {
+    if (!orgId || !form.topic.trim()) return;
+    setCreating(true); setError(null);
     try {
-      const res = await api.get<ApiResponse<{ count: number }>>('/trends/unread-count', {
-        params: { organization_id: orgId },
-      });
-      setUnreadCount(res.data.count);
-    } catch {
-      // silently fail
-    }
-  }, [orgId]);
-
-  useEffect(() => {
-    fetchMonitors();
-    fetchItems();
-    fetchUnreadCount();
-  }, [fetchMonitors, fetchItems, fetchUnreadCount]);
-
-  const handleCreate = async () => {
-    if (!newMonitor.topic || !orgId) return;
-    try {
-      setCreating(true);
-      const keywords = newMonitor.keywords.split(',').map((k) => k.trim()).filter(Boolean);
-      const sources = newMonitor.sources.split(',').map((s) => s.trim()).filter(Boolean);
-      await api.post('/trends', {
-        body: {
-          topic: newMonitor.topic,
-          description: newMonitor.description || undefined,
-          keywords,
-          sources,
-          organization_id: orgId,
-        },
-      });
-      setShowCreate(false);
-      setNewMonitor({ topic: '', description: '', keywords: '', sources: '' });
-      fetchMonitors();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to create monitor');
-    } finally {
-      setCreating(false);
-    }
+      await api.post('/trends', { body: { organization_id: orgId, topic: form.topic.trim(), description: form.description.trim() || undefined, keywords: form.keywords.split(',').map((v) => v.trim()).filter(Boolean), sources: form.sources.split(',').map((v) => v.trim()).filter(Boolean) } });
+      setForm({ topic: '', description: '', keywords: '', sources: '' }); setShowCreate(false); await load();
+    } catch (caught) { setError(caught instanceof Error ? caught.message : 'Trend monitor could not be created.'); }
+    finally { setCreating(false); }
   };
 
-  const handleCheck = async (id: string) => {
-    try {
-      setChecking(id);
-      await api.post(`/trends/${id}/check`, {
-        body: { organization_id: orgId },
-      });
-      fetchMonitors();
-      fetchItems();
-      fetchUnreadCount();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to check trends');
-    } finally {
-      setChecking(null);
-    }
-  };
+  const runCheck = async (id: string) => { setChecking(id); setError(null); try { await api.post(`/trends/${id}/check`, { body: { organization_id: orgId } }); await load(); } catch (caught) { setError(caught instanceof Error ? caught.message : 'Trend check failed.'); } finally { setChecking(null); } };
+  const remove = async (id: string) => { if (!confirm('Remove this monitor and its collected items?')) return; try { await api.delete(`/trends/${id}`, { params: { organization_id: orgId } }); await load(); } catch (caught) { setError(caught instanceof Error ? caught.message : 'Trend monitor could not be removed.'); } };
+  const markRead = async (id: string) => { try { await api.patch(`/trends/items/${id}/read`, { body: { organization_id: orgId } }); await load(); } catch { /* keep the current view truthful */ } };
+  const toggleSave = async (id: string) => { try { await api.patch(`/trends/items/${id}/save`, { body: { organization_id: orgId } }); await load(); } catch { /* keep the current view truthful */ } };
 
-  const handleDelete = async (id: string) => {
-    if (!confirm('Delete this monitor and all its items?')) return;
-    try {
-      await api.delete(`/trends/${id}`, {
-        params: { organization_id: orgId },
-      });
-      fetchMonitors();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to delete monitor');
-    }
-  };
+  const shownItems = tab === 'alerts' ? items.filter((item) => !(item as any).is_read) : items;
 
-  const handleMarkRead = async (itemId: string) => {
-    try {
-      await api.patch(`/trends/items/${itemId}/read`, {
-        body: { organization_id: orgId },
-      });
-      fetchItems();
-      fetchUnreadCount();
-    } catch {
-      // silently fail
-    }
-  };
+  return <div className="space-y-6">
+    <header className="ep-panel p-6 sm:p-8"><div className="flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between"><div className="max-w-3xl"><p className="ep-section-label">Research & Intelligence · Trends</p><h1 className="ep-page-title mt-2">Watch the topics and market signals that can change your plan.</h1><p className="ep-page-copy mt-3 text-sm leading-6 sm:text-base">Create focused monitors, review collected items and keep useful signals visible to the Marketing Director without pretending every mention is an opportunity.</p></div><button type="button" onClick={() => setShowCreate(true)} className="ep-button-primary shrink-0 px-4 py-2.5 text-sm"><Plus className="h-4 w-4" /> Add monitor</button></div></header>
+    {error && <div className="ep-status-danger flex items-start gap-3 rounded-xl border px-4 py-3 text-sm"><AlertCircle className="mt-0.5 h-4 w-4 shrink-0" /><span className="flex-1">{error}</span><button type="button" onClick={() => setError(null)}><X className="h-4 w-4" /></button></div>}
 
-  const handleToggleSave = async (itemId: string) => {
-    try {
-      await api.patch(`/trends/items/${itemId}/save`, {
-        body: { organization_id: orgId },
-      });
-      fetchItems();
-    } catch {
-      // silently fail
-    }
-  };
+    <div className="ep-card flex max-w-full gap-1 overflow-x-auto p-1.5">{(['monitors','alerts','items'] as Tab[]).map((value) => <button type="button" key={value} onClick={() => setTab(value)} className={tab === value ? 'shrink-0 rounded-lg bg-[var(--ep-navy)] px-4 py-2.5 text-sm font-extrabold capitalize text-white' : 'shrink-0 rounded-lg px-4 py-2.5 text-sm font-bold capitalize text-[var(--ep-text-muted)] hover:bg-[var(--ep-blue-soft)]'}>{value}{value === 'alerts' && unreadCount > 0 ? ` (${unreadCount})` : ''}</button>)}</div>
 
-  const sentimentColor = (sentiment: string | null) => {
-    switch (sentiment) {
-      case 'positive': return 'text-emerald-400 bg-emerald-500/10';
-      case 'negative': return 'text-red-400 bg-red-500/10';
-      case 'mixed': return 'text-amber-400 bg-amber-500/10';
-      default: return 'text-zinc-400 bg-zinc-500/10';
-    }
-  };
+    {showCreate && <section className="ep-card p-5 sm:p-6"><div className="flex items-start justify-between"><div><p className="ep-section-label">New trend monitor</p><h2 className="mt-1 text-lg font-extrabold text-[var(--ep-navy)]">Define what this workspace should watch</h2></div><button type="button" onClick={() => setShowCreate(false)} className="rounded-lg p-2 text-[var(--ep-text-soft)] hover:bg-[var(--ep-surface-subtle)]"><X className="h-4 w-4" /></button></div><div className="mt-5 grid gap-4 md:grid-cols-2"><Field label="Topic *"><input value={form.topic} onChange={(e) => setForm({ ...form, topic: e.target.value })} placeholder="Equestrian software, horse welfare…" className={inputClass} /></Field><Field label="Description"><input value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="Why this topic matters" className={inputClass} /></Field><Field label="Keywords"><input value={form.keywords} onChange={(e) => setForm({ ...form, keywords: e.target.value })} placeholder="Comma-separated keywords" className={inputClass} /></Field><Field label="Sources"><input value={form.sources} onChange={(e) => setForm({ ...form, sources: e.target.value })} placeholder="Comma-separated public source URLs" className={inputClass} /></Field></div><div className="mt-5 flex gap-2"><button type="button" onClick={() => void create()} disabled={creating || !form.topic.trim()} className="ep-button-primary px-4 py-2.5 text-sm">{creating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />} Save monitor</button><button type="button" onClick={() => setShowCreate(false)} className="ep-button-secondary px-4 py-2.5 text-sm">Cancel</button></div></section>}
 
-  return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-white">Trend Monitoring</h1>
-          <p className="mt-1 text-sm text-zinc-400">
-            Track industry trends and get alerts on relevant topics.
-          </p>
-        </div>
-        <button
-          onClick={() => setShowCreate(true)}
-          className="inline-flex items-center gap-2 rounded-lg bg-brand-500 px-4 py-2.5 text-sm font-semibold text-white transition-all hover:bg-brand-400 active:scale-[0.98]"
-        >
-          <Plus className="h-4 w-4" />
-          Add Monitor
-        </button>
-      </div>
-
-      {error && (
-        <div className="flex items-center gap-3 rounded-lg border border-red-500/20 bg-red-500/5 px-4 py-3">
-          <AlertCircle className="h-4 w-4 text-red-400" />
-          <p className="text-sm text-red-300">{error}</p>
-          <button onClick={() => setError(null)} className="ml-auto text-red-400 hover:text-red-300">
-            <X className="h-4 w-4" />
-          </button>
-        </div>
-      )}
-
-      <div className="flex items-center gap-1 rounded-lg bg-white/[0.03] p-1">
-        {(['monitors', 'alerts', 'items'] as const).map((tab) => (
-          <button
-            key={tab}
-            onClick={() => setActiveTab(tab)}
-            className={`relative rounded-md px-4 py-2 text-sm font-medium transition-colors ${
-              activeTab === tab
-                ? 'bg-brand-500/10 text-brand-400'
-                : 'text-zinc-400 hover:text-white'
-            }`}
-          >
-            {tab.charAt(0).toUpperCase() + tab.slice(1)}
-            {tab === 'alerts' && unreadCount > 0 && (
-              <span className="ml-2 inline-flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-[10px] font-bold text-white">
-                {unreadCount}
-              </span>
-            )}
-          </button>
-        ))}
-      </div>
-
-      {showCreate && (
-        <div className="rounded-xl border border-white/[0.06] bg-surface-100 p-6">
-          <h2 className="text-lg font-semibold text-white">Add Trend Monitor</h2>
-          <div className="mt-4 space-y-4">
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div>
-                <label className="block text-sm font-medium text-zinc-300 mb-1.5">Topic *</label>
-                <input
-                  type="text"
-                  value={newMonitor.topic}
-                  onChange={(e) => setNewMonitor({ ...newMonitor, topic: e.target.value })}
-                  placeholder="AI Marketing"
-                  className="h-10 w-full rounded-lg border border-white/[0.06] bg-white/[0.03] px-4 text-sm text-white placeholder-zinc-500 outline-none focus:border-brand-500/50"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-zinc-300 mb-1.5">Description</label>
-                <input
-                  type="text"
-                  value={newMonitor.description}
-                  onChange={(e) => setNewMonitor({ ...newMonitor, description: e.target.value })}
-                  placeholder="Track AI trends in marketing..."
-                  className="h-10 w-full rounded-lg border border-white/[0.06] bg-white/[0.03] px-4 text-sm text-white placeholder-zinc-500 outline-none focus:border-brand-500/50"
-                />
-              </div>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-zinc-300 mb-1.5">Keywords (comma-separated)</label>
-              <input
-                type="text"
-                value={newMonitor.keywords}
-                onChange={(e) => setNewMonitor({ ...newMonitor, keywords: e.target.value })}
-                placeholder="AI, marketing automation, LLM"
-                className="h-10 w-full rounded-lg border border-white/[0.06] bg-white/[0.03] px-4 text-sm text-white placeholder-zinc-500 outline-none focus:border-brand-500/50"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-zinc-300 mb-1.5">Sources (comma-separated URLs)</label>
-              <input
-                type="text"
-                value={newMonitor.sources}
-                onChange={(e) => setNewMonitor({ ...newMonitor, sources: e.target.value })}
-                placeholder="https://techcrunch.com/feed, https://news.ycombinator.com"
-                className="h-10 w-full rounded-lg border border-white/[0.06] bg-white/[0.03] px-4 text-sm text-white placeholder-zinc-500 outline-none focus:border-brand-500/50"
-              />
-            </div>
-            <div className="flex items-center gap-3">
-              <button
-                onClick={handleCreate}
-                disabled={creating || !newMonitor.topic}
-                className="inline-flex items-center gap-2 rounded-lg bg-brand-500 px-4 py-2.5 text-sm font-semibold text-white transition-all hover:bg-brand-400 disabled:opacity-50"
-              >
-                {creating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
-                Create Monitor
-              </button>
-              <button
-                onClick={() => setShowCreate(false)}
-                className="rounded-lg px-4 py-2.5 text-sm font-medium text-zinc-400 hover:bg-white/[0.04] hover:text-white"
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {activeTab === 'monitors' && (
-        <>
-          {loading ? (
-            <div className="flex items-center justify-center py-20">
-              <Loader2 className="h-8 w-8 animate-spin text-brand-400" />
-            </div>
-          ) : monitors.length === 0 ? (
-            <div className="rounded-xl border border-white/[0.06] bg-surface-100">
-              <div className="flex flex-col items-center justify-center py-20 text-center">
-                <div className="flex h-16 w-16 items-center justify-center rounded-full bg-white/[0.04]">
-                  <TrendingUp className="h-8 w-8 text-zinc-500" />
-                </div>
-                <h3 className="mt-6 text-lg font-semibold text-white">No trend monitors</h3>
-                <p className="mt-2 max-w-sm text-sm text-zinc-500">
-                  Create monitors to track industry trends and get alerts on relevant topics.
-                </p>
-                <button
-                  onClick={() => setShowCreate(true)}
-                  className="mt-6 inline-flex items-center gap-2 rounded-lg bg-brand-500 px-5 py-2.5 text-sm font-semibold text-white transition-all hover:bg-brand-400"
-                >
-                  <Plus className="h-4 w-4" />
-                  Create your first monitor
-                </button>
-              </div>
-            </div>
-          ) : (
-            <div className="space-y-3">
-              {monitors.map((monitor) => (
-                <div
-                  key={monitor.id}
-                  className="group rounded-xl border border-white/[0.06] bg-surface-100 p-5 transition-all hover:border-brand-500/20"
-                >
-                  <div className="flex items-start justify-between">
-                    <div className="flex items-start gap-4">
-                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-amber-500/10">
-                        <TrendingUp className="h-5 w-5 text-amber-400" />
-                      </div>
-                      <div>
-                        <h3 className="text-sm font-semibold text-white">{monitor.topic}</h3>
-                        {monitor.description && (
-                          <p className="mt-0.5 text-xs text-zinc-500">{monitor.description}</p>
-                        )}
-                        <div className="mt-2 flex flex-wrap gap-1.5">
-                          {monitor.keywords.map((kw, i) => (
-                            <span key={i} className="rounded-full bg-white/[0.04] px-2 py-0.5 text-[11px] text-zinc-400">
-                              {kw}
-                            </span>
-                          ))}
-                        </div>
-                        <div className="mt-2 flex items-center gap-4 text-xs text-zinc-400">
-                          <span className={`inline-flex items-center gap-1 ${monitor.is_active ? 'text-emerald-400' : 'text-zinc-500'}`}>
-                            {monitor.is_active ? 'Active' : 'Paused'}
-                          </span>
-                          {monitor.last_checked_at && (
-                            <span>Last checked {new Date(monitor.last_checked_at).toLocaleDateString()}</span>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={() => handleCheck(monitor.id)}
-                        disabled={checking === monitor.id}
-                        title="Run check"
-                        className="rounded-md p-1.5 text-zinc-500 transition-colors hover:bg-white/[0.04] hover:text-white disabled:opacity-50"
-                      >
-                        {checking === monitor.id ? (
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                        ) : (
-                          <RefreshCw className="h-4 w-4" />
-                        )}
-                      </button>
-                      <button
-                        onClick={() => handleDelete(monitor.id)}
-                        title="Delete"
-                        className="rounded-md p-1.5 text-zinc-500 transition-colors hover:bg-red-500/10 hover:text-red-400"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </>
-      )}
-
-      {activeTab === 'alerts' && (
-        <div className="space-y-3">
-          {items.length === 0 ? (
-            <div className="rounded-xl border border-white/[0.06] bg-surface-100 py-16 text-center">
-              <Bell className="mx-auto h-8 w-8 text-zinc-500" />
-              <p className="mt-4 text-sm text-zinc-400">No unread alerts</p>
-            </div>
-          ) : (
-            items.map((item) => (
-              <div
-                key={item.id}
-                className={`rounded-xl border p-5 transition-all ${
-                  item.is_read
-                    ? 'border-white/[0.06] bg-surface-100'
-                    : 'border-amber-500/20 bg-amber-500/5'
-                }`}
-              >
-                <div className="flex items-start justify-between">
-                  <div className="flex-1">
-                    <h3 className="text-sm font-semibold text-white">{item.title}</h3>
-                    {item.summary && <p className="mt-1 text-xs text-zinc-400">{item.summary}</p>}
-                    <div className="mt-2 flex items-center gap-3">
-                      {item.sentiment && (
-                        <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${sentimentColor(item.sentiment)}`}>
-                          {item.sentiment}
-                        </span>
-                      )}
-                      <span className="text-[11px] text-zinc-500">
-                        Score: {(item.relevance_score * 100).toFixed(0)}%
-                      </span>
-                      {item.source && <span className="text-[11px] text-zinc-500">{item.source}</span>}
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-1.5">
-                    {item.url && (
-                      <a
-                        href={item.url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="rounded-md p-1.5 text-zinc-500 hover:bg-white/[0.04] hover:text-white"
-                      >
-                        <ExternalLink className="h-4 w-4" />
-                      </a>
-                    )}
-                    <button
-                      onClick={() => handleToggleSave(item.id)}
-                      title={item.is_saved ? 'Unsave' : 'Save'}
-                      className="rounded-md p-1.5 text-zinc-500 hover:bg-white/[0.04] hover:text-amber-400"
-                    >
-                      {item.is_saved ? <BookmarkCheck className="h-4 w-4 text-amber-400" /> : <Bookmark className="h-4 w-4" />}
-                    </button>
-                    {!item.is_read && (
-                      <button
-                        onClick={() => handleMarkRead(item.id)}
-                        title="Mark as read"
-                        className="rounded-md p-1.5 text-zinc-500 hover:bg-white/[0.04] hover:text-white"
-                      >
-                        <Eye className="h-4 w-4" />
-                      </button>
-                    )}
-                  </div>
-                </div>
-              </div>
-            ))
-          )}
-        </div>
-      )}
-
-      {activeTab === 'items' && (
-        <div className="rounded-xl border border-white/[0.06] bg-surface-100 py-16 text-center">
-          <TrendingUp className="mx-auto h-8 w-8 text-zinc-500" />
-          <p className="mt-4 text-sm text-zinc-400">
-            Select a monitor to view its trend items, or check the Alerts tab for high-relevance items.
-          </p>
-        </div>
-      )}
-    </div>
-  );
+    {tab === 'monitors' ? <section><div className="mb-3 flex items-center justify-between"><div><p className="ep-section-label">Monitoring</p><h2 className="mt-1 text-lg font-extrabold text-[var(--ep-navy)]">Active topics</h2></div><button type="button" onClick={() => void load()} className="ep-button-secondary px-3 py-2 text-xs"><RefreshCw className="h-3.5 w-3.5" /> Refresh</button></div>{loading ? <div className="ep-card flex justify-center py-16"><Loader2 className="h-7 w-7 animate-spin text-[var(--ep-blue)]" /></div> : monitors.length === 0 ? <div className="ep-card py-14 text-center"><TrendingUp className="mx-auto h-8 w-8 text-[var(--ep-text-soft)]" /><p className="mt-3 text-sm font-semibold text-[var(--ep-text-muted)]">No trend monitors yet.</p></div> : <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{monitors.map((monitor) => <article key={monitor.id} className="ep-card p-5"><div className="flex items-start gap-3"><span className="rounded-xl bg-[var(--ep-blue-soft)] p-2.5 text-[var(--ep-blue)]"><TrendingUp className="h-5 w-5" /></span><div className="min-w-0 flex-1"><h3 className="font-extrabold text-[var(--ep-navy)]">{monitor.topic}</h3>{monitor.description && <p className="mt-1 text-sm leading-5 text-[var(--ep-text-muted)]">{monitor.description}</p>}</div></div><div className="mt-4 flex flex-wrap gap-1.5">{(monitor.keywords || []).map((keyword) => <span key={keyword} className="rounded-full bg-[var(--ep-surface-subtle)] px-2.5 py-1 text-[10px] font-semibold text-[var(--ep-text-muted)]">{keyword}</span>)}</div><p className="mt-4 text-xs text-[var(--ep-text-soft)]">{monitor.last_checked_at ? `Last checked ${new Date(monitor.last_checked_at).toLocaleString()}` : 'Not checked yet'}</p><div className="mt-4 flex gap-2 border-t border-[var(--ep-border)] pt-3"><button type="button" onClick={() => void runCheck(monitor.id)} disabled={checking === monitor.id} className="ep-button-secondary px-3 py-2 text-xs">{checking === monitor.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />} Check now</button><button type="button" onClick={() => void remove(monitor.id)} className="ml-auto rounded-lg p-2 text-[var(--ep-text-soft)] hover:bg-[var(--ep-danger-soft)] hover:text-[var(--ep-danger)]"><Trash2 className="h-4 w-4" /></button></div></article>)}</div>}</section> : <section><div className="mb-3"><p className="ep-section-label">{tab === 'alerts' ? 'Unread alerts' : 'Collected intelligence'}</p><h2 className="mt-1 text-lg font-extrabold text-[var(--ep-navy)]">Trend items</h2></div>{shownItems.length === 0 ? <div className="ep-card py-14 text-center"><Bell className="mx-auto h-8 w-8 text-[var(--ep-text-soft)]" /><p className="mt-3 text-sm font-semibold text-[var(--ep-text-muted)]">Nothing in this view.</p></div> : <div className="space-y-3">{shownItems.map((item) => { const row = item as any; return <article key={item.id} className="ep-card p-5"><div className="flex items-start gap-3"><div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><h3 className="font-extrabold text-[var(--ep-navy)]">{row.title || row.headline || row.topic || 'Trend item'}</h3>{row.sentiment && <span className="rounded-full bg-[var(--ep-surface-subtle)] px-2 py-0.5 text-[10px] font-bold capitalize text-[var(--ep-text-muted)]">{row.sentiment}</span>}</div><p className="mt-2 text-sm leading-6 text-[var(--ep-text-muted)]">{row.summary || row.description || row.content || 'A monitored signal was collected for review.'}</p>{row.source_url || row.url ? <a href={row.source_url || row.url} target="_blank" rel="noreferrer" className="mt-3 inline-flex items-center gap-1 text-xs font-extrabold text-[var(--ep-blue)]">Open source <ExternalLink className="h-3.5 w-3.5" /></a> : null}</div><div className="flex shrink-0 gap-1"><button type="button" onClick={() => void toggleSave(item.id)} className="rounded-lg p-2 text-[var(--ep-text-muted)] hover:bg-[var(--ep-blue-soft)] hover:text-[var(--ep-blue)]" aria-label="Save item">{row.is_saved ? <BookmarkCheck className="h-4 w-4" /> : <Bookmark className="h-4 w-4" />}</button>{!row.is_read && <button type="button" onClick={() => void markRead(item.id)} className="ep-button-secondary px-2.5 py-1.5 text-xs">Mark read</button>}</div></div></article>; })}</div>}</section>}
+  </div>;
 }
+
+function Field({ label, children }: { label: string; children: React.ReactNode }) { return <label className="block"><span className="mb-1.5 block text-xs font-extrabold text-[var(--ep-text-muted)]">{label}</span>{children}</label>; }
