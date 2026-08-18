@@ -4,81 +4,191 @@
 
 :root {
   color-scheme: light;
-  --color-bg: #f7f5f1;
-  --color-surface: #ffffff;
-  --color-surface-2: #f1eee8;
-  --color-muted: #e9e4dc;
-  --color-border: #ded8cf;
-  --color-text: #172c3d;
-  --color-text-secondary: #61727d;
-  --color-brand: #2e6da4;
-  --color-brand-dark: #1a3a5c;
-  --color-teal: #348d82;
-  --color-accent: #b99a55;
-  --shadow-card: 0 1px 2px rgba(23,44,61,.05), 0 12px 32px rgba(23,44,61,.05);
+
+  /* Canonical EquiProfile customer theme — derived from the real logo. */
+  --ep-navy: #052b57;
+  --ep-navy-deep: #031a35;
+  --ep-blue: #167cc1;
+  --ep-blue-hover: #1069a7;
+  --ep-blue-soft: #eef7fd;
+
+  --ep-page: #f5f8fc;
+  --ep-surface: #ffffff;
+  --ep-surface-subtle: #eef3f8;
+  --ep-border: #d7e0ea;
+  --ep-border-strong: #bdcad7;
+  --ep-text: #10263b;
+  --ep-text-muted: #5f7184;
+  --ep-text-soft: #8190a0;
+
+  --ep-success: #18794e;
+  --ep-success-soft: #edf8f2;
+  --ep-warning: #9a6700;
+  --ep-warning-soft: #fff8e6;
+  --ep-danger: #b42318;
+  --ep-danger-soft: #fff2f0;
+
+  --ep-radius-sm: 10px;
+  --ep-radius-md: 14px;
+  --ep-radius-lg: 20px;
+  --ep-shadow-card: 0 1px 2px rgba(5, 43, 87, 0.04), 0 10px 30px rgba(5, 43, 87, 0.06);
+  --ep-shadow-float: 0 18px 50px rgba(5, 43, 87, 0.12);
+
+  /* Backwards-compatible variable names point at the ONE canonical theme. */
+  --color-bg: var(--ep-page);
+  --color-surface: var(--ep-surface);
+  --color-surface-2: var(--ep-surface-subtle);
+  --color-muted: var(--ep-surface-subtle);
+  --color-border: var(--ep-border);
+  --color-text: var(--ep-text);
+  --color-text-secondary: var(--ep-text-muted);
+  --color-brand: var(--ep-blue);
+  --color-brand-dark: var(--ep-navy);
+  --color-accent: var(--ep-blue);
+  --shadow-card: var(--ep-shadow-card);
 }
 
+/* Marketing launches with one deliberate light customer theme. */
 .dark {
   color-scheme: light;
-  --color-bg: #f7f5f1;
-  --color-surface: #ffffff;
-  --color-surface-2: #f1eee8;
-  --color-muted: #e9e4dc;
-  --color-border: #ded8cf;
-  --color-text: #172c3d;
-  --color-text-secondary: #61727d;
+  --color-bg: var(--ep-page);
+  --color-surface: var(--ep-surface);
+  --color-surface-2: var(--ep-surface-subtle);
+  --color-muted: var(--ep-surface-subtle);
+  --color-border: var(--ep-border);
+  --color-text: var(--ep-text);
+  --color-text-secondary: var(--ep-text-muted);
 }
 
 @layer base {
-  html { scroll-behavior: smooth; -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
-  body { min-height: 100vh; background: var(--color-bg); color: var(--color-text); }
-  ::selection { background: rgba(46,109,164,.2); color: var(--color-text); }
-  * { scrollbar-width: thin; scrollbar-color: #c7c0b7 transparent; }
+  html {
+    scroll-behavior: smooth;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    background: var(--ep-page);
+  }
+
+  body {
+    min-height: 100vh;
+    margin: 0;
+    overflow-x: hidden;
+    background: var(--ep-page);
+    color: var(--ep-text);
+    font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+
+  ::selection {
+    background: rgba(22, 124, 193, 0.18);
+    color: var(--ep-text);
+  }
+
+  * {
+    box-sizing: border-box;
+    scrollbar-width: thin;
+    scrollbar-color: #b9c7d5 transparent;
+  }
+
   ::-webkit-scrollbar { width: 7px; height: 7px; }
   ::-webkit-scrollbar-track { background: transparent; }
-  ::-webkit-scrollbar-thumb { background: #c7c0b7; border-radius: 999px; }
-  ::-webkit-scrollbar-thumb:hover { background: #aaa39a; }
-  :focus-visible { outline: 2px solid var(--color-brand); outline-offset: 2px; border-radius: 6px; }
+  ::-webkit-scrollbar-thumb { background: #b9c7d5; border-radius: 999px; }
+  ::-webkit-scrollbar-thumb:hover { background: #94a7b9; }
+
+  :focus-visible {
+    outline: 3px solid rgba(22, 124, 193, 0.28);
+    outline-offset: 2px;
+    border-radius: 6px;
+  }
+
   :focus:not(:focus-visible) { outline: none; }
 }
 
 @layer utilities {
-  .glass { background: rgba(255,255,255,.96); border: 1px solid var(--color-border); }
-  .glass-hover:hover { background: #f1eee8; border-color: #d0c8bd; }
-  .text-gradient { background: linear-gradient(135deg,#1a3a5c 0%,#2e6da4 55%,#348d82 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
-  .animate-in { animation: fadeIn .25s ease-in-out, slideUp .25s ease-out; }
+  .ep-page-title {
+    color: var(--ep-navy);
+    font-size: clamp(1.75rem, 3vw, 2.35rem);
+    line-height: 1.1;
+    font-weight: 750;
+    letter-spacing: -0.025em;
+  }
+
+  .ep-page-copy { color: var(--ep-text-muted); }
+  .ep-section-label {
+    color: var(--ep-blue);
+    font-size: 0.68rem;
+    line-height: 1rem;
+    font-weight: 800;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+  }
 }
 
 @layer components {
-  .ep-card { border: 1px solid var(--color-border); border-radius: 1rem; background: var(--color-surface); box-shadow: var(--shadow-card); }
-  .ep-input { width: 100%; border: 1px solid #d8d1c8; border-radius: .75rem; background: #fff; color: #172c3d; }
-  .ep-input::placeholder { color: #8a969e; }
-  .ep-input:focus { border-color: #6fa1c8; box-shadow: 0 0 0 3px rgba(46,109,164,.12); }
-
-  /* Legacy launch pages are normalized here while each route is migrated to the native EquiProfile components.
-     Unlike the rejected rescue CSS, this does not invert arbitrary black surfaces or touch fixed-position studio canvases. */
-  .ep-workspace .bg-surface-100 { background-color: #fff !important; }
-  .ep-workspace .bg-surface-200 { background-color: #f3f0eb !important; }
-  .ep-workspace [class*="border-white"] { border-color: #e1dbd2 !important; }
-  .ep-workspace [class*="divide-white"] > :not([hidden]) ~ :not([hidden]) { border-color: #e7e1d9 !important; }
-  .ep-workspace [class*="bg-white/"] { background-color: #f7f5f1 !important; }
-  .ep-workspace .text-white { color: #172c3d !important; }
-  .ep-workspace .text-zinc-200,
-  .ep-workspace .text-zinc-300 { color: #405968 !important; }
-  .ep-workspace .text-zinc-400 { color: #61727d !important; }
-  .ep-workspace .text-zinc-500,
-  .ep-workspace .text-zinc-600 { color: #7b8991 !important; }
-  .ep-workspace input:not([type="checkbox"]):not([type="radio"]),
-  .ep-workspace textarea,
-  .ep-workspace select {
-    background-color: #fff !important;
-    border-color: #d8d1c8 !important;
-    color: #172c3d !important;
+  .ep-card {
+    min-width: 0;
+    border: 1px solid var(--ep-border);
+    border-radius: var(--ep-radius-md);
+    background: var(--ep-surface);
+    box-shadow: var(--ep-shadow-card);
   }
-  .ep-workspace input::placeholder,
-  .ep-workspace textarea::placeholder { color: #8b979e !important; }
-  .ep-workspace [class*="bg-brand-500"].text-white,
-  .ep-workspace [class*="bg-red-500"].text-white,
-  .ep-workspace a[class*="bg-brand-500"],
-  .ep-workspace button[class*="bg-brand-500"] { color: #fff !important; }
+
+  .ep-panel {
+    min-width: 0;
+    border: 1px solid var(--ep-border);
+    border-radius: var(--ep-radius-lg);
+    background: var(--ep-surface);
+  }
+
+  .ep-input {
+    width: 100%;
+    border: 1px solid var(--ep-border-strong);
+    border-radius: var(--ep-radius-sm);
+    background: var(--ep-surface);
+    color: var(--ep-text);
+    outline: none;
+    transition: border-color 120ms ease, box-shadow 120ms ease;
+  }
+
+  .ep-input::placeholder { color: var(--ep-text-soft); }
+  .ep-input:focus {
+    border-color: var(--ep-blue);
+    box-shadow: 0 0 0 3px rgba(22, 124, 193, 0.12);
+  }
+
+  .ep-button-primary {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    border-radius: var(--ep-radius-sm);
+    background: var(--ep-blue);
+    color: #fff;
+    font-weight: 750;
+    transition: background 120ms ease, transform 120ms ease;
+  }
+
+  .ep-button-primary:hover { background: var(--ep-blue-hover); }
+  .ep-button-primary:active { transform: translateY(1px); }
+  .ep-button-primary:disabled { cursor: not-allowed; opacity: 0.48; }
+
+  .ep-button-secondary {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    border: 1px solid var(--ep-border-strong);
+    border-radius: var(--ep-radius-sm);
+    background: var(--ep-surface);
+    color: var(--ep-navy);
+    font-weight: 700;
+    transition: border-color 120ms ease, background 120ms ease;
+  }
+
+  .ep-button-secondary:hover {
+    border-color: #9eb2c5;
+    background: var(--ep-blue-soft);
+  }
+
+  .ep-status-success { border-color: #b8dec9; background: var(--ep-success-soft); color: var(--ep-success); }
+  .ep-status-warning { border-color: #ead7a2; background: var(--ep-warning-soft); color: var(--ep-warning); }
+  .ep-status-danger { border-color: #edc2bd; background: var(--ep-danger-soft); color: var(--ep-danger); }
 }
