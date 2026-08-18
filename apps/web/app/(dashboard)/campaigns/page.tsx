@@ -2,92 +2,33 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { AlertCircle, Filter, Loader2, Megaphone, Plus, Search } from 'lucide-react';
+import { AlertCircle, CheckCircle2, Filter, Lightbulb, Loader2, Megaphone, Plus, Search } from 'lucide-react';
 import { api } from '@/lib/api';
+import { useAuthStore } from '@/stores/auth.store';
 import type { ApiResponse } from '@/types';
 
-interface Campaign {
-  id: string;
-  name: string;
-  description: string | null;
-  type: string;
-  status: string;
-  created_at: string;
-  updated_at: string;
-}
+type Plan = {
+  id:string; name:string; goal?:string|null; status:string; version?:number; strategy_validation_status?:string;
+  creative_concept?:Record<string,unknown>; asset_requirements?:Array<Record<string,unknown>>;
+  generation_credit_limit?:number; approved_at?:string|null; created_at:string; updated_at:string;
+};
+const statuses=['all','draft','review','approved','archived'];
 
-const statuses = ['all', 'draft', 'active', 'paused', 'completed'];
+function statusClass(status:string){if(status==='approved')return 'ep-status-success';if(status==='review')return 'ep-status-warning';if(status==='archived')return 'bg-[var(--ep-surface-subtle)] text-[var(--ep-text-muted)] border-[var(--ep-border)]';return 'bg-[var(--ep-blue-soft)] text-[var(--ep-blue)] border-[#cfe5f3]';}
 
-export default function CampaignsPage() {
-  const [campaigns, setCampaigns] = useState<Campaign[]>([]);
-  const [statusFilter, setStatusFilter] = useState('all');
-  const [search, setSearch] = useState('');
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+export default function CampaignsPage(){
+  const {currentOrganization}=useAuthStore(); const orgId=currentOrganization?.id||'';
+  const [plans,setPlans]=useState<Plan[]>([]); const [statusFilter,setStatusFilter]=useState('all'); const [search,setSearch]=useState(''); const [loading,setLoading]=useState(true); const [error,setError]=useState<string|null>(null);
+  const load=useCallback(async()=>{if(!orgId){setLoading(false);return;}setLoading(true);setError(null);try{const response=await api.get<ApiResponse<Plan[]>>('/campaign-ai/plans',{params:{organization_id:orgId}});setPlans(response.data||[]);}catch(caught){setError(caught instanceof Error?caught.message:'Campaign strategies could not be loaded.');}finally{setLoading(false);}},[orgId]);
+  useEffect(()=>{void load();},[load]);
+  const filtered=useMemo(()=>plans.filter((plan)=>{const needle=search.trim().toLowerCase();return(statusFilter==='all'||plan.status===statusFilter)&&(!needle||plan.name.toLowerCase().includes(needle)||String(plan.goal||'').toLowerCase().includes(needle));}),[plans,search,statusFilter]);
+  const approved=plans.filter((plan)=>plan.status==='approved').length; const review=plans.filter((plan)=>plan.status==='review').length; const assets=plans.reduce((sum,plan)=>sum+(Array.isArray(plan.asset_requirements)?plan.asset_requirements.length:0),0);
 
-  const load = useCallback(async () => {
-    try {
-      setLoading(true);
-      setError(null);
-      const response = await api.get<ApiResponse<Campaign[]>>('/campaigns', { params: { limit: '100' } });
-      setCampaigns(response.data || []);
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'Campaigns could not be loaded.');
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => { void load(); }, [load]);
-
-  const filtered = useMemo(() => campaigns.filter((campaign) => {
-    const matchesStatus = statusFilter === 'all' || campaign.status === statusFilter;
-    const needle = search.trim().toLowerCase();
-    const matchesSearch = !needle || campaign.name.toLowerCase().includes(needle) || campaign.description?.toLowerCase().includes(needle);
-    return matchesStatus && matchesSearch;
-  }), [campaigns, search, statusFilter]);
-
-  return (
-    <div className="space-y-6">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-white">Campaigns</h1>
-          <p className="mt-1 text-sm text-zinc-400">Plan and track coordinated marketing work across your channels.</p>
-        </div>
-        <Link href="/campaigns/new" className="inline-flex items-center justify-center gap-2 rounded-lg bg-brand-500 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-brand-600">
-          <Plus className="h-4 w-4" /> Create campaign
-        </Link>
-      </div>
-
-      {error && <div className="flex items-center gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"><AlertCircle className="h-4 w-4" />{error}<button type="button" onClick={() => void load()} className="ml-auto font-semibold">Try again</button></div>}
-
-      <div className="flex flex-col gap-3 rounded-xl border border-white/[0.06] bg-surface-100 p-3 lg:flex-row lg:items-center">
-        <label className="relative flex-1">
-          <span className="sr-only">Search campaigns</span>
-          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500" />
-          <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search campaigns" className="h-10 w-full rounded-lg border border-white/10 bg-white/[0.03] pl-10 pr-4 text-sm text-white" />
-        </label>
-        <div className="flex flex-wrap items-center gap-2"><Filter className="h-4 w-4 text-zinc-500" />{statuses.map((status) => <button type="button" key={status} onClick={() => setStatusFilter(status)} className={`rounded-lg px-3 py-1.5 text-xs font-semibold capitalize ${statusFilter === status ? 'bg-brand-500/10 text-brand-600' : 'text-zinc-400 hover:bg-white/[0.04]'}`}>{status}</button>)}</div>
-      </div>
-
-      {loading ? (
-        <div className="flex justify-center py-20"><Loader2 className="h-8 w-8 animate-spin text-brand-500" /></div>
-      ) : filtered.length === 0 ? (
-        <div className="rounded-2xl border border-white/[0.06] bg-surface-100 px-6 py-16 text-center">
-          <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-brand-500/10"><Megaphone className="h-7 w-7 text-brand-500" /></div>
-          <h2 className="mt-5 text-lg font-semibold text-white">{campaigns.length ? 'No campaigns match these filters' : 'No campaigns yet'}</h2>
-          <p className="mx-auto mt-2 max-w-md text-sm text-zinc-500">{campaigns.length ? 'Try a different search or status.' : 'Create a campaign brief to organise your goals, channels and content.'}</p>
-          {!campaigns.length && <Link href="/campaigns/new" className="mt-5 inline-flex items-center gap-2 rounded-lg bg-brand-500 px-4 py-2.5 text-sm font-semibold text-white"><Plus className="h-4 w-4" />Create your first campaign</Link>}
-        </div>
-      ) : (
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {filtered.map((campaign) => <article key={campaign.id} className="rounded-2xl border border-white/[0.06] bg-surface-100 p-5 shadow-sm">
-            <div className="flex items-start justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-wide text-brand-500">{campaign.type}</p><h2 className="mt-1 text-base font-semibold text-white">{campaign.name}</h2></div><span className="rounded-full bg-brand-500/10 px-2.5 py-1 text-xs font-semibold capitalize text-brand-600">{campaign.status}</span></div>
-            <p className="mt-3 line-clamp-3 min-h-[3.75rem] text-sm text-zinc-400">{campaign.description || 'No description has been added.'}</p>
-            <p className="mt-4 text-xs text-zinc-500">Updated {new Date(campaign.updated_at || campaign.created_at).toLocaleDateString('en-GB')}</p>
-          </article>)}
-        </div>
-      )}
-    </div>
-  );
+  return <div className="space-y-6">
+    <header className="ep-panel p-6 sm:p-8"><div className="flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between"><div className="max-w-3xl"><p className="ep-section-label">Strategy & Campaigns</p><h1 className="ep-page-title mt-2">Plan the campaign before you pay to produce the assets.</h1><p className="ep-page-copy mt-3 text-sm leading-6 sm:text-base">Campaign strategies contain the audience, offer, creative concept, channel plan, calendar, asset briefs, tracking, constraints and owner approval state.</p></div><Link href="/campaigns/new" className="ep-button-primary shrink-0 px-4 py-2.5 text-sm"><Plus className="h-4 w-4"/> Plan campaign</Link></div></header>
+    {error&&<div className="ep-status-danger flex items-center gap-3 rounded-xl border px-4 py-3 text-sm"><AlertCircle className="h-4 w-4"/><span className="flex-1">{error}</span><button type="button" onClick={()=>void load()} className="font-extrabold">Retry</button></div>}
+    <section className="grid gap-4 sm:grid-cols-3"><article className="ep-card p-5"><Megaphone className="h-5 w-5 text-[var(--ep-blue)]"/><p className="mt-4 text-3xl font-extrabold text-[var(--ep-navy)]">{plans.length}</p><p className="mt-1 text-xs font-bold text-[var(--ep-text-muted)]">Campaign strategies</p></article><article className="ep-card p-5"><CheckCircle2 className="h-5 w-5 text-[var(--ep-success)]"/><p className="mt-4 text-3xl font-extrabold text-[var(--ep-navy)]">{approved}</p><p className="mt-1 text-xs font-bold text-[var(--ep-text-muted)]">Owner approved · {review} in review</p></article><article className="ep-card p-5"><Lightbulb className="h-5 w-5 text-[var(--ep-blue)]"/><p className="mt-4 text-3xl font-extrabold text-[var(--ep-navy)]">{assets}</p><p className="mt-1 text-xs font-bold text-[var(--ep-text-muted)]">Planned asset briefs</p></article></section>
+    <section className="ep-card p-3"><div className="flex flex-col gap-3 lg:flex-row lg:items-center"><label className="relative flex-1"><span className="sr-only">Search campaigns</span><Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--ep-text-soft)]"/><input value={search} onChange={(event)=>setSearch(event.target.value)} placeholder="Search campaign name or goal" className="ep-input min-h-10 pl-10 pr-3 text-sm"/></label><div className="flex flex-wrap items-center gap-1.5"><Filter className="h-4 w-4 text-[var(--ep-text-soft)]"/>{statuses.map((status)=><button type="button" key={status} onClick={()=>setStatusFilter(status)} className={statusFilter===status?'rounded-lg bg-[var(--ep-navy)] px-3 py-2 text-xs font-bold capitalize text-white':'rounded-lg px-3 py-2 text-xs font-bold capitalize text-[var(--ep-text-muted)] hover:bg-[var(--ep-blue-soft)]'}>{status}</button>)}</div></div></section>
+    {loading?<div className="ep-card flex justify-center py-20"><Loader2 className="h-8 w-8 animate-spin text-[var(--ep-blue)]"/></div>:filtered.length===0?<section className="ep-card px-6 py-16 text-center"><div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-[var(--ep-blue-soft)] text-[var(--ep-blue)]"><Megaphone className="h-7 w-7"/></div><h2 className="mt-5 text-lg font-extrabold text-[var(--ep-navy)]">{plans.length?'No strategies match these filters':'No campaign strategy yet'}</h2><p className="mx-auto mt-2 max-w-md text-sm leading-6 text-[var(--ep-text-muted)]">{plans.length?'Try a different search or status.':'Start with grounded business facts, audience, offer, channels and success criteria.'}</p>{!plans.length&&<Link href="/campaigns/new" className="ep-button-primary mt-5 px-4 py-2.5 text-sm"><Plus className="h-4 w-4"/> Plan first campaign</Link>}</section>:<section className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{filtered.map((plan)=>{const concept=String((plan.creative_concept as any)?.name||(plan.creative_concept as any)?.central_idea||'Creative concept pending');const itemCount=Array.isArray(plan.asset_requirements)?plan.asset_requirements.length:0;return <Link key={plan.id} href={`/campaigns/${plan.id}`} className="ep-card group p-5 transition hover:border-[#9fb4c8] hover:shadow-[var(--ep-shadow-float)]"><div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="text-[10px] font-extrabold uppercase tracking-[.12em] text-[var(--ep-blue)]">Campaign strategy · v{plan.version||1}</p><h2 className="mt-2 truncate text-lg font-extrabold text-[var(--ep-navy)]">{plan.name}</h2></div><span className={`${statusClass(plan.status)} shrink-0 rounded-full border px-2.5 py-1 text-[10px] font-extrabold uppercase`}>{plan.status}</span></div><p className="mt-3 line-clamp-2 min-h-10 text-sm leading-5 text-[var(--ep-text-muted)]">{plan.goal||'No campaign goal has been recorded.'}</p><div className="mt-4 rounded-xl bg-[var(--ep-surface-subtle)] p-3"><p className="text-[10px] font-bold uppercase tracking-wide text-[var(--ep-text-soft)]">Creative direction</p><p className="mt-1 line-clamp-2 text-sm font-semibold text-[var(--ep-navy)]">{concept}</p></div><div className="mt-4 flex items-center justify-between text-xs text-[var(--ep-text-muted)]"><span>{itemCount} planned asset{itemCount===1?'':'s'}</span><span className="font-extrabold text-[var(--ep-blue)] group-hover:translate-x-0.5">Open strategy →</span></div></Link>;})}</section>}
+  </div>;
 }
