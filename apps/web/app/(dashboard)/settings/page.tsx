@@ -1,5 +1,6 @@
 'use client';
 
+import type { ComponentType } from 'react';
 import Link from 'next/link';
 import { Building2, BrainCircuit, Lock, Palette, ShieldCheck, User } from 'lucide-react';
 import { useAuthStore } from '@/stores/auth.store';
@@ -20,6 +21,6 @@ export default function SettingsPage() {
   </div>;
 }
 
-function Info({ icon: Icon, label, value }: { icon: React.ComponentType<{ className?: string }>; label: string; value: string }) {
+function Info({ icon: Icon, label, value }: { icon: ComponentType<{ className?: string }>; label: string; value: string }) {
   return <div className="flex items-center gap-3 rounded-xl bg-[var(--ep-surface-subtle)] p-4"><Icon className="h-4 w-4 shrink-0 text-[var(--ep-blue)]"/><div className="min-w-0"><p className="text-xs font-bold text-[var(--ep-text-muted)]">{label}</p><p className="truncate text-sm font-semibold text-[var(--ep-navy)]">{value}</p></div></div>;
 }
