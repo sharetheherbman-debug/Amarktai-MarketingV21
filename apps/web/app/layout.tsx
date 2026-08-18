@@ -1,79 +1,40 @@
 import type { Metadata, Viewport } from 'next';
 import './globals.css';
 
+const BRAND_ICON = 'https://equiprofile.online/favicon.svg';
+
 export const metadata: Metadata = {
-  title: 'EquiProfile Marketing',
-  description:
-    'Transform your marketing with AI-powered automation, analytics, and campaign management. The complete marketing operating system for modern businesses.',
-  keywords: ['AI marketing', 'marketing automation', 'campaign management', 'analytics'],
+  title: {
+    default: 'EquiProfile Marketing',
+    template: '%s · EquiProfile Marketing',
+  },
+  description: 'EquiProfile Marketing — business intelligence, campaign strategy, content production, publishing and optimisation in one governed marketing workspace.',
   authors: [{ name: 'EquiProfile' }],
   openGraph: {
     type: 'website',
-    locale: 'en_US',
+    locale: 'en_ZA',
     url: 'https://marketing.equiprofile.online',
     siteName: 'EquiProfile Marketing',
     title: 'EquiProfile Marketing',
-    description:
-      'Transform your marketing with AI-powered automation, analytics, and campaign management.',
-    images: [
-      {
-        url: 'https://marketing.equiprofile.online/og-image.png',
-        width: 1200,
-        height: 630,
-        alt: 'EquiProfile Marketing',
-      },
-    ],
-  },
-  twitter: {
-    card: 'summary_large_image',
-    title: 'EquiProfile Marketing',
-    description:
-      'Transform your marketing with AI-powered automation, analytics, and campaign management.',
-    images: ['https://marketing.equiprofile.online/og-image.png'],
+    description: 'The EquiProfile marketing operating system for planning, creating, governing, publishing and improving customer marketing.',
   },
   icons: {
-    icon: '/favicon.svg',
-    shortcut: '/favicon.svg',
+    icon: [{ url: BRAND_ICON, type: 'image/svg+xml' }],
+    shortcut: BRAND_ICON,
+    apple: BRAND_ICON,
   },
 };
 
 export const viewport: Viewport = {
-  themeColor: '#f8f6f3',
+  themeColor: '#052b57',
   width: 'device-width',
   initialScale: 1,
 };
 
-const themeScript = `
-  (function() {
-    try {
-      var stored = JSON.parse(localStorage.getItem('ui-storage'));
-      var theme = stored?.state?.theme || 'light';
-      var root = document.documentElement;
-      if (theme === 'system') {
-        var sys = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-        root.classList.add(sys);
-      } else {
-        root.classList.add(theme);
-      }
-    } catch(e) {
-      document.documentElement.classList.add('light');
-    }
-  })();
-`;
-
-export default function RootLayout({
-  children,
-}: Readonly<{
-  children: React.ReactNode;
-}>) {
+export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="en" suppressHydrationWarning>
-      <head>
-        <script dangerouslySetInnerHTML={{ __html: themeScript }} />
-      </head>
-      <body
-        className="font-sans antialiased bg-[var(--color-bg)] text-[var(--color-text)]"
-      >
+    <html lang="en" className="light" suppressHydrationWarning>
+      <body className="font-sans antialiased bg-[var(--ep-page)] text-[var(--ep-text)]">
         {children}
       </body>
     </html>
