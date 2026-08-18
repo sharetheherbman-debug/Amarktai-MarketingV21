@@ -1,54 +1,51 @@
 'use client';
 
-import { FormEvent, useState } from 'react';
+import { FormEvent, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { ArrowLeft, Loader2 } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, Loader2, Megaphone, Plus, ShieldCheck, X } from 'lucide-react';
 import { api } from '@/lib/api';
+import { useAuthStore } from '@/stores/auth.store';
+import type { ApiResponse } from '@/types';
 
-const campaignTypes = [
-  { value: 'content', label: 'Content campaign' },
-  { value: 'social', label: 'Social campaign' },
-  { value: 'email', label: 'Email campaign' },
-  { value: 'ads', label: 'Advertising campaign' },
-  { value: 'sms', label: 'SMS campaign' },
-];
+type Control={emergency_stop?:boolean;operating_mode?:string};
+type Plan={id:string};
+const stages=['awareness','consideration','conversion','retention','reactivation'];
+const channelOptions=['social','email','content','seo','advertising'];
+const inputClass='ep-input min-h-11 px-3 py-2.5 text-sm';
 
-export default function NewCampaignPage() {
-  const router = useRouter();
-  const [name, setName] = useState('');
-  const [description, setDescription] = useState('');
-  const [type, setType] = useState('content');
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+export default function NewCampaignPage(){
+  const router=useRouter(); const {currentOrganization}=useAuthStore(); const orgId=currentOrganization?.id||'';
+  const [control,setControl]=useState<Control>({}); const [loadingControl,setLoadingControl]=useState(true);
+  const [name,setName]=useState(''); const [goal,setGoal]=useState(''); const [audience,setAudience]=useState(''); const [products,setProducts]=useState(''); const [location,setLocation]=useState(''); const [stage,setStage]=useState('conversion'); const [offer,setOffer]=useState(''); const [valueProposition,setValueProposition]=useState(''); const [proofPoints,setProofPoints]=useState<string[]>(['']); const [ctas,setCtas]=useState<string[]>(['']); const [channels,setChannels]=useState<string[]>(['social','content']); const [restrictions,setRestrictions]=useState<string[]>([]); const [prohibitedClaims,setProhibitedClaims]=useState<string[]>([]); const [successCriteria,setSuccessCriteria]=useState<string[]>(['']); const [creditLimit,setCreditLimit]=useState('250'); const [durationWeeks,setDurationWeeks]=useState('4'); const [language,setLanguage]=useState('en-ZA'); const [saving,setSaving]=useState(false); const [error,setError]=useState<string|null>(null);
 
-  const submit = async (event: FormEvent) => {
-    event.preventDefault();
-    if (!name.trim()) return;
-    try {
-      setSaving(true);
-      setError(null);
-      await api.post('/campaigns', { body: { name: name.trim(), description: description.trim() || undefined, type } });
-      router.push('/campaigns');
-      router.refresh();
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'The campaign could not be created.');
-    } finally {
-      setSaving(false);
-    }
-  };
+  useEffect(()=>{void api.get<ApiResponse<Control>>('/relaunch-control').then((response)=>setControl(response.data||{})).catch(()=>setControl({})).finally(()=>setLoadingControl(false));},[]);
+  const executionAllowed=control.emergency_stop===false;
+  const clean=(items:string[])=>items.map((item)=>item.trim()).filter(Boolean);
+  const toggleChannel=(channel:string)=>setChannels((current)=>current.includes(channel)?current.filter((value)=>value!==channel):[...current,channel]);
 
-  return (
-    <div className="mx-auto max-w-2xl space-y-6">
-      <Link href="/campaigns" className="inline-flex items-center gap-2 text-sm font-semibold text-brand-600"><ArrowLeft className="h-4 w-4" />Back to campaigns</Link>
-      <div><h1 className="text-2xl font-bold text-white">Create campaign</h1><p className="mt-1 text-sm text-zinc-400">Start with a clear name, purpose and channel. The campaign is created as a draft.</p></div>
-      <form onSubmit={submit} className="space-y-5 rounded-2xl border border-white/[0.06] bg-surface-100 p-6 shadow-sm">
-        <label className="block text-sm font-medium text-zinc-300">Campaign name<span className="text-red-500"> *</span><input required maxLength={255} value={name} onChange={(event) => setName(event.target.value)} className="mt-2 h-11 w-full rounded-lg border border-white/10 bg-white/[0.03] px-3 text-white" placeholder="Spring client growth campaign" /></label>
-        <label className="block text-sm font-medium text-zinc-300">Primary channel<select value={type} onChange={(event) => setType(event.target.value)} className="mt-2 h-11 w-full rounded-lg border border-white/10 bg-surface-200 px-3 text-white">{campaignTypes.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label>
-        <label className="block text-sm font-medium text-zinc-300">What should this campaign achieve?<textarea rows={5} value={description} onChange={(event) => setDescription(event.target.value)} className="mt-2 w-full rounded-lg border border-white/10 bg-white/[0.03] p-3 text-white" placeholder="Describe the audience, offer and intended outcome." /></label>
-        {error && <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
-        <div className="flex flex-wrap gap-3"><button type="submit" disabled={saving || !name.trim()} className="inline-flex items-center gap-2 rounded-lg bg-brand-500 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50">{saving && <Loader2 className="h-4 w-4 animate-spin" />}Create draft campaign</button><Link href="/campaigns" className="rounded-lg px-4 py-2.5 text-sm font-semibold text-zinc-500">Cancel</Link></div>
-      </form>
-    </div>
-  );
+  const submit=async(event:FormEvent)=>{event.preventDefault();if(!orgId||!name.trim()||!goal.trim()||!executionAllowed)return;setSaving(true);setError(null);try{const response=await api.post<ApiResponse<Plan>>('/campaign-ai/plans/generate',{body:{organization_id:orgId,name:name.trim(),goal:goal.trim(),target_audience:audience.trim(),products:products.trim(),location:location.trim(),duration_weeks:Math.max(1,Number(durationWeeks)||4),objective_stage:stage,offer:offer.trim()||undefined,value_proposition:valueProposition.trim()||undefined,proof_points:clean(proofPoints),calls_to_action:clean(ctas),channels,brand_restrictions:clean(restrictions),prohibited_claims:clean(prohibitedClaims),success_criteria:clean(successCriteria),generation_credit_limit:Math.max(0,Number(creditLimit)||0),language}});if(!response.data?.id)throw new Error('The campaign strategy was created but its identifier was not returned.');router.push(`/campaigns/${response.data.id}`);router.refresh();}catch(caught){setError(caught instanceof Error?caught.message:'The campaign strategy could not be created.');}finally{setSaving(false);}};
+
+  return <div className="mx-auto max-w-5xl space-y-6">
+    <Link href="/campaigns" className="inline-flex items-center gap-2 text-sm font-extrabold text-[var(--ep-blue)]"><ArrowLeft className="h-4 w-4"/> Back to campaigns</Link>
+    <header className="ep-panel p-6 sm:p-8"><p className="ep-section-label">Campaign Planner</p><h1 className="ep-page-title mt-2">Give the Marketing Director enough truth to build a useful strategy.</h1><p className="ep-page-copy mt-3 max-w-3xl text-sm leading-6 sm:text-base">The planner uses the Business Brain plus these owner-supplied facts to create a structured strategy, creative concept, messaging, channel plan, calendar, asset requirements and measurement plan.</p></header>
+    {!loadingControl&&!executionAllowed&&<div className="ep-status-warning rounded-xl border p-4"><div className="flex items-start gap-3"><ShieldCheck className="mt-0.5 h-5 w-5 shrink-0"/><div><p className="font-extrabold">Campaign strategy generation is paused by launch safety.</p><p className="mt-1 text-sm leading-5 opacity-80">You can prepare this brief now, but the paid strategy request remains disabled while Emergency Stop is on. This page does not bypass that control.</p></div></div></div>}
+    {error&&<div className="ep-status-danger flex items-start gap-3 rounded-xl border px-4 py-3 text-sm"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0"/><span>{error}</span></div>}
+
+    <form onSubmit={submit} className="space-y-5">
+      <section className="ep-card p-5 sm:p-6"><p className="ep-section-label">1 · Objective</p><div className="mt-4 grid gap-4 md:grid-cols-2"><Field label="Campaign name *"><input required value={name} onChange={(event)=>setName(event.target.value)} placeholder="Spring client growth campaign" className={inputClass}/></Field><Field label="Journey stage"><select value={stage} onChange={(event)=>setStage(event.target.value)} className={inputClass}>{stages.map((item)=><option key={item} value={item}>{title(item)}</option>)}</select></Field><div className="md:col-span-2"><Field label="What must this campaign achieve? *"><textarea required rows={4} value={goal} onChange={(event)=>setGoal(event.target.value)} placeholder="Describe the measurable business or marketing outcome." className="ep-input px-3 py-3 text-sm leading-6"/></Field></div><Field label="Target audience"><textarea rows={3} value={audience} onChange={(event)=>setAudience(event.target.value)} placeholder="Who are we trying to reach and why?" className="ep-input px-3 py-3 text-sm leading-6"/></Field><Field label="Products / services"><textarea rows={3} value={products} onChange={(event)=>setProducts(event.target.value)} placeholder="Which products or services are in scope?" className="ep-input px-3 py-3 text-sm leading-6"/></Field><Field label="Location / market"><input value={location} onChange={(event)=>setLocation(event.target.value)} placeholder="South Africa, Gauteng, global…" className={inputClass}/></Field><Field label="Language"><input value={language} onChange={(event)=>setLanguage(event.target.value)} placeholder="en-ZA" className={inputClass}/></Field></div></section>
+
+      <section className="ep-card p-5 sm:p-6"><p className="ep-section-label">2 · Offer & proof</p><div className="mt-4 grid gap-4 md:grid-cols-2"><Field label="Offer"><textarea rows={3} value={offer} onChange={(event)=>setOffer(event.target.value)} placeholder="What exactly are we asking the audience to consider?" className="ep-input px-3 py-3 text-sm leading-6"/></Field><Field label="Value proposition"><textarea rows={3} value={valueProposition} onChange={(event)=>setValueProposition(event.target.value)} placeholder="Why is this useful or different?" className="ep-input px-3 py-3 text-sm leading-6"/></Field><ListField label="Proof points" items={proofPoints} onChange={setProofPoints} placeholder="Verified fact, testimonial, certification or evidence"/><ListField label="Calls to action" items={ctas} onChange={setCtas} placeholder="Book a demo, enquire, buy, download…"/></div></section>
+
+      <section className="ep-card p-5 sm:p-6"><p className="ep-section-label">3 · Channels & guardrails</p><div className="mt-4"><p className="text-xs font-extrabold text-[var(--ep-text-muted)]">Requested channels</p><div className="mt-2 flex flex-wrap gap-2">{channelOptions.map((channel)=><button type="button" key={channel} onClick={()=>toggleChannel(channel)} className={channels.includes(channel)?'rounded-full bg-[var(--ep-navy)] px-3 py-2 text-xs font-bold text-white':'rounded-full border border-[var(--ep-border)] bg-white px-3 py-2 text-xs font-bold text-[var(--ep-text-muted)] hover:bg-[var(--ep-blue-soft)]'}>{title(channel)}{channel==='advertising'?' · read/sync only':''}</button>)}</div></div><div className="mt-5 grid gap-4 md:grid-cols-3"><ListField label="Brand restrictions" items={restrictions} onChange={setRestrictions} placeholder="Restriction marketing must respect"/><ListField label="Prohibited claims" items={prohibitedClaims} onChange={setProhibitedClaims} placeholder="Claim that must never be invented or used"/><ListField label="Success criteria" items={successCriteria} onChange={setSuccessCriteria} placeholder="How the owner will judge success"/></div></section>
+
+      <section className="ep-card p-5 sm:p-6"><p className="ep-section-label">4 · Production limits</p><div className="mt-4 grid gap-4 sm:grid-cols-2"><Field label="Duration (weeks)"><input type="number" min="1" max="52" value={durationWeeks} onChange={(event)=>setDurationWeeks(event.target.value)} className={inputClass}/></Field><Field label="Campaign Generation Credit limit"><input type="number" min="0" value={creditLimit} onChange={(event)=>setCreditLimit(event.target.value)} className={inputClass}/><span className="mt-1 block text-[11px] leading-5 text-[var(--ep-text-soft)]">This is a campaign production bound, not a promise that credits are currently available.</span></Field></div></section>
+
+      <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end"><Link href="/campaigns" className="ep-button-secondary px-5 py-3 text-sm">Cancel</Link><button type="submit" disabled={saving||loadingControl||!executionAllowed||!name.trim()||!goal.trim()} className="ep-button-primary px-5 py-3 text-sm">{saving?<Loader2 className="h-4 w-4 animate-spin"/>:<Megaphone className="h-4 w-4"/>} Generate campaign strategy</button></div>
+    </form>
+  </div>;
 }
+
+function title(value:string){return value.replaceAll('_',' ').replace(/\b\w/g,(letter)=>letter.toUpperCase());}
+function Field({label,children}:{label:string;children:React.ReactNode}){return <label className="block"><span className="mb-1.5 block text-xs font-extrabold text-[var(--ep-text-muted)]">{label}</span>{children}</label>;}
+function ListField({label,items,onChange,placeholder}:{label:string;items:string[];onChange:(items:string[])=>void;placeholder:string}){return <div><p className="mb-1.5 text-xs font-extrabold text-[var(--ep-text-muted)]">{label}</p><div className="space-y-2">{items.map((item,index)=><div key={index} className="flex gap-2"><input value={item} onChange={(event)=>onChange(items.map((value,current)=>current===index?event.target.value:value))} placeholder={placeholder} className="ep-input min-h-10 min-w-0 flex-1 px-3 text-sm"/><button type="button" onClick={()=>onChange(items.filter((_,current)=>current!==index))} className="rounded-lg p-2 text-[var(--ep-text-soft)] hover:bg-[var(--ep-danger-soft)] hover:text-[var(--ep-danger)]" aria-label="Remove"><X className="h-4 w-4"/></button></div>)}<button type="button" onClick={()=>onChange([...items,''])} className="ep-button-secondary px-3 py-2 text-xs"><Plus className="h-3.5 w-3.5"/> Add</button></div></div>;}
