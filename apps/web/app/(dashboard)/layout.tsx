@@ -1,17 +1,30 @@
 'use client';
 
+import type { ComponentType } from 'react';
 import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import Link from 'next/link';
+import { usePathname, useRouter } from 'next/navigation';
+import { BookOpenCheck, CalendarRange, LayoutDashboard, Megaphone, MoreHorizontal } from 'lucide-react';
 import { useAuthStore } from '@/stores/auth.store';
 import { useUIStore } from '@/stores/ui.store';
 import { DashboardSidebar } from '@/components/dashboard/DashboardSidebar';
 import { DashboardHeader } from '@/components/dashboard/DashboardHeader';
 import { cn } from '@/lib/utils';
 
+type MobileNavItem = { label: string; href: string; icon: ComponentType<{ className?: string }> };
+
+const mobileNav: MobileNavItem[] = [
+  { label: 'Home', href: '/dashboard', icon: LayoutDashboard },
+  { label: 'Campaigns', href: '/campaigns', icon: Megaphone },
+  { label: 'Content', href: '/content-studio', icon: BookOpenCheck },
+  { label: 'Calendar', href: '/content-studio/calendar', icon: CalendarRange },
+];
+
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
+  const pathname = usePathname() || '/dashboard';
   const { isAuthenticated, isLoading, checkAuth } = useAuthStore();
-  const { sidebarOpen } = useUIStore();
+  const { sidebarOpen, setSidebarOpen } = useUIStore();
   const [authChecked, setAuthChecked] = useState(false);
 
   useEffect(() => {
@@ -51,10 +64,42 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         )}
       >
         <DashboardHeader />
-        <main className="min-w-0 flex-1 overflow-x-hidden p-3 sm:p-5 md:p-6">
+        <main className="min-w-0 flex-1 overflow-x-hidden p-3 pb-24 sm:p-5 sm:pb-24 md:p-6 md:pb-24 lg:pb-6">
           <div className="mx-auto w-full max-w-[1480px] min-w-0">{children}</div>
         </main>
       </div>
+
+      <nav className="fixed bottom-0 left-0 right-0 z-30 border-t border-[var(--ep-border)] bg-white/95 backdrop-blur-md lg:hidden" aria-label="Mobile navigation">
+        <div className="flex h-16 items-stretch">
+          {mobileNav.map((item) => {
+            const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
+            const Icon = item.icon;
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                className={cn(
+                  'flex flex-1 flex-col items-center justify-center gap-0.5 text-[10px] font-medium transition-colors',
+                  active ? 'text-[var(--ep-blue)]' : 'text-[var(--ep-text-muted)] hover:text-[var(--ep-text)]',
+                )}
+                aria-current={active ? 'page' : undefined}
+              >
+                <Icon className="h-5 w-5" />
+                <span>{item.label}</span>
+              </Link>
+            );
+          })}
+          <button
+            type="button"
+            onClick={() => setSidebarOpen(true)}
+            className="flex flex-1 flex-col items-center justify-center gap-0.5 text-[10px] font-medium text-[var(--ep-text-muted)] transition-colors hover:text-[var(--ep-text)]"
+            aria-label="More modules"
+          >
+            <MoreHorizontal className="h-5 w-5" />
+            <span>More</span>
+          </button>
+        </div>
+      </nav>
     </div>
   );
 }
