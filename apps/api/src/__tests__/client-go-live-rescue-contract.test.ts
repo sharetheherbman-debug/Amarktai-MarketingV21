@@ -41,6 +41,13 @@ describe('client go-live rescue contracts', () => {
     expect(vectorService).toContain('ki.embedding IS NOT NULL');
   });
 
+  test('knowledge source creation keeps PostgreSQL parameter types unambiguous', () => {
+    const knowledgeService = fs.readFileSync(path.join(apiRoot, 'services/knowledge.service.ts'), 'utf8');
+    expect(knowledgeService).toContain("CASE WHEN $3::text IN ('website','api','rss') THEN NOW() ELSE NULL END");
+    expect(knowledgeService).toContain("NOW() + make_interval(mins => $7::int)");
+    expect(knowledgeService).not.toContain("($7 || ' minutes')::interval");
+  });
+
   test('campaign reads and writes derive tenant from authenticated context', () => {
     const campaigns = fs.readFileSync(path.join(apiRoot, 'routes/campaigns.ts'), 'utf8');
     expect(campaigns).toContain('router.use(requireOrganizationMembership)');
