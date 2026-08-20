@@ -5,16 +5,23 @@ const root = path.resolve(__dirname, '..', '..', '..', '..');
 const read = (file: string) => fs.readFileSync(path.join(root, file), 'utf8').replace(/\r\n/g, '\n');
 
 describe('Phase 1 owner-only security boundary', () => {
-  test('public registration and every legacy public product route prefix are disabled', () => {
+  test('public registration and legacy public product routes are disabled while authenticated app routes stay protected', () => {
     expect(read('apps/api/src/routes/auth.ts')).toContain('REGISTRATION_DISABLED');
     const middleware = read('apps/web/middleware.ts');
+    const legacyStart = middleware.indexOf('const LEGACY_PUBLIC_PATHS');
+    const legacyEnd = middleware.indexOf(']);', legacyStart);
+    const legacyBlock = middleware.slice(legacyStart, legacyEnd + 3);
+
     for (const route of [
-      '/', '/register', '/pricing', '/features', '/about', '/ai-agents', '/blog',
-      '/contact', '/docs', '/compare', '/use-cases', '/integrations',
+      '/register', '/pricing', '/features', '/about', '/ai-agents', '/blog',
+      '/contact', '/docs', '/compare', '/use-cases',
     ]) {
-      expect(middleware).toContain(`'${route}'`);
+      expect(legacyBlock).toContain(`'${route}'`);
     }
-    expect(middleware).toContain('pathname.startsWith(`${prefix}/`)');
+
+    expect(legacyBlock).not.toContain("'/integrations'");
+    expect(middleware).toContain("if (pathname === '/') return true;");
+    expect(middleware).toContain('if (!hasApplicationSession(request))');
     expect(middleware).toContain("new URL('/login'");
   });
 
@@ -36,10 +43,12 @@ describe('Phase 1 owner-only security boundary', () => {
     expect(mfa).toContain('mfa.recovery_codes_regenerated');
   });
 
-  test('billing and credit views are authenticated and Phase 1 hides checkout', () => {
+  test('billing and credit views are authenticated and Phase 1 exposes no checkout UI', () => {
     expect(read('apps/api/src/server.ts')).toContain("app.use('/api/v1/billing', ...tenant, billingRoutes)");
     const credits = read('apps/web/app/(dashboard)/billing/page.tsx');
-    expect(credits).toContain('Public purchases are disabled for Phase 1');
+    expect(credits).toContain('/generation-credits/wallet');
+    expect(credits).toContain('Protected credit accounting');
     expect(credits).not.toContain('Continue to Stripe');
+    expect(credits).not.toContain('create-checkout');
   });
 });
