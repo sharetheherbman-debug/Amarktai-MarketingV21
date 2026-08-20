@@ -91,6 +91,19 @@ describe('client go-live rescue contracts', () => {
     expect(campaign).not.toMatch(/jobId:\s*`campaign-text:/);
   });
 
+  test('scheduler refreshes authenticated GenX catalogue and pricing before snapshots can go stale', () => {
+    const scheduler = fs.readFileSync(path.join(apiRoot, 'services/scheduler.service.ts'), 'utf8');
+    expect(scheduler).toContain("import { env } from '../config/env';");
+    expect(scheduler).toContain("import * as genxRegistry from './genx-model-registry.service';");
+    expect(scheduler).toContain("import * as genxPricing from './genx-pricing.service';");
+    expect(scheduler).toContain("this.scheduleTask('refresh-genx-catalogue-pricing'");
+    expect(scheduler).toContain('env.GENX_PRICE_REFRESH_MINUTES');
+    expect(scheduler).toContain('env.GENX_PRICE_MAX_AGE_MINUTES - 1');
+    expect(scheduler).toContain('genxRegistry.fetchLiveModelCatalogue()');
+    expect(scheduler).toContain('genxRegistry.syncModelsToDatabase(models)');
+    expect(scheduler).toContain('genxPricing.syncPricingFromModels(models)');
+  });
+
   test('campaign reads and writes derive tenant from authenticated context', () => {
     const campaigns = fs.readFileSync(path.join(apiRoot, 'routes/campaigns.ts'), 'utf8');
     expect(campaigns).toContain('router.use(requireOrganizationMembership)');
