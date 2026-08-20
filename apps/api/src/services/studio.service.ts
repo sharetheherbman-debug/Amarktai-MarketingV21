@@ -152,7 +152,7 @@ export async function createGeneration(
       options: data.options || {},
     },
     {
-      jobId: `studio:${generation.id}`,
+      jobId: `studio-${generation.id}`,
       // Control Centre approvals may be granted after the owner reviews the
       // queued request. Retain the same job/idempotency key while it waits.
       attempts: 60,
@@ -194,7 +194,7 @@ export async function retryGeneration(id: string, orgId: string, userId: string)
     type: row.type, modelId: row.model, prompt: row.prompt,
     negativePrompt: row.negative_prompt, options,
   }, {
-    jobId: `studio:${id}:retry:${Number(row.attempt_count || 0) + 1}`,
+    jobId: `studio-${id}-retry-${Number(row.attempt_count || 0) + 1}`,
     attempts: 60, backoff: { type: 'fixed', delay: 30_000 },
     removeOnComplete: { age: 86400 }, removeOnFail: { age: 604800 },
   });
