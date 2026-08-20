@@ -78,7 +78,7 @@ describe('autonomous execution integrity', () => {
     expect(production).toContain("generationQueue.add('campaign-text'");
     expect(production).toContain("status='queueing',resolution_status='pending_generation'");
     expect(production).toContain('attempt_count=attempt_count+1');
-    expect(production).toContain('campaign-text:${run.id}:attempt:${attempt}');
+    expect(production).toContain('campaign-text-${run.id}-attempt-${attempt}');
     expect(production).toContain('studioService.retryGeneration');
     expect(production).toContain("SET status='failed',error_message=$1");
     expect(worker).toContain("job.name === 'campaign-text'");
