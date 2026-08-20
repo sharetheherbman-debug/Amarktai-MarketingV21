@@ -92,7 +92,7 @@ async function processStudio(job: Job): Promise<void> {
   const generationId = data.generationId as string;
   const workerId = `generation-${process.pid}`;
   const generation = await query(
-    `SELECT campaign_id, user_id, type, model, prompt, options, attempt_count,
+    `SELECT user_id, type, model, prompt, options, attempt_count,
             status, cancellation_requested_at
      FROM studio_generations WHERE id=$1 AND organization_id=$2`,
     [generationId, data.organizationId]
@@ -107,13 +107,16 @@ async function processStudio(job: Job): Promise<void> {
     return;
   }
   const generationOptions = asObject(generation.rows[0].options);
+  const campaignPlanId = typeof generationOptions.campaign_plan_id === 'string'
+    ? generationOptions.campaign_plan_id
+    : null;
 
   let governed: GovernedGeneration | null = null;
   try {
     governed = await beginGovernedGeneration({
       organizationId: data.organizationId,
       userId: data.userId,
-      campaignId: generation.rows[0].campaign_id || null,
+      campaignId: campaignPlanId,
       generationJobId: generationId,
       modelId: data.modelId,
       operation: data.type === 'cinema' ? 'text_to_video' : data.type,
@@ -124,7 +127,7 @@ async function processStudio(job: Job): Promise<void> {
       requestedBy: 'user',
       payload: {
         generation_id: generationId,
-        campaign_plan_id: generationOptions.campaign_plan_id || null,
+        campaign_plan_id: campaignPlanId,
         brief_id: generationOptions.brief_id || null,
         variant_number: generationOptions.variant_number || null,
       },
