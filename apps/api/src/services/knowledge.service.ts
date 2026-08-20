@@ -25,9 +25,9 @@ export async function create(orgId: string, data: CreateKnowledgeSourceData, use
   const result = await query(
     `INSERT INTO knowledge_sources
        (organization_id,name,type,url,config,created_by,refresh_interval_minutes,next_refresh_at,stale_after)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,
-       CASE WHEN $3::text IN ('website','api','rss') THEN NOW() ELSE NULL END,
-       CASE WHEN $3::text IN ('website','api','rss') THEN NOW() + make_interval(mins => $7::int) ELSE NULL END)
+     VALUES ($1,$2,$3::varchar,$4,$5,$6,$7,
+       CASE WHEN $3::varchar IN ('website','api','rss') THEN NOW() ELSE NULL END,
+       CASE WHEN $3::varchar IN ('website','api','rss') THEN NOW() + make_interval(mins => $7::int) ELSE NULL END)
      RETURNING *`,
     [orgId, data.name, data.type, data.url || null, JSON.stringify(config), userId, refreshInterval]
   );
