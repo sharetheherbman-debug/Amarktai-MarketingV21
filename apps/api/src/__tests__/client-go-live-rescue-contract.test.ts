@@ -74,6 +74,23 @@ describe('client go-live rescue contracts', () => {
     expect(controlService).toContain("approval_expires_at=CASE WHEN $4::varchar='approved' THEN NOW() + interval '30 minutes' ELSE NULL END");
   });
 
+  test('BullMQ custom media job IDs avoid the reserved colon separator', () => {
+    const studio = fs.readFileSync(path.join(apiRoot, 'services/studio.service.ts'), 'utf8');
+    const longform = fs.readFileSync(path.join(apiRoot, 'services/longform-queue.service.ts'), 'utf8');
+    const campaign = fs.readFileSync(path.join(apiRoot, 'services/campaign-production.service.ts'), 'utf8');
+
+    expect(studio).toContain('jobId: `studio-${generation.id}`');
+    expect(studio).toContain('jobId: `studio-${id}-retry-${Number(row.attempt_count || 0) + 1}`');
+    expect(studio).not.toMatch(/jobId:\s*`studio:/);
+
+    expect(longform).toContain('const queueJobId = `scene-${sceneId}-${Number(scene.retry_count || 0)}-${mode}`;');
+    expect(longform).toContain('jobId: queueJobId');
+    expect(longform).not.toContain('jobId: idempotencyKey');
+
+    expect(campaign).toContain('jobId: `campaign-text-${run.id}-attempt-${attempt}`');
+    expect(campaign).not.toMatch(/jobId:\s*`campaign-text:/);
+  });
+
   test('campaign reads and writes derive tenant from authenticated context', () => {
     const campaigns = fs.readFileSync(path.join(apiRoot, 'routes/campaigns.ts'), 'utf8');
     expect(campaigns).toContain('router.use(requireOrganizationMembership)');
