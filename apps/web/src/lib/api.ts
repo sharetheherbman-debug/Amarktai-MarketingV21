@@ -25,7 +25,22 @@ class ApiClient {
   }
 
   private getOrganizationId(): string | null {
-    return typeof window === 'undefined' ? null : localStorage.getItem('org_id');
+    if (typeof window === 'undefined') return null;
+    const direct = localStorage.getItem('org_id');
+    if (direct) return direct;
+    try {
+      const persisted = JSON.parse(localStorage.getItem('auth-storage') || '{}') as {
+        state?: { currentOrganization?: { id?: string } | null };
+      };
+      const recovered = String(persisted.state?.currentOrganization?.id || '').trim();
+      if (recovered) {
+        localStorage.setItem('org_id', recovered);
+        return recovered;
+      }
+    } catch {
+      // Ignore malformed legacy persisted state; the request will fail closed without an org id.
+    }
+    return null;
   }
 
   private isFormData(value: unknown): value is FormData {
