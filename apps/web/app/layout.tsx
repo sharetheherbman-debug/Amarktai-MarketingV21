@@ -1,7 +1,7 @@
 import type { Metadata, Viewport } from 'next';
 import './globals.css';
 
-const BRAND_ICON = 'https://equiprofile.online/favicon.svg';
+const BRAND_ICON = '/favicon.svg';
 
 export const metadata: Metadata = {
   title: {
