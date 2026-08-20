@@ -3,6 +3,12 @@ import { Job } from 'bullmq';
 declare module 'bullmq' {
   interface Job {
     isActive(): Promise<boolean>;
+    /**
+     * BullMQ runtime jobs expose `name`, but the installed package typings do
+     * not currently include it on Job. Keep this augmentation type-only: do
+     * not define or shadow Job.prototype.name at runtime.
+     */
+    readonly name: string;
   }
 }
 
