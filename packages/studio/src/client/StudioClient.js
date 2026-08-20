@@ -73,10 +73,11 @@ export class StudioClient {
       options,
     });
     let generation = this.normalizeGeneration(result.data);
-    if (generation?.id && !generation.url && !['completed', 'failed', 'cancelled'].includes(generation.status)) {
+    if (generation?.id && !generation.url && !['completed', 'failed', 'cancelled', 'pending_control'].includes(generation.status)) {
       const isLongRunning = type.includes('video') || type === 'cinema' || type === 'lip_sync';
       generation = await this.waitForGeneration(generation.id, {
         maxWaitMs: isLongRunning ? 20 * 60 * 1000 : 10 * 60 * 1000,
+        stopOnPendingControl: true,
       });
     }
     return generation;
@@ -114,7 +115,13 @@ export class StudioClient {
   }
 
   async waitForGeneration(generationId, options = {}) {
-    const { signal, pollIntervalMs = 3000, maxWaitMs = 300000, onProgress } = options;
+    const {
+      signal,
+      pollIntervalMs = 3000,
+      maxWaitMs = 300000,
+      onProgress,
+      stopOnPendingControl = true,
+    } = options;
     const startedAt = Date.now();
     let transientFailures = 0;
 
@@ -124,8 +131,9 @@ export class StudioClient {
         const generation = await this.getGeneration(generationId);
         transientFailures = 0;
         onProgress?.(generation);
+        if (generation.status === 'pending_control' && stopOnPendingControl) return generation;
         if (generation.status === 'completed') {
-          if (!generation.url) throw new Error('Generation completed without a media output');
+          if (!generation.url) throw new Error('Generation completed but its saved Studio asset is unavailable');
           return generation;
         }
         if (generation.status === 'failed') throw new Error(generation.error_message || 'Generation failed');
@@ -137,7 +145,7 @@ export class StudioClient {
           message === 'Polling cancelled' ||
           message === 'Generation was cancelled' ||
           message === 'Generation failed' ||
-          message.includes('completed without')
+          message.includes('saved Studio asset is unavailable')
         ) throw error;
         transientFailures += 1;
         if (transientFailures > 4) throw error;
@@ -145,6 +153,81 @@ export class StudioClient {
       }
     }
     throw new Error('Generation polling timeout');
+  }
+
+  async decideGeneration(generation, decision, reason) {
+    const actionId = generation?.control_decision_id;
+    if (!actionId) throw new Error('This generation does not have a pending manual approval');
+    if (!['approved', 'rejected', 'cancelled'].includes(decision)) throw new Error('Invalid generation decision');
+    const result = await this.request(
+      'POST',
+      `/relaunch-control/actions/${encodeURIComponent(actionId)}/decision`,
+      {
+        decision,
+        reason: reason || `Studio generation ${decision}`,
+      }
+    );
+    return result.data || result;
+  }
+
+  async approveGeneration(generation, reason = 'Approved in Creative Studio') {
+    await this.decideGeneration(generation, 'approved', reason);
+    return this.waitForGeneration(generation.id, {
+      maxWaitMs: generation.type?.includes('video') || generation.type === 'cinema' ? 20 * 60 * 1000 : 10 * 60 * 1000,
+      stopOnPendingControl: false,
+    });
+  }
+
+  async rejectGeneration(generation, reason = 'Rejected in Creative Studio') {
+    return this.decideGeneration(generation, 'rejected', reason);
+  }
+
+  async resumeGeneration(generationId, onProgress) {
+    return this.waitForGeneration(generationId, {
+      maxWaitMs: 20 * 60 * 1000,
+      stopOnPendingControl: false,
+      onProgress,
+    });
+  }
+
+  mediaRequestUrl(url) {
+    if (!url) throw new Error('Media URL is missing');
+    if (url.startsWith('/api/')) return url;
+    if (url.startsWith('/v1/')) return `${API_BASE}${url}`;
+    const absolute = new URL(url, window.location.origin);
+    if (absolute.origin !== window.location.origin) {
+      throw new Error('External provider media URLs are not exposed to the browser');
+    }
+    return absolute.toString();
+  }
+
+  async fetchMediaBlob(url) {
+    const response = await fetch(this.mediaRequestUrl(url), {
+      method: 'GET',
+      credentials: 'include',
+      headers: this.getHeaders(false),
+    });
+    if (!response.ok) {
+      const error = await response.json().catch(() => null);
+      throw new Error(error?.error?.message || `Media fetch failed: ${response.status}`);
+    }
+    return response.blob();
+  }
+
+  async downloadMedia(url, filename = 'studio-asset') {
+    const blob = await this.fetchMediaBlob(url);
+    const objectUrl = URL.createObjectURL(blob);
+    try {
+      const anchor = document.createElement('a');
+      anchor.href = objectUrl;
+      anchor.download = filename;
+      anchor.rel = 'noopener';
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+    } finally {
+      setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+    }
   }
 
   async resumePendingGenerations(onUpdate) {
