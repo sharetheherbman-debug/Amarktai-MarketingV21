@@ -75,6 +75,26 @@ export async function getAvailableModels(operation?: string) {
   return ensureAvailableModels(operation);
 }
 
+async function failQueueSubmission(
+  generationId: string,
+  orgId: string,
+  error: unknown
+): Promise<void> {
+  const message = error instanceof Error ? error.message : String(error || 'Queue submission failed');
+  await query(
+    `UPDATE studio_generations
+     SET status='failed',
+         error_code='queue_submission_failed',
+         error_message=$1,
+         completed_at=NOW(),
+         updated_at=NOW()
+     WHERE id=$2 AND organization_id=$3
+       AND status='pending'
+       AND provider_job_id IS NULL`,
+    [message.slice(0, 2000), generationId, orgId]
+  );
+}
+
 export async function createGeneration(
   orgId: string,
   userId: string,
@@ -138,34 +158,50 @@ export async function createGeneration(
   );
 
   const generation = mapGenerationRow(result.rows[0]);
-  const job = await generationQueue.add(
-    'studio-generate',
-    {
-      kind: 'studio',
-      generationId: generation.id,
-      organizationId: orgId,
-      userId,
-      type: data.type,
-      modelId,
-      prompt: data.prompt,
-      negativePrompt: data.negative_prompt,
-      options: data.options || {},
-    },
-    {
-      jobId: `studio-${generation.id}`,
-      // Control Centre approvals may be granted after the owner reviews the
-      // queued request. Retain the same job/idempotency key while it waits.
-      attempts: 60,
-      backoff: { type: 'fixed', delay: 30_000 },
-      removeOnComplete: { age: 86400 },
-      removeOnFail: { age: 604800 },
-    }
-  );
+  let job;
+  try {
+    job = await generationQueue.add(
+      'studio-generate',
+      {
+        kind: 'studio',
+        generationId: generation.id,
+        organizationId: orgId,
+        userId,
+        type: data.type,
+        modelId,
+        prompt: data.prompt,
+        negativePrompt: data.negative_prompt,
+        options: data.options || {},
+      },
+      {
+        jobId: `studio-${generation.id}`,
+        // Control Centre approvals may be granted after the owner reviews the
+        // queued request. Retain the same job/idempotency key while it waits.
+        attempts: 60,
+        backoff: { type: 'fixed', delay: 30_000 },
+        removeOnComplete: { age: 86400 },
+        removeOnFail: { age: 604800 },
+      }
+    );
+  } catch (error) {
+    await failQueueSubmission(generation.id, orgId, error).catch((cleanupError) => {
+      logger.error(`Failed to close Studio queue-submission row ${generation.id}: ${cleanupError}`);
+    });
+    throw error;
+  }
 
-  await query(
-    'UPDATE studio_generations SET queue_job_id = $1, updated_at = NOW() WHERE id = $2',
-    [String(job.id), generation.id]
-  );
+  try {
+    await query(
+      'UPDATE studio_generations SET queue_job_id = $1, updated_at = NOW() WHERE id = $2',
+      [String(job.id), generation.id]
+    );
+  } catch (error) {
+    await job.remove().catch(() => undefined);
+    await failQueueSubmission(generation.id, orgId, error).catch((cleanupError) => {
+      logger.error(`Failed to close Studio queue-registration row ${generation.id}: ${cleanupError}`);
+    });
+    throw error;
+  }
 
   logger.info(`Generation queued: ${generation.id}`);
   return getGeneration(generation.id, orgId);
