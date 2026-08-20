@@ -3,14 +3,22 @@ jest.mock('../../config/database', () => ({
   transaction: jest.fn(),
 }));
 
+import { query } from '../../config/database';
 import {
   extractPriceComponents,
+  quoteGeneration,
   retailFromWholesale,
   tokenQuantityForBillingUnit,
 } from '../../services/genx-pricing.service';
 import type { GenXModel } from '../../services/genx-model-registry.service';
 
+const mockedQuery = query as jest.MockedFunction<typeof query>;
+
 describe('GenX pricing service', () => {
+  beforeEach(() => {
+    mockedQuery.mockReset();
+  });
+
   test('prefers explicit agent-tier image pricing', () => {
     const model: GenXModel = {
       id: 'image-model',
@@ -82,5 +90,39 @@ describe('GenX pricing service', () => {
     expect(tokenQuantityForBillingUnit(250_000, 'million_tokens')).toBe(0.25);
     expect(tokenQuantityForBillingUnit(100, 'request')).toBe(1);
     expect(() => tokenQuantityForBillingUnit(100, 'mystery_unit')).toThrow('Unsupported text billing unit');
+  });
+
+  test('uses the last authenticated pricing sync for freshness without rotating an unchanged snapshot', async () => {
+    const oldEffectiveFrom = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const freshSync = new Date();
+    mockedQuery.mockResolvedValueOnce({
+      rows: [{
+        id: '00000000-0000-0000-0000-000000000001',
+        model_id: 'image-model',
+        operation: 'text_to_image',
+        billable_unit: 'image',
+        wholesale_unit_cost_gbp: 0.10,
+        retail_unit_cost_gbp: 0.20,
+        target_margin_bps: 4000,
+        effective_from: oldEffectiveFrom,
+        retail_enabled: true,
+        pricing_status: 'priced',
+        pricing_last_synced_at: freshSync,
+      }],
+      rowCount: 1,
+      command: 'SELECT',
+      oid: 0,
+      fields: [],
+    } as any);
+
+    const quote = await quoteGeneration({
+      modelId: 'image-model',
+      operation: 'text_to_image',
+      quantity: 1,
+    });
+
+    expect(quote.model_id).toBe('image-model');
+    expect(quote.price_effective_from).toBe(oldEffectiveFrom.toISOString());
+    expect(quote.reservation_credits).toBeGreaterThan(0);
   });
 });
