@@ -108,6 +108,6 @@ describe('client go-live rescue contracts', () => {
     const rootLayout = fs.readFileSync(path.join(repositoryRoot, 'apps/web/app/layout.tsx'), 'utf8');
     expect(rootLayout).toContain("const BRAND_ICON = '/favicon.svg';");
     expect(rootLayout).not.toContain('https://equiprofile.online/favicon.svg');
-    expect(fs.existsSync(path.join(repositoryRoot, 'apps/web/app/favicon.svg'))).toBe(true);
+    expect(fs.existsSync(path.join(repositoryRoot, 'apps/web/public/favicon.svg'))).toBe(true);
   });
 });
