@@ -105,6 +105,7 @@ export async function enqueueSceneGeneration(sceneId: string, orgId: string) {
   const operation = operationFor(scene, mode);
   const model = await resolveModel(scene, operation);
   const idempotencyKey = scene.idempotency_key || `scene:${sceneId}:${Number(scene.retry_count || 0)}:${mode}`;
+  const queueJobId = `scene-${sceneId}-${Number(scene.retry_count || 0)}-${mode}`;
   const queue = mode === 'still_motion' ? stillMotionQueue : generationQueue;
   const job = await queue.add(
     mode === 'still_motion' ? 'longform-still-motion' : 'longform-scene',
@@ -117,7 +118,7 @@ export async function enqueueSceneGeneration(sceneId: string, orgId: string) {
       productionMode: mode,
     },
     {
-      jobId: idempotencyKey,
+      jobId: queueJobId,
       attempts: 3,
       backoff: { type: 'exponential', delay: 10000 },
       removeOnComplete: { age: 86400 },
