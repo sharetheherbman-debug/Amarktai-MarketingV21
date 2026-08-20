@@ -99,9 +99,9 @@ export async function generateEmbeddings(texts: string[], orgId: string): Promis
 export async function storeEmbedding(itemId: string, embedding: number[]): Promise<void> {
   const vector = fitDimensions(embedding, env.EMBEDDING_DIMENSIONS);
   await query(
-    `INSERT INTO knowledge_embeddings (item_id, embedding)
-     VALUES ($1, $2::vector)
-     ON CONFLICT (item_id) DO UPDATE SET embedding = $2::vector, updated_at = NOW()`,
+    `UPDATE knowledge_items
+     SET embedding = $2::vector, updated_at = NOW()
+     WHERE id = $1`,
     [itemId, `[${vector.join(',')}]`]
   );
   logger.debug(`Embedding stored for item: ${itemId}`);
@@ -119,12 +119,12 @@ export async function similaritySearch(
        ki.id,
        ki.title,
        ki.content,
-       1 - (ke.embedding <=> $2::vector) AS similarity
+       1 - (ki.embedding <=> $2::vector) AS similarity
      FROM knowledge_items ki
-     JOIN knowledge_embeddings ke ON ke.item_id = ki.id
      WHERE ki.organization_id = $1
-       AND 1 - (ke.embedding <=> $2::vector) >= $3
-     ORDER BY ke.embedding <=> $2::vector
+       AND ki.embedding IS NOT NULL
+       AND 1 - (ki.embedding <=> $2::vector) >= $3
+     ORDER BY ki.embedding <=> $2::vector
      LIMIT $4`,
     [orgId, `[${vector.join(',')}]`, threshold, limit]
   );
