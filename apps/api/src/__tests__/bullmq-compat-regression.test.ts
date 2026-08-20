@@ -2,14 +2,14 @@ import fs from 'fs';
 import path from 'path';
 
 describe('BullMQ compatibility shim', () => {
-  test('never shadows Job.prototype.name', () => {
+  test('keeps Job.name augmentation type-only and never shadows Job.prototype.name', () => {
     const source = fs.readFileSync(
       path.resolve(__dirname, '../config/bullmq-compat.ts'),
       'utf8'
     );
 
+    expect(source).toContain('readonly name: string');
     expect(source).not.toContain("Object.defineProperty(prototype, 'name'");
-    expect(source).not.toContain('readonly name: string');
     expect(source).toContain("Object.defineProperty(prototype, 'isActive'");
   });
 
