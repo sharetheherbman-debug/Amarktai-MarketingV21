@@ -286,9 +286,9 @@ export async function requireExecutionApproval(
          (organization_id,action_type,channel,title,summary,status,requested_credits,
           requested_ad_spend_pence,policy_version,requested_by,requested_by_user_id,
           decision_reason,idempotency_key,payload,payload_hash,decided_at,approval_expires_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,
-         CASE WHEN $6='approved' THEN NOW() ELSE NULL END,
-         CASE WHEN $6='approved' THEN NOW() + ($16 || ' minutes')::interval ELSE NULL END)
+       VALUES ($1,$2,$3,$4,$5,$6::varchar,$7,$8,$9,$10,$11,$12,$13,$14,$15,
+         CASE WHEN $6::varchar='approved' THEN NOW() ELSE NULL END,
+         CASE WHEN $6::varchar='approved' THEN NOW() + make_interval(mins => $16::int) ELSE NULL END)
        RETURNING *`,
       [
         organizationId,
