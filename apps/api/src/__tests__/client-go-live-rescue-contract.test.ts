@@ -50,6 +50,22 @@ describe('client go-live rescue contracts', () => {
     expect(knowledgeService).not.toContain("($7 || ' minutes')::interval");
   });
 
+  test('generation credit settlement keeps reused PostgreSQL parameters explicitly typed', () => {
+    const creditService = fs.readFileSync(path.join(apiRoot, 'services/generation-credit.service.ts'), 'utf8');
+    expect(creditService).toContain('provider_job_id=COALESCE(provider_job_id,$2::varchar),settled_credits=$3::bigint');
+    expect(creditService).toContain('released_credits=$4::bigint,status=$5::varchar');
+    expect(creditService).toContain('settled_at=CASE WHEN $3::bigint>0 THEN NOW() ELSE settled_at END');
+    expect(creditService).toContain('released_at=CASE WHEN $4::bigint>0 OR $3::bigint=0 THEN NOW() ELSE released_at END');
+  });
+
+  test('relaunch decision insert keeps status and approval TTL parameters unambiguous', () => {
+    const gateService = fs.readFileSync(path.join(apiRoot, 'services/relaunch-execution-gate.service.ts'), 'utf8');
+    expect(gateService).toContain('VALUES ($1,$2,$3,$4,$5,$6::varchar,$7,$8,$9,$10,$11,$12,$13,$14,$15,');
+    expect(gateService).toContain("CASE WHEN $6::varchar='approved' THEN NOW() ELSE NULL END");
+    expect(gateService).toContain("CASE WHEN $6::varchar='approved' THEN NOW() + make_interval(mins => $16::int) ELSE NULL END");
+    expect(gateService).not.toContain("($16 || ' minutes')::interval");
+  });
+
   test('campaign reads and writes derive tenant from authenticated context', () => {
     const campaigns = fs.readFileSync(path.join(apiRoot, 'routes/campaigns.ts'), 'utf8');
     expect(campaigns).toContain('router.use(requireOrganizationMembership)');
