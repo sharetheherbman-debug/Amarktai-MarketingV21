@@ -104,9 +104,11 @@ describe('pre-deployment runtime regressions', () => {
     expect(checkout).toContain("currency !== 'GBP'");
     expect(checkout).toContain('stripe-credit-session:${sessionId}');
     expect(webhook).toContain('processGenerationCreditStripeEvent');
-    expect(page).toContain('Generation Credits');
-    expect(page).toContain('Public purchases are disabled for Phase 1');
+    expect(page).toContain('Generation credits');
+    expect(page).toContain('Protected credit accounting');
+    expect(page).toContain('/generation-credits/wallet');
     expect(page).not.toContain('Continue to Stripe');
+    expect(page).not.toContain('create-checkout');
   });
 
   test('GenX models require verified GBP price snapshots before retail use', () => {
@@ -157,8 +159,10 @@ describe('pre-deployment runtime regressions', () => {
     expect(service).toContain('Per-action Generation Credit limit exceeded');
     expect(route).toContain("router.post('/emergency-stop'");
     expect(route).toContain("router.post('/actions/:id/decision'");
-    expect(page).toContain('Relaunch Control Centre');
-    expect(page).toContain('Daily advertising budget');
+    expect(page).toContain('Automation & Safety');
+    expect(page).toContain('Workspace protection');
+    expect(page).toContain('Daily ad budget');
+    expect(page).toContain('Safety changes are intentionally not exposed on this client screen during acceptance.');
   });
 
   test('external content ingestion uses the public-network fetch guard', () => {
