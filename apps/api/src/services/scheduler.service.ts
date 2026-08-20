@@ -1,4 +1,5 @@
 import { query } from '../config/database';
+import { env } from '../config/env';
 import { logger } from '../utils/logger';
 import { healthCheck as providerHealthCheck } from './provider.service';
 import { publishDuePostsThroughControlCentre } from './controlled-social-publishing.service';
@@ -7,6 +8,8 @@ import { checkMonitor } from './trend.service';
 import { refreshDueSources } from './knowledge.service';
 import { runGrowthDirector } from './growth-director.service';
 import { syncPublishedSocialPerformance } from './social-performance.service';
+import * as genxRegistry from './genx-model-registry.service';
+import * as genxPricing from './genx-pricing.service';
 
 interface ScheduledTask {
   name: string;
@@ -123,6 +126,24 @@ class SchedulerService {
     this.scheduleTask('refresh-business-knowledge', 5 * 60 * 1000, async () => {
       const refreshed = await refreshDueSources(10);
       if (refreshed > 0) logger.info(`Refreshed ${refreshed} scheduled business knowledge source(s)`);
+    });
+
+    const pricingRefreshMinutes = Math.max(
+      1,
+      Math.min(
+        env.GENX_PRICE_REFRESH_MINUTES,
+        Math.max(1, env.GENX_PRICE_MAX_AGE_MINUTES - 1)
+      )
+    );
+    this.scheduleTask('refresh-genx-catalogue-pricing', pricingRefreshMinutes * 60 * 1000, async () => {
+      const models = await genxRegistry.fetchLiveModelCatalogue();
+      if (models.length === 0) throw new Error('GenX returned no catalogue models during scheduled refresh');
+      const catalogue = await genxRegistry.syncModelsToDatabase(models);
+      const pricing = await genxPricing.syncPricingFromModels(models);
+      logger.info(
+        `GenX scheduled refresh: catalogue=${catalogue.total}, priced=${pricing.priced}, ` +
+        `unpriced=${pricing.unpriced}, snapshots=${pricing.snapshotsCreated}, errors=${pricing.errors.length}`
+      );
     });
 
     this.scheduleTask('autonomous-growth-director', 10 * 60 * 1000, async () => {
