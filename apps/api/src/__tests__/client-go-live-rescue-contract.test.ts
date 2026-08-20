@@ -43,8 +43,10 @@ describe('client go-live rescue contracts', () => {
 
   test('knowledge source creation keeps PostgreSQL parameter types unambiguous', () => {
     const knowledgeService = fs.readFileSync(path.join(apiRoot, 'services/knowledge.service.ts'), 'utf8');
-    expect(knowledgeService).toContain("CASE WHEN $3::text IN ('website','api','rss') THEN NOW() ELSE NULL END");
+    expect(knowledgeService).toContain('VALUES ($1,$2,$3::varchar,$4,$5,$6,$7,');
+    expect(knowledgeService).toContain("CASE WHEN $3::varchar IN ('website','api','rss') THEN NOW() ELSE NULL END");
     expect(knowledgeService).toContain('NOW() + make_interval(mins => $7::int)');
+    expect(knowledgeService).not.toContain('$3::text');
     expect(knowledgeService).not.toContain("($7 || ' minutes')::interval");
   });
 
@@ -85,6 +87,12 @@ describe('client go-live rescue contracts', () => {
     expect(apiClient).toContain("localStorage.getItem('auth-storage')");
     expect(apiClient).toContain('currentOrganization?.id');
     expect(apiClient).toContain("localStorage.setItem('org_id', recovered)");
+    expect(apiClient).toContain('private refreshPromise: Promise<boolean> | null = null;');
+    expect(apiClient).toContain('private async refreshAccessToken(): Promise<boolean>');
+    expect(apiClient).toContain("/auth/refresh");
+    expect(apiClient).toContain("credentials: 'include'");
+    expect(apiClient).toContain('if (response.status === 401');
+    expect(apiClient).toContain('if (refreshed) response = await perform();');
 
     const dashboard = fs.readFileSync(
       path.join(repositoryRoot, 'apps/web/app/(dashboard)/dashboard/page.tsx'),
