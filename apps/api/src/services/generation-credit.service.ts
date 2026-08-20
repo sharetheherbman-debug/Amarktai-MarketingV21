@@ -536,9 +536,10 @@ export async function settleReservation(input: {
 
     await client.query(
       `UPDATE generation_credit_reservations SET
-         provider_job_id=COALESCE(provider_job_id,$2),settled_credits=$3,
-         released_credits=$4,status=$5,settled_at=CASE WHEN $3>0 THEN NOW() ELSE settled_at END,
-         released_at=CASE WHEN $4>0 OR $3=0 THEN NOW() ELSE released_at END,
+         provider_job_id=COALESCE(provider_job_id,$2::varchar),settled_credits=$3::bigint,
+         released_credits=$4::bigint,status=$5::varchar,
+         settled_at=CASE WHEN $3::bigint>0 THEN NOW() ELSE settled_at END,
+         released_at=CASE WHEN $4::bigint>0 OR $3::bigint=0 THEN NOW() ELSE released_at END,
          metadata=metadata || $6::jsonb,updated_at=NOW()
        WHERE id=$1`,
       [
