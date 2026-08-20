@@ -44,7 +44,7 @@ describe('client go-live rescue contracts', () => {
   test('knowledge source creation keeps PostgreSQL parameter types unambiguous', () => {
     const knowledgeService = fs.readFileSync(path.join(apiRoot, 'services/knowledge.service.ts'), 'utf8');
     expect(knowledgeService).toContain("CASE WHEN $3::text IN ('website','api','rss') THEN NOW() ELSE NULL END");
-    expect(knowledgeService).toContain("NOW() + make_interval(mins => $7::int)");
+    expect(knowledgeService).toContain('NOW() + make_interval(mins => $7::int)');
     expect(knowledgeService).not.toContain("($7 || ' minutes')::interval");
   });
 
@@ -81,6 +81,10 @@ describe('client go-live rescue contracts', () => {
     const apiClient = fs.readFileSync(path.join(repositoryRoot, 'apps/web/src/lib/api.ts'), 'utf8');
     expect(apiClient).toContain("trimmed === '/api'");
     expect(apiClient).toContain("return '/api/v1'");
+    expect(apiClient).toContain("localStorage.getItem('org_id')");
+    expect(apiClient).toContain("localStorage.getItem('auth-storage')");
+    expect(apiClient).toContain('currentOrganization?.id');
+    expect(apiClient).toContain("localStorage.setItem('org_id', recovered)");
 
     const dashboard = fs.readFileSync(
       path.join(repositoryRoot, 'apps/web/app/(dashboard)/dashboard/page.tsx'),
