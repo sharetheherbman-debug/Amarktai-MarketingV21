@@ -70,14 +70,23 @@ describe('client go-live rescue contracts', () => {
     expect(leaks).toEqual([]);
   });
 
-  test('dashboard, SSO, MFA and billing retain canonical API base normalization', () => {
-    const files = [
+  test('dashboard shared client, SSO, MFA and billing retain canonical API base normalization', () => {
+    const apiClient = fs.readFileSync(path.join(repositoryRoot, 'apps/web/src/lib/api.ts'), 'utf8');
+    expect(apiClient).toContain("trimmed === '/api'");
+    expect(apiClient).toContain("return '/api/v1'");
+
+    const dashboard = fs.readFileSync(
       path.join(repositoryRoot, 'apps/web/app/(dashboard)/dashboard/page.tsx'),
+      'utf8'
+    );
+    expect(dashboard).toContain("import { api } from '@/lib/api';");
+
+    const directFetchFiles = [
       path.join(repositoryRoot, 'apps/web/app/connector/sso/page.tsx'),
       path.join(repositoryRoot, 'apps/web/app/(auth)/mfa/setup/page.tsx'),
       path.join(repositoryRoot, 'apps/web/app/(dashboard)/billing/page.tsx'),
     ];
-    for (const file of files) {
+    for (const file of directFetchFiles) {
       const source = fs.readFileSync(file, 'utf8');
       expect(source).toContain("trimmed === '/api'");
       expect(source).toContain("return '/api/v1'");
