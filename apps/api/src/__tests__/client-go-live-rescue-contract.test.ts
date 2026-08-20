@@ -32,6 +32,15 @@ describe('client go-live rescue contracts', () => {
     expect(server).toContain("app.use('/api/v1/tools', toolRoutes);");
   });
 
+  test('knowledge vector storage uses the canonical knowledge_items embedding column', () => {
+    const vectorService = fs.readFileSync(path.join(apiRoot, 'services/vector.service.ts'), 'utf8');
+    expect(vectorService).not.toContain('knowledge_embeddings');
+    expect(vectorService).toContain('UPDATE knowledge_items');
+    expect(vectorService).toContain('SET embedding = $2::vector, updated_at = NOW()');
+    expect(vectorService).toContain('1 - (ki.embedding <=> $2::vector) AS similarity');
+    expect(vectorService).toContain('ki.embedding IS NOT NULL');
+  });
+
   test('campaign reads and writes derive tenant from authenticated context', () => {
     const campaigns = fs.readFileSync(path.join(apiRoot, 'routes/campaigns.ts'), 'utf8');
     expect(campaigns).toContain('router.use(requireOrganizationMembership)');
