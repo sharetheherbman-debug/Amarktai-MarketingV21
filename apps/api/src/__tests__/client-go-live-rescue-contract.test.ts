@@ -66,6 +66,14 @@ describe('client go-live rescue contracts', () => {
     expect(gateService).not.toContain("($16 || ' minutes')::interval");
   });
 
+  test('relaunch manual proposal and decision keep reused status parameters explicitly typed', () => {
+    const controlService = fs.readFileSync(path.join(apiRoot, 'services/relaunch-control.service.ts'), 'utf8');
+    expect(controlService).toContain('VALUES ($1,$2,$3,$4,$5,$6::varchar,$7,$8,$9,$10,$11,$12,$13,$14,$15,');
+    expect(controlService).toContain("CASE WHEN $6::varchar='approved' THEN NOW() ELSE NULL END");
+    expect(controlService).toContain('status=$4::varchar,decided_by_user_id=$3');
+    expect(controlService).toContain("approval_expires_at=CASE WHEN $4::varchar='approved' THEN NOW() + interval '30 minutes' ELSE NULL END");
+  });
+
   test('campaign reads and writes derive tenant from authenticated context', () => {
     const campaigns = fs.readFileSync(path.join(apiRoot, 'routes/campaigns.ts'), 'utf8');
     expect(campaigns).toContain('router.use(requireOrganizationMembership)');
