@@ -7,6 +7,8 @@ import { hashPassword } from '../utils/encryption';
 import { generateAccessToken, generateRefreshToken } from '../utils/jwt';
 import { logger } from '../utils/logger';
 
+export type HostProductLine = 'management' | 'academy' | 'shop';
+
 export interface TrustedApplication {
   applicationId: string;
   connectorId: string;
@@ -37,7 +39,14 @@ export interface ConversionEventPayload {
 export interface BusinessSnapshotPayload {
   snapshot_id: string;
   occurred_at: string;
-  app: { id: string; name: string; domain: string; description?: string; status?: string };
+  app: {
+    id: string;
+    name: string;
+    domain: string;
+    description?: string;
+    status?: string;
+    product_lines?: HostProductLine[];
+  };
   products?: Array<Record<string, unknown>>;
   plans?: Array<Record<string, unknown>>;
   pricing?: Array<Record<string, unknown>>;
@@ -88,6 +97,35 @@ function canonicalize(value: unknown): string {
   return `{${Object.keys(object).sort().map((key) => `${JSON.stringify(key)}:${canonicalize(object[key])}`).join(',')}}`;
 }
 
+function normalizeProductLine(value: unknown): HostProductLine | null {
+  const normalized = String(value || '').trim().toLowerCase();
+  return ['management', 'academy', 'shop'].includes(normalized) ? (normalized as HostProductLine) : null;
+}
+
+function validateSnapshotProductLines(payload: BusinessSnapshotPayload): void {
+  const declared = payload.app.product_lines || [];
+  for (const productLine of declared) {
+    if (!normalizeProductLine(productLine)) {
+      throw new AppError(400, 'Business snapshot contains an unsupported product line', 'BUSINESS_SNAPSHOT_PRODUCT_LINE_INVALID');
+    }
+  }
+  for (const collection of [
+    payload.products,
+    payload.plans,
+    payload.pricing,
+    payload.features,
+    payload.offers,
+    payload.promotions,
+    payload.status_changes,
+  ]) {
+    for (const record of collection || []) {
+      if (record.product_line !== undefined && !normalizeProductLine(record.product_line)) {
+        throw new AppError(400, 'Business snapshot record contains an unsupported product line', 'BUSINESS_SNAPSHOT_PRODUCT_LINE_INVALID');
+      }
+    }
+  }
+}
+
 function signedMessage(timestamp: string, nonce: string, body: unknown): string {
   return `${timestamp}\n${nonce}\n${canonicalize(body)}`;
 }
@@ -96,10 +134,10 @@ export function signApplicationPayload(key: string, timestamp: string, nonce: st
   return crypto.createHmac('sha256', key).update(signedMessage(timestamp, nonce, body), 'utf8').digest('hex');
 }
 
-export async function ensureConfiguredEquiProfileConnector(): Promise<void> {
+export async function ensureConfiguredApplicationConnector(): Promise<void> {
   const config = connectorConfig();
   if (!config.connectorKey && env.NODE_ENV !== 'production') {
-    logger.warn('EquiProfile application connector is not configured');
+    logger.warn('Host application connector is not configured');
     return;
   }
   await query(
@@ -122,6 +160,9 @@ export async function ensureConfiguredEquiProfileConnector(): Promise<void> {
   );
   logger.info(`Application connector configured: ${config.applicationId}`);
 }
+
+/** LEGACY_COMPAT_ONLY: retain the historical export while callers migrate. */
+export const ensureConfiguredEquiProfileConnector = ensureConfiguredApplicationConnector;
 
 function requiredHeader(req: Request, name: string): string {
   const value = String(req.header(name) || '').trim();
@@ -195,7 +236,7 @@ export async function issueSsoCode(application: TrustedApplication, payload: Sso
     throw new AppError(400, 'external_user_id, email and display_name are required', 'SSO_PAYLOAD_INVALID');
   }
   if (!['admin', 'superadmin'].includes(payload.external_role)) {
-    throw new AppError(403, 'Only EquiProfile administrators may use Marketing SSO', 'SSO_ROLE_FORBIDDEN');
+    throw new AppError(403, 'Only authorized host-application administrators may use Marketing SSO', 'SSO_ROLE_FORBIDDEN');
   }
   const email = payload.email.trim().toLowerCase();
   if (!/^\S+@\S+\.\S+$/.test(email)) throw new AppError(400, 'A valid email is required', 'SSO_EMAIL_INVALID');
@@ -358,6 +399,12 @@ export async function recordConversionEvent(application: TrustedApplication, pay
     throw new AppError(400, 'value_pence must be a non-negative integer', 'CONVERSION_VALUE_INVALID');
   }
 
+  const properties = payload.properties || {};
+  const productLine = normalizeProductLine(properties.product_line);
+  if (properties.product_line !== undefined && !productLine) {
+    throw new AppError(400, 'Conversion event contains an unsupported product_line', 'CONVERSION_PRODUCT_LINE_INVALID');
+  }
+
   const result = await query(
     `INSERT INTO application_conversion_events
        (application_id,event_id,event_type,occurred_at,external_user_id,
@@ -374,13 +421,12 @@ export async function recordConversionEvent(application: TrustedApplication, pay
       payload.external_organization_id || null,
       payload.value_pence ?? null,
       payload.consent_basis,
-      JSON.stringify(payload.properties || {}),
+      JSON.stringify(properties),
     ]
   );
   const connector = await query('SELECT default_organization_id FROM application_connectors WHERE id=$1', [application.connectorId]);
   const organizationId = connector.rows[0]?.default_organization_id;
   if (organizationId && result.rows.length > 0) {
-    const properties = payload.properties || {};
     const uuid = (value: unknown) => /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value || '')) ? String(value) : null;
     await query(
       `INSERT INTO marketing_performance_events
@@ -397,7 +443,12 @@ export async function recordConversionEvent(application: TrustedApplication, pay
         properties.variation_id ? String(properties.variation_id) : null,
         payload.external_user_id ? hashOpaqueValue(`${application.applicationId}:${payload.external_user_id}`) : null,
         payload.value_pence || 0,
-        JSON.stringify({ event_type: payload.event_type, consent_basis: payload.consent_basis }),
+        JSON.stringify({
+          event_type: payload.event_type,
+          consent_basis: payload.consent_basis,
+          ...(productLine ? { product_line: productLine } : {}),
+          ...(properties.entity_type ? { entity_type: String(properties.entity_type) } : {}),
+        }),
       ]
     );
   }
@@ -414,6 +465,7 @@ export async function recordBusinessSnapshot(
   if (payload.app.id !== application.applicationId) {
     throw new AppError(400, 'Business snapshot app ID does not match the authenticated connector', 'BUSINESS_SNAPSHOT_APP_MISMATCH');
   }
+  validateSnapshotProductLines(payload);
   const serialized = canonicalize(payload);
   if (Buffer.byteLength(serialized, 'utf8') > 1024 * 1024) {
     throw new AppError(413, 'Business snapshot exceeds the 1 MB limit', 'BUSINESS_SNAPSHOT_TOO_LARGE');
@@ -451,7 +503,7 @@ export async function recordBusinessSnapshot(
       `INSERT INTO marketing_change_events
          (organization_id,source_type,event_type,materiality,summary,payload)
        VALUES ($1,'connector','structured_business_change','material',$2,$3)`,
-      [organizationId, `${application.name} business knowledge advanced to version ${version}`, JSON.stringify({ application_id: application.applicationId, version, snapshot_id: payload.snapshot_id, occurred_at: occurredAt.toISOString() })]
+      [organizationId, `${application.name} business knowledge advanced to version ${version}`, JSON.stringify({ application_id: application.applicationId, version, snapshot_id: payload.snapshot_id, occurred_at: occurredAt.toISOString(), product_lines: payload.app.product_lines || [] })]
     );
     return { accepted: true, duplicate: false, version, material_change: true };
   });
