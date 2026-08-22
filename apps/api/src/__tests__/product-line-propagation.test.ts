@@ -1,11 +1,13 @@
 import { readFileSync } from 'fs';
 import { resolve } from 'path';
+import { legacyProductLine, normalizeProductScopeKey, normalizeProductScopes } from '../utils/product-scope';
 
-describe('generic product-line campaign propagation', () => {
+describe('generic multi-product campaign propagation', () => {
   const root = resolve(process.cwd());
   const source = (path: string) => readFileSync(resolve(root, path), 'utf8');
 
-  const migration = source('src/db/migrations/033_product_line_campaign_intelligence.sql');
+  const legacyMigration = source('src/db/migrations/033_product_line_campaign_intelligence.sql');
+  const genericMigration = source('src/db/migrations/034_generic_multi_product_scope.sql');
   const connector = source('src/services/application-connector.service.ts');
   const planner = source('src/services/campaign-planner.service.ts');
   const production = source('src/services/campaign-production.service.ts');
@@ -16,9 +18,11 @@ describe('generic product-line campaign propagation', () => {
   const worker = source('src/workers/generation-worker.ts');
   const plannerUi = readFileSync(resolve(root, '../web/app/(dashboard)/campaign-planner/page.tsx'), 'utf8');
 
-  it('adds an additive, nullable product-line dimension without assigning legacy records', () => {
-    expect(migration).toContain('ADD COLUMN IF NOT EXISTS product_line VARCHAR(32)');
-    expect(migration).toContain("CHECK (product_line IN ('management','academy','shop'))");
+  it('keeps legacy migration history immutable and adds a forward generic multi-scope migration', () => {
+    expect(legacyMigration).toContain("CHECK (product_line IN ('management','academy','shop'))");
+    expect(genericMigration).toContain('DROP CONSTRAINT IF EXISTS campaign_plans_product_line_check');
+    expect(genericMigration).toContain("ADD COLUMN IF NOT EXISTS product_lines JSONB NOT NULL DEFAULT '[]'::jsonb");
+    expect(genericMigration).toContain('USING GIN (product_lines)');
     for (const table of [
       'campaign_plans',
       'campaigns',
@@ -26,55 +30,64 @@ describe('generic product-line campaign propagation', () => {
       'application_conversion_events',
       'marketing_performance_events',
     ]) {
-      expect(migration).toContain(`ALTER TABLE ${table}`);
+      expect(genericMigration).toContain(`ALTER TABLE ${table}`);
+      expect(genericMigration).toContain(`UPDATE ${table}`);
     }
-    expect(migration).not.toContain('UPDATE campaign_plans SET product_line');
-    expect(migration).not.toContain('UPDATE campaigns SET product_line');
   });
 
-  it('stores validated connector scope in immutable conversions and derived attribution', () => {
-    expect(connector).toContain('export function normalizeProductLine');
-    expect(connector).toContain('consent_basis,product_line,properties');
-    expect(connector).toContain('value_pence,product_line,metrics');
+  it('normalizes arbitrary connected-app scope keys without hard-coding EquiProfile products', () => {
+    expect(normalizeProductScopeKey('CRM-Pro')).toBe('crm-pro');
+    expect(normalizeProductScopes(['crm-pro', 'Consulting', 'crm-pro'])).toEqual(['crm-pro', 'consulting']);
+    expect(legacyProductLine(['crm-pro'])).toBe('crm-pro');
+    expect(legacyProductLine(['crm-pro', 'consulting'])).toBeNull();
+    expect(() => normalizeProductScopes(['not valid!'])).toThrow();
+  });
+
+  it('stores generic connector scope in immutable conversions and derived attribution', () => {
+    expect(connector).toContain('normalizeProductScopes');
+    expect(connector).toContain('product_lines');
+    expect(connector).toContain('application_conversion_events');
+    expect(connector).toContain('marketing_performance_events');
     expect(connector).toContain("'conversion_signal'");
+    expect(connector).not.toContain("['management', 'academy', 'shop'].includes");
   });
 
-  it('carries optional product-line scope through campaign planning and plan versioning', () => {
-    expect(planner).toContain('product_line?: HostProductLine');
-    expect(planner).toContain("product_line: input.product_line || 'unclassified'");
-    expect(planner).toContain('planning_idempotency_key,product_line');
-    expect(planner).toContain("['product_line', 'product_line', false]");
+  it('carries canonical multi-scope context through campaign planning and versioning', () => {
+    expect(planner).toContain('product_lines?: string[]');
+    expect(planner).toContain('const productLines = normalizeProductScopes');
+    expect(planner).toContain('product_scopes: productLines.length > 0 ? productLines');
+    expect(planner).toContain('planning_idempotency_key,product_line,product_lines');
+    expect(planner).toContain('product_lines');
   });
 
-  it('validates and persists the same generic scope in campaign CRUD', () => {
-    expect(validation).toContain("product_line: z.enum(['management', 'academy', 'shop']).optional()");
-    expect(campaignRoute).toContain('type, product_line, project_id');
-    expect(campaignRoute).toContain('product_line, config, schedule, created_by');
-    expect(campaignRoute).toContain('CAMPAIGN_PRODUCT_LINE_INVALID');
-    expect(campaignAiRoute).toContain("code: 'PRODUCT_LINE_INVALID'");
-    expect(campaignAiRoute).toContain('product_line: product_line || undefined');
+  it('validates and persists generic scope arrays in campaign CRUD', () => {
+    expect(validation).toContain('product_lines');
+    expect(campaignRoute).toContain('product_lines');
+    expect(campaignAiRoute).toContain('product_lines');
+    expect(campaignAiRoute).toContain('normalizeProductScopes');
+    expect(campaignAiRoute).not.toContain("product_line must be management, academy, or shop");
   });
 
-  it('propagates plan scope into durable asset runs and generated content metadata', () => {
-    expect(production).toContain('variant_number,product_line,generation_kind');
-    expect(production).toContain('product_line: plan.product_line || null');
-    expect(production).toContain('product_line: plan.product_line || undefined');
-    expect(worker).toContain('data.request?.product_line');
-    expect(worker).toContain("JSON.stringify({ product_line: data.request.product_line })");
+  it('propagates multi-scope context into durable asset runs and generated content', () => {
+    expect(production).toContain('product_lines');
+    expect(production).toContain('normalizeProductScopes');
+    expect(worker).toContain('product_lines');
+    expect(worker).toContain('product_line');
   });
 
-  it('exposes optional scope in the Campaign Planner user interface', () => {
-    expect(plannerUi).toContain('Product line');
-    expect(plannerUi).toContain('No product-line scope');
-    expect(plannerUi).toContain('product_line: form.product_line || undefined');
-    expect(plannerUi).toContain('plan.product_line');
+  it('exposes reusable multi-product scope in the Campaign Planner UI', () => {
+    expect(plannerUi).toContain('Product/service scopes');
+    expect(plannerUi).toContain('product_lines');
+    expect(plannerUi).not.toContain('<option value="management">Management</option>');
+    expect(plannerUi).not.toContain('<option value="academy">Academy</option>');
+    expect(plannerUi).not.toContain('<option value="shop">Shop</option>');
   });
 
-  it('keeps Growth Director reuse and performance learning scoped to the product line', () => {
-    expect(growthDirector).toContain("AND ($3::text IS NULL OR plan.product_line=$3)");
-    expect(growthDirector).toContain('[organizationId, cycle.id, opportunityProductLine]');
-    expect(growthDirector).toContain('event.product_line=run.product_line');
-    expect(growthDirector).toContain('product_line: opportunityProductLine');
-    expect(growthDirector).toContain('product_line: winner.product_line || null');
+  it('keeps Growth Director plan reuse, attribution and learning multi-scope aware', () => {
+    expect(growthDirector).toContain('plan.product_lines ?| $3::text[]');
+    expect(growthDirector).toContain('run.product_lines ? event.product_line');
+    expect(growthDirector).toContain('product_lines: opportunityScopes');
+    expect(growthDirector).toContain('product_lines: winnerScopes');
+    expect(growthDirector).not.toContain("['management', 'academy', 'shop'].includes");
   });
 });
