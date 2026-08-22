@@ -3,8 +3,11 @@ import { resolve } from 'path';
 import { legacyProductLine, normalizeProductScopeKey, normalizeProductScopes } from '../utils/product-scope';
 
 describe('generic multi-product campaign propagation', () => {
-  const root = resolve(process.cwd());
-  const source = (path: string) => readFileSync(resolve(root, path), 'utf8');
+  // Resolve from this test file rather than process.cwd(). CI may invoke Jest from
+  // the workspace root or the API workspace; the release contract must inspect the
+  // same source tree in either case.
+  const apiRoot = resolve(__dirname, '../..');
+  const source = (path: string) => readFileSync(resolve(apiRoot, path), 'utf8');
 
   const legacyMigration = source('src/db/migrations/033_product_line_campaign_intelligence.sql');
   const genericMigration = source('src/db/migrations/034_generic_multi_product_scope.sql');
@@ -15,7 +18,7 @@ describe('generic multi-product campaign propagation', () => {
   const campaignRoute = source('src/routes/campaigns.ts');
   const campaignAiRoute = source('src/routes/campaign-ai.ts');
   const validation = source('src/utils/validation.ts');
-  const plannerUi = readFileSync(resolve(root, '../web/app/(dashboard)/campaign-planner/page.tsx'), 'utf8');
+  const plannerUi = readFileSync(resolve(apiRoot, '../web/app/(dashboard)/campaign-planner/page.tsx'), 'utf8');
 
   it('keeps legacy migration history immutable and adds a forward generic multi-scope migration', () => {
     expect(legacyMigration).toContain("CHECK (product_line IN ('management','academy','shop'))");
