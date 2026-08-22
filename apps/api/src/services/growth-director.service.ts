@@ -22,6 +22,13 @@ function stringArray(value: unknown): string[] {
   return Array.isArray(value) ? value.map(String).map((item) => item.trim()).filter(Boolean) : [];
 }
 
+function productLine(value: unknown): 'management' | 'academy' | 'shop' | null {
+  const normalized = String(value || '').trim().toLowerCase();
+  return ['management', 'academy', 'shop'].includes(normalized)
+    ? normalized as 'management' | 'academy' | 'shop'
+    : null;
+}
+
 async function scheduleApprovedSocialAssets(cycleId: string, organizationId: string, campaignPlanId: string): Promise<{
   eligible: number; scheduled: number; existing: number; held: number;
 }> {
@@ -87,7 +94,7 @@ async function scheduleApprovedSocialAssets(cycleId: string, organizationId: str
 
 async function persistPerformanceLearning(organizationId: string, campaignPlanId: string): Promise<Record<string, unknown>> {
   const performance = await query(
-    `SELECT content.id,content.title,content.platform,
+    `SELECT content.id,content.title,content.platform,run.product_line,
             COUNT(event.id)::int AS event_count,
             COALESCE(SUM(event.value_pence),0)::bigint AS value_pence
      FROM campaign_asset_runs run
@@ -96,10 +103,11 @@ async function persistPerformanceLearning(organizationId: string, campaignPlanId
      LEFT JOIN marketing_performance_events event
        ON event.organization_id=content.organization_id
       AND event.content_id=content.id
+      AND (run.product_line IS NULL OR event.product_line=run.product_line)
       AND event.occurred_at>=NOW()-INTERVAL '30 days'
      WHERE run.organization_id=$1 AND run.campaign_plan_id=$2
        AND run.status='completed' AND content.deleted_at IS NULL
-     GROUP BY content.id,content.title,content.platform
+     GROUP BY content.id,content.title,content.platform,run.product_line
      ORDER BY value_pence DESC,event_count DESC,content.id
      LIMIT 100`,
     [organizationId, campaignPlanId]
@@ -128,7 +136,8 @@ async function persistPerformanceLearning(organizationId: string, campaignPlanId
      DO UPDATE SET weight=LEAST(10,owner_marketing_preferences.weight+0.1),
                    evidence_count=owner_marketing_preferences.evidence_count+1,
                    examples=EXCLUDED.examples,updated_at=NOW()`,
-    [organizationId, platform, JSON.stringify([{ content_id: winner.id, title: winner.title,
+    [organizationId, `${String(winner.product_line || 'unclassified')}:${platform}`, JSON.stringify([{ content_id: winner.id, title: winner.title,
+      product_line: winner.product_line || null,
       event_count: Number(winner.event_count || 0), value_pence: Number(winner.value_pence || 0) }])]
   );
   await query(
@@ -141,11 +150,13 @@ async function persistPerformanceLearning(organizationId: string, campaignPlanId
          AND event_type='performance_learning' AND status='pending'
      )`,
     [organizationId, winner.id,
-      `Attributable performance favours ${String(winner.title || winner.id)} on ${platform}`,
+      `Attributable ${String(winner.product_line || 'unclassified')} performance favours ${String(winner.title || winner.id)} on ${platform}`,
       JSON.stringify({ campaign_plan_id: campaignPlanId, content_id: winner.id, platform,
+        product_line: winner.product_line || null,
         event_count: Number(winner.event_count || 0), value_pence: Number(winner.value_pence || 0) })]
   );
   return { measured_assets: performance.rows.length, winner: { content_id: winner.id, platform,
+    product_line: winner.product_line || null,
     event_count: Number(winner.event_count || 0), value_pence: Number(winner.value_pence || 0) } };
 }
 
@@ -221,10 +232,13 @@ async function selectOrCreateCampaignPlan(
     );
     if (attached.rows.length > 0) return { plan: attached.rows[0], created: false, contextEvidence: { reused_attached_plan: true } };
   }
+  const opportunity = objectValue(cycle.opportunity);
+  const opportunityProductLine = productLine(opportunity.product_line);
   const current = await query(
     `SELECT plan.* FROM campaign_plans plan
      WHERE plan.organization_id=$1 AND plan.strategy_validation_status='valid'
        AND plan.status<>'archived' AND plan.updated_at>=NOW()-INTERVAL '30 days'
+       AND ($3::text IS NULL OR plan.product_line=$3)
        AND NOT EXISTS (
          SELECT 1 FROM autonomous_growth_cycles active
          WHERE active.campaign_plan_id=plan.id AND active.id<>$2
@@ -232,11 +246,9 @@ async function selectOrCreateCampaignPlan(
        )
      ORDER BY CASE plan.status WHEN 'approved' THEN 1 WHEN 'review' THEN 2 ELSE 3 END,
               plan.updated_at DESC LIMIT 1`,
-    [organizationId, cycle.id]
+    [organizationId, cycle.id, opportunityProductLine]
   );
-  if (current.rows.length > 0) return { plan: current.rows[0], created: false, contextEvidence: { reused_current_plan: true } };
-
-  const opportunity = objectValue(cycle.opportunity);
+  if (current.rows.length > 0) return { plan: current.rows[0], created: false, contextEvidence: { reused_current_plan: true, product_line: opportunityProductLine } };
   const opportunitySummary = String(opportunity.summary || opportunity.source || cycle.objective || 'scheduled baseline growth opportunity');
   const context = await contextEngine.assemble({
     orgId: organizationId,
@@ -252,7 +264,8 @@ async function selectOrCreateCampaignPlan(
     goal: String(cycle.objective || 'Identify and advance the strongest evidence-backed organic growth opportunity'),
     target_audience: 'Use the primary audience and personas in Brand DNA and connected business knowledge.',
     budget_cents: 0,
-    products: `Select the most relevant current product, plan, feature or approved offer from the shared business brain. Cycle opportunity: ${opportunitySummary}`,
+    product_line: opportunityProductLine || undefined,
+    products: `Select the most relevant current product, plan, feature or approved offer from the shared business brain${opportunityProductLine ? ` for the ${opportunityProductLine} product line` : ''}. Cycle opportunity: ${opportunitySummary}`,
     location: 'Use configured market and location knowledge only.',
     objective_stage: 'conversion',
     offer: 'Use only an approved current offer from structured connector or owner knowledge; otherwise avoid offer-dependent claims.',
@@ -267,6 +280,7 @@ async function selectOrCreateCampaignPlan(
       assembled_at: new Date().toISOString(),
       trigger_type: cycle.trigger_type,
       opportunity: opportunitySummary,
+      product_line: opportunityProductLine,
       brand_dna_available: Boolean(context.brandDna),
       shared_business_brain_available: Boolean(context.knowledge),
     },
@@ -467,7 +481,7 @@ export async function observeOrganization(organizationId: string): Promise<strin
       `INSERT INTO autonomous_growth_cycles
          (organization_id,status,trigger_type,trigger_ref,objective,opportunity,next_run_at)
        VALUES ($1,'observing','knowledge_change',$2,$3,$4,NOW()) RETURNING id`,
-      [organizationId, event.id, `Respond to ${event.event_type}`, JSON.stringify({ summary: event.summary, materiality: event.materiality })]
+      [organizationId, event.id, `Respond to ${event.event_type}`, JSON.stringify({ summary: event.summary, materiality: event.materiality, product_line: productLine(objectValue(event.payload).product_line) })]
     );
     await client.query("UPDATE marketing_change_events SET status='consumed',consumed_at=NOW() WHERE id=$1", [event.id]);
     await client.query(

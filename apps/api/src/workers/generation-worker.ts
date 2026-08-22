@@ -582,6 +582,14 @@ async function processCampaignText(job: Job): Promise<void> {
     [data.runId, data.organizationId]
   );
   const result = await contentEngine.generateContent(data.organizationId, data.request, data.userId);
+  if (data.request?.product_line) {
+    await query(
+      `UPDATE content_items
+       SET metadata=COALESCE(metadata, '{}'::jsonb) || $1::jsonb,updated_at=NOW()
+       WHERE id=$2 AND organization_id=$3`,
+      [JSON.stringify({ product_line: data.request.product_line }), result.content.id, data.organizationId]
+    );
+  }
   await query(
     `UPDATE campaign_asset_runs
      SET status='completed',content_id=$1,resolution_status='pending_review',

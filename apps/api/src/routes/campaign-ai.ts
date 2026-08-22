@@ -29,8 +29,11 @@ router.get('/plans/:id', async (req: AuthRequest, res: Response<ApiResponse>, ne
 
 router.post('/plans/generate', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
   try {
-    const { organization_id, name, goal, target_audience } = req.body;
+    const { organization_id, name, goal, target_audience, product_line } = req.body;
     if (!organization_id || !name || !goal) { res.status(400).json({ success: false, error: { message: 'organization_id, name, and goal required', code: 'BAD_REQUEST' } }); return; }
+    if (product_line !== undefined && product_line !== null && !['management', 'academy', 'shop'].includes(String(product_line))) {
+      res.status(400).json({ success: false, error: { message: 'product_line must be management, academy, or shop', code: 'PRODUCT_LINE_INVALID' } }); return;
+    }
     const plan = await plannerService.generatePlan(organization_id, {
       ...req.body,
       name,
@@ -39,6 +42,7 @@ router.post('/plans/generate', async (req: AuthRequest, res: Response<ApiRespons
       budget_cents: Number(req.body.budget_cents || 0),
       products: String(req.body.products || ''),
       location: String(req.body.location || ''),
+      product_line: product_line || undefined,
     }, req.user!.userId);
     res.status(201).json({ success: true, data: plan });
   } catch (error) { next(error); }
@@ -48,6 +52,9 @@ router.put('/plans/:id', async (req: AuthRequest, res: Response<ApiResponse>, ne
   try {
     const organizationId = String(req.body.organization_id || '');
     if (!organizationId) { res.status(400).json({ success: false, error: { message: 'organization_id required', code: 'BAD_REQUEST' } }); return; }
+    if (req.body.product_line !== undefined && req.body.product_line !== null && !['management', 'academy', 'shop'].includes(String(req.body.product_line))) {
+      res.status(400).json({ success: false, error: { message: 'product_line must be management, academy, or shop', code: 'PRODUCT_LINE_INVALID' } }); return;
+    }
     const plan = await plannerService.updatePlan(req.params.id, organizationId, req.body, req.user!.userId);
     res.json({ success: true, data: plan });
   } catch (error) { next(error); }

@@ -4,6 +4,7 @@ import { logger } from '../utils/logger';
 import { NotFoundError, AppError } from '../middleware/errorHandler';
 import { contextEngine } from './context-engine.service';
 import { generateGovernedText } from './governed-text-generation.service';
+import type { HostProductLine } from './application-connector.service';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -14,6 +15,7 @@ export interface CampaignPlan {
   goal: string | null;
   target_audience: Record<string, unknown>;
   budget_cents: number;
+  product_line: HostProductLine | null;
   strategy: Record<string, unknown>;
   channels: Record<string, unknown>;
   kpis: Record<string, unknown>;
@@ -50,6 +52,7 @@ export interface CampaignPlanInput {
   goal: string;
   target_audience: string;
   budget_cents: number;
+  product_line?: HostProductLine;
   products: string;
   location: string;
   duration_weeks?: number;
@@ -81,6 +84,7 @@ export interface CampaignPlanUpdate {
   optimization_plan?: Record<string, unknown>;
   constraints?: Record<string, unknown>;
   generation_credit_limit?: number;
+  product_line?: HostProductLine | null;
   change_summary?: string;
 }
 
@@ -137,6 +141,7 @@ export async function generatePlan(orgId: string, input: CampaignPlanInput, user
     objective_stage: input.objective_stage || 'conversion',
     target_audience: input.target_audience,
     budget_gbp: Number((input.budget_cents / 100).toFixed(2)),
+    product_line: input.product_line || 'unclassified',
     products_or_services: input.products,
     location: input.location,
     duration_weeks: input.duration_weeks || 4,
@@ -203,8 +208,8 @@ Return strict JSON only with this shape:
           creative_concept,messaging_plan,channels,kpis,content_calendar,
           asset_requirements,optimization_plan,constraints,generation_credit_limit,
           status,strategy_validation_status,owner_clarification,ai_generated,created_by,
-          planning_idempotency_key)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,'draft',$17,$18,TRUE,$19,$20)
+          planning_idempotency_key,product_line)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,'draft',$17,$18,TRUE,$19,$20,$21)
        ON CONFLICT (organization_id,planning_idempotency_key)
          WHERE planning_idempotency_key IS NOT NULL
        DO UPDATE SET updated_at=campaign_plans.updated_at
@@ -223,6 +228,7 @@ Return strict JSON only with this shape:
         JSON.stringify(missingInformation.map((question: unknown) => ({ type: 'missing_information', question: String(question) }))),
         userId,
         input.idempotency_key || null,
+        input.product_line || null,
       ]
     );
 
@@ -304,6 +310,7 @@ export async function updatePlan(
     ['kpis', 'kpis', true], ['content_calendar', 'content_calendar', true],
     ['asset_requirements', 'asset_requirements', true], ['optimization_plan', 'optimization_plan', true],
     ['constraints', 'constraints', true], ['generation_credit_limit', 'generation_credit_limit', false],
+    ['product_line', 'product_line', false],
   ];
   const updates: string[] = [];
   const values: unknown[] = [];
@@ -358,6 +365,7 @@ function mapPlanRow(row: Record<string, unknown>): CampaignPlan {
     goal: row.goal as string | null,
     target_audience: typeof row.target_audience === 'string' ? JSON.parse(row.target_audience) : (row.target_audience as Record<string, unknown>) || {},
     budget_cents: parseInt(row.budget_cents as string) || 0,
+    product_line: (row.product_line as HostProductLine | null) || null,
     strategy: typeof row.strategy === 'string' ? JSON.parse(row.strategy) : (row.strategy as Record<string, unknown>) || {},
     channels: typeof row.channels === 'string' ? JSON.parse(row.channels) : (row.channels as Record<string, unknown>) || {},
     kpis: typeof row.kpis === 'string' ? JSON.parse(row.kpis) : (row.kpis as Record<string, unknown>) || {},

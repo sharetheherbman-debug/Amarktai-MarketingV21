@@ -97,7 +97,7 @@ function canonicalize(value: unknown): string {
   return `{${Object.keys(object).sort().map((key) => `${JSON.stringify(key)}:${canonicalize(object[key])}`).join(',')}}`;
 }
 
-function normalizeProductLine(value: unknown): HostProductLine | null {
+export function normalizeProductLine(value: unknown): HostProductLine | null {
   const normalized = String(value || '').trim().toLowerCase();
   return ['management', 'academy', 'shop'].includes(normalized) ? (normalized as HostProductLine) : null;
 }
@@ -406,10 +406,10 @@ export async function recordConversionEvent(application: TrustedApplication, pay
   }
 
   const result = await query(
-    `INSERT INTO application_conversion_events
+      `INSERT INTO application_conversion_events
        (application_id,event_id,event_type,occurred_at,external_user_id,
-        external_organization_id,value_pence,currency,consent_basis,properties)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,'GBP',$8,$9)
+        external_organization_id,value_pence,currency,consent_basis,product_line,properties)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,'GBP',$8,$9,$10)
      ON CONFLICT (application_id,event_id) DO NOTHING
      RETURNING id`,
     [
@@ -420,8 +420,9 @@ export async function recordConversionEvent(application: TrustedApplication, pay
       payload.external_user_id || null,
       payload.external_organization_id || null,
       payload.value_pence ?? null,
-      payload.consent_basis,
-      JSON.stringify(properties),
+        payload.consent_basis,
+        productLine,
+        JSON.stringify(properties),
     ]
   );
   const connector = await query('SELECT default_organization_id FROM application_connectors WHERE id=$1', [application.connectorId]);
@@ -431,8 +432,8 @@ export async function recordConversionEvent(application: TrustedApplication, pay
     await query(
       `INSERT INTO marketing_performance_events
          (organization_id,event_id,event_type,occurred_at,campaign_id,campaign_plan_id,
-          content_id,platform,source,medium,variation_id,pseudonymous_subject,value_pence,metrics)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+          content_id,platform,source,medium,variation_id,pseudonymous_subject,value_pence,product_line,metrics)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
        ON CONFLICT (organization_id,event_id) DO NOTHING`,
       [
         organizationId, crypto.createHash('sha256').update(`${application.applicationId}:${payload.event_id}`).digest('hex'), payload.event_type, occurredAt,
@@ -443,11 +444,28 @@ export async function recordConversionEvent(application: TrustedApplication, pay
         properties.variation_id ? String(properties.variation_id) : null,
         payload.external_user_id ? hashOpaqueValue(`${application.applicationId}:${payload.external_user_id}`) : null,
         payload.value_pence || 0,
+        productLine,
         JSON.stringify({
           event_type: payload.event_type,
           consent_basis: payload.consent_basis,
           ...(productLine ? { product_line: productLine } : {}),
           ...(properties.entity_type ? { entity_type: String(properties.entity_type) } : {}),
+        }),
+      ]
+    );
+    await query(
+      `INSERT INTO marketing_change_events
+         (organization_id,source_type,event_type,materiality,summary,payload)
+       VALUES ($1,'conversion','conversion_signal','minor',$2,$3)`,
+      [
+        organizationId,
+        `${productLine || 'unclassified'} conversion signal received`,
+        JSON.stringify({
+          application_id: application.applicationId,
+          event_id: payload.event_id,
+          event_type: payload.event_type,
+          product_line: productLine,
+          occurred_at: occurredAt.toISOString(),
         }),
       ]
     );

@@ -3,7 +3,7 @@ import { requireAuth, AuthRequest } from '../middleware/auth';
 import { validateBody, validateQuery } from '../middleware/validator';
 import { createCampaignSchema, paginationSchema } from '../utils/validation';
 import { query, transaction } from '../config/database';
-import { NotFoundError } from '../middleware/errorHandler';
+import { AppError, NotFoundError } from '../middleware/errorHandler';
 import { ApiResponse, PaginatedResponse } from '../types';
 
 const router = Router();
@@ -63,14 +63,14 @@ router.get('/', validateQuery(paginationSchema), async (req: AuthRequest, res: R
 
 router.post('/', validateBody(createCampaignSchema), async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction) => {
   try {
-    const { name, description, type, project_id, config, schedule } = req.body;
+    const { name, description, type, product_line, project_id, config, schedule } = req.body;
     const orgId = req.query.organization_id as string || req.body.organization_id;
 
     const result = await query(
-      `INSERT INTO campaigns (organization_id, project_id, name, description, type, config, schedule, created_by)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      `INSERT INTO campaigns (organization_id, project_id, name, description, type, product_line, config, schedule, created_by)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
        RETURNING *`,
-      [orgId, project_id || null, name, description || null, type, JSON.stringify(config || {}), JSON.stringify(schedule || {}), req.user!.userId]
+      [orgId, project_id || null, name, description || null, type, product_line || null, JSON.stringify(config || {}), JSON.stringify(schedule || {}), req.user!.userId]
     );
 
     res.status(201).json({ success: true, data: result.rows[0] });
@@ -98,7 +98,10 @@ router.get('/:id', async (req: AuthRequest, res: Response<ApiResponse>, next: Ne
 
 router.put('/:id', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction) => {
   try {
-    const { name, description, type, status, config, schedule } = req.body;
+    const { name, description, type, status, product_line, config, schedule } = req.body;
+    if (product_line !== undefined && !['management', 'academy', 'shop'].includes(String(product_line))) {
+      throw new AppError(400, 'Campaign product line is invalid', 'CAMPAIGN_PRODUCT_LINE_INVALID');
+    }
     const updates: string[] = [];
     const values: any[] = [];
     let paramCount = 1;
@@ -107,6 +110,7 @@ router.put('/:id', async (req: AuthRequest, res: Response<ApiResponse>, next: Ne
     if (description) { updates.push(`description = $${paramCount++}`); values.push(description); }
     if (type) { updates.push(`type = $${paramCount++}`); values.push(type); }
     if (status) { updates.push(`status = $${paramCount++}`); values.push(status); }
+    if (product_line !== undefined) { updates.push(`product_line = $${paramCount++}`); values.push(product_line || null); }
     if (config) { updates.push(`config = $${paramCount++}`); values.push(JSON.stringify(config)); }
     if (schedule) { updates.push(`schedule = $${paramCount++}`); values.push(JSON.stringify(schedule)); }
 

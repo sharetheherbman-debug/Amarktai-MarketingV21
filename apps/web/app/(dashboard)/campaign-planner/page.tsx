@@ -26,6 +26,7 @@ import type { ApiResponse } from '@/types';
 
 interface CampaignPlan {
   id: string; name: string; goal: string | null; status: string; budget_cents: number;
+  product_line: 'management' | 'academy' | 'shop' | null;
   ai_generated: boolean; created_at: string; strategy: Record<string, any>; channels: Record<string, any>;
   brief: Record<string, any>; creative_concept: Record<string, any>; messaging_plan: Record<string, any>;
   content_calendar: Array<Record<string, any>>; asset_requirements: Array<Record<string, any>>;
@@ -36,7 +37,7 @@ interface AssetRun { id: string; brief_id: string; variant_number: number; gener
 
 const initialForm = {
   name: '', goal: '', objective_stage: 'conversion', target_audience: '', budget_cents: 0,
-  products: '', location: '', duration_weeks: 4, offer: '', value_proposition: '',
+  product_line: '', products: '', location: '', duration_weeks: 4, offer: '', value_proposition: '',
   proof_points: '', calls_to_action: '', channels: ['social', 'email', 'content'],
   brand_restrictions: '', prohibited_claims: '', success_criteria: '',
   generation_credit_limit: 0, language: 'en-GB',
@@ -80,6 +81,7 @@ export default function CampaignPlannerPage() {
       setGenerating(true);
       const payload = {
         ...form,
+        product_line: form.product_line || undefined,
         proof_points: form.proof_points.split('\n').map(value => value.trim()).filter(Boolean),
         calls_to_action: form.calls_to_action.split('\n').map(value => value.trim()).filter(Boolean),
         brand_restrictions: form.brand_restrictions.split('\n').map(value => value.trim()).filter(Boolean),
@@ -190,6 +192,14 @@ export default function CampaignPlannerPage() {
                 className="h-10 w-full rounded-lg border border-white/[0.06] bg-surface-200 px-4 text-sm text-white outline-none focus:border-brand-500/50">
                 {['awareness','consideration','conversion','retention','reactivation'].map(stage => <option key={stage} value={stage}>{stage[0].toUpperCase()+stage.slice(1)}</option>)}
               </select></div>
+            <div><label className="block text-sm font-medium text-zinc-300 mb-1.5">Product line</label>
+              <select value={form.product_line} onChange={e => setForm({ ...form, product_line: e.target.value })}
+                className="h-10 w-full rounded-lg border border-white/[0.06] bg-surface-200 px-4 text-sm text-white outline-none focus:border-brand-500/50">
+                <option value="">No product-line scope</option>
+                <option value="management">Management</option>
+                <option value="academy">Academy</option>
+                <option value="shop">Shop</option>
+              </select></div>
             <div><label className="block text-sm font-medium text-zinc-300 mb-1.5">Target Audience</label>
               <input type="text" value={form.target_audience} onChange={e => setForm({ ...form, target_audience: e.target.value })} placeholder="Who they are, what they need and what may stop them"
                 className="h-10 w-full rounded-lg border border-white/[0.06] bg-white/[0.03] px-4 text-sm text-white placeholder-zinc-500 outline-none focus:border-brand-500/50" /></div>
@@ -262,6 +272,7 @@ export default function CampaignPlannerPage() {
                     {plan.budget_cents > 0 && <span className="flex items-center gap-1"><DollarSign className="h-3 w-3" />£{(plan.budget_cents / 100).toLocaleString()}</span>}
                     <span>{new Date(plan.created_at).toLocaleDateString()}</span>
                     <span>Version {plan.version}</span>
+                    {plan.product_line && <span className="rounded-full bg-brand-500/10 px-2 py-0.5 font-semibold text-brand-300">{plan.product_line}</span>}
                     <span>{plan.asset_requirements?.length || 0} asset briefs</span>
                   </div>
                 </div>

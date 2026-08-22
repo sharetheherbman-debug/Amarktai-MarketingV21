@@ -32,7 +32,7 @@ function assetPrompt(plan: Record<string, any>, brief: Record<string, any>, vari
 Use the validated strategy and business facts as the only source of claims. Preserve the offer, central concept and CTA while adapting structure and length to the specified channel. Never invent facts, statistics, testimonials, guarantees, certifications or prices.
 
 VALIDATED CAMPAIGN:
-${JSON.stringify({ brief: asObject(plan.brief), creative_concept: asObject(plan.creative_concept), messaging_plan: asObject(plan.messaging_plan), constraints: asObject(plan.constraints) }, null, 2)}
+${JSON.stringify({ product_line: plan.product_line || 'unclassified', brief: asObject(plan.brief), creative_concept: asObject(plan.creative_concept), messaging_plan: asObject(plan.messaging_plan), constraints: asObject(plan.constraints) }, null, 2)}
 
 ASSET BRIEF:
 ${JSON.stringify(brief, null, 2)}`;
@@ -57,12 +57,12 @@ export async function queueCampaignProduction(planId: string, orgId: string, use
       const operation = mediaOperation(String(brief.format || brief.content_type || ''));
       const inserted = await query(
         `INSERT INTO campaign_asset_runs
-           (organization_id,campaign_plan_id,brief_id,variant_number,generation_kind,status,created_by)
-         VALUES ($1,$2,$3,$4,$5,'planned',$6)
+           (organization_id,campaign_plan_id,brief_id,variant_number,product_line,generation_kind,status,created_by)
+         VALUES ($1,$2,$3,$4,$5,$6,'planned',$7)
          ON CONFLICT (campaign_plan_id,brief_id,variant_number)
-         DO UPDATE SET updated_at=NOW()
+         DO UPDATE SET product_line=COALESCE(campaign_asset_runs.product_line,EXCLUDED.product_line),updated_at=NOW()
          RETURNING *`,
-        [orgId, planId, briefId, variant, operation ? 'media' : 'text', userId]
+        [orgId, planId, briefId, variant, plan.product_line || null, operation ? 'media' : 'text', userId]
       );
       const existingRun = inserted.rows[0];
       if (['queueing','queued','processing','pending_control','completed'].includes(String(existingRun.status))) continue;
@@ -93,6 +93,7 @@ export async function queueCampaignProduction(planId: string, orgId: string, use
                 campaign_plan_id: planId,
                 brief_id: briefId,
                 variant_number: variant,
+                product_line: plan.product_line || null,
                 idempotency_key: `campaign-asset:${run.id}`,
                 quantity: Number(brief.duration_seconds || 1),
                 accessibility_text: brief.accessibility_requirements || [],
@@ -110,6 +111,7 @@ export async function queueCampaignProduction(planId: string, orgId: string, use
             prompt,
             campaign_plan_id: planId,
             brief_id: briefId,
+            product_line: plan.product_line || undefined,
             audience: JSON.stringify(asObject(plan.brief).audience_segments || []),
             objective: String(asObject(plan.brief).objective || plan.goal || ''),
             offer: String(asObject(plan.brief).offer || ''),
