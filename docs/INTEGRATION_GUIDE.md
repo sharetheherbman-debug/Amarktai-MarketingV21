@@ -194,3 +194,34 @@ interface IntegrationProvider {
 - [API Documentation](./API.md)
 - [Database Schema](./DATABASE.md)
 - [Architecture Overview](./ARCHITECTURE.md)
+
+## Application Connector
+
+The **Application Connector** is the generic, server-to-server integration surface for a trusted host product. It is separate from user-configured provider integrations. A host uses a deployment-managed application identifier and connector key, while Marketing stores only a derived key hash and rejects expired, malformed, or replayed signed requests.
+
+| Route | Signed request | Purpose | Idempotency behavior |
+| --- | --- | --- | --- |
+| `POST /api/v1/application-connectors/sso/issue` | Yes | Issues a short-lived Marketing SSO redirect for a trusted host administrator. | Each code is single-use and time-limited. |
+| `POST /api/v1/application-connectors/sso/redeem` | No; one-time code | Redeems an SSO code in the user’s browser. | Reused or expired codes are rejected. |
+| `POST /api/v1/application-connectors/events/conversion` | Yes | Records a consent-bounded conversion event. | `event_id` is unique per application; duplicate delivery returns `200`. |
+| `POST /api/v1/application-connectors/business-snapshot` | Yes | Records a versioned, authoritative business snapshot. | A matching canonical payload returns the current version without creating a duplicate. |
+
+All signed calls use `X-Application-Id`, `X-Application-Key`, `X-Application-Timestamp`, `X-Application-Nonce`, and `X-Application-Signature`. The signature is HMAC-SHA-256 over the Unix timestamp, nonce, and recursively key-sorted JSON body, each separated by a newline. Marketing accepts only requests within the configured clock-skew window and records nonces to prevent replay.
+
+The workspace package [`@amarktai/application-connector-sdk`](../packages/application-connector-sdk/README.md) implements this exact wire protocol for server-side hosts. It does not contain deployment credentials or customer-specific configuration. Hosts must send it only after their own durable transaction commits; delivery failures must be contained and cannot reverse payment, entitlement, membership, or fulfilment decisions.
+
+### Product-line context and attribution
+
+A host may send an optional `product_line` in conversion properties and business-snapshot records. Marketing persists that context through conversion storage, performance attribution, campaign plans, campaign assets, and Growth Director learning. The supplied value must be one of the product scopes enabled by the Marketing deployment; unclassified historic records remain valid but are never silently reclassified. Conversion events require an explicit `consent_basis` and should use pseudonymous or aggregate data wherever practical.
+
+### Deployment configuration
+
+Connector values are supplied only during controlled deployment. The host needs a Marketing base URL, application identifier, and connector key. Marketing needs its signing secret plus the corresponding host connector configuration. Never place a connector key in browser code, a repository, a log, or a user-visible response.
+
+## References
+
+[1] [Application Connector SDK](../packages/application-connector-sdk/README.md)
+
+[2] [Application Connector server routes](../apps/api/src/routes/application-connectors.ts)
+
+[3] [Application Connector authentication and persistence service](../apps/api/src/services/application-connector.service.ts)

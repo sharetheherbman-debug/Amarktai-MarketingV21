@@ -77,4 +77,27 @@ describe('EquiProfile connector wire contract', () => {
     expect(service).toContain('BUSINESS_SNAPSHOT_PRODUCT_LINE_INVALID');
     expect(service).toContain("['management', 'academy', 'shop']");
   });
+
+  test('reusable SDK preserves the canonical signed wire protocol without product branding', () => {
+    const sdk = read('packages/application-connector-sdk/src/index.ts');
+    const sdkGuide = read('packages/application-connector-sdk/README.md');
+
+    for (const header of [
+      'X-Application-Id',
+      'X-Application-Key',
+      'X-Application-Timestamp',
+      'X-Application-Nonce',
+      'X-Application-Signature',
+    ]) expect(sdk).toContain(header);
+
+    expect(sdk).toContain('Object.keys(object).sort()');
+    expect(sdk).toContain("createHmac('sha256', key)");
+    expect(sdk).toContain("'/sso/issue'");
+    expect(sdk).toContain("'/events/conversion'");
+    expect(sdk).toContain("'/business-snapshot'");
+    expect(sdk).toContain("randomBytes(24).toString('base64url')");
+    expect(sdk).not.toContain('equiprofile');
+    expect(sdkGuide).toContain('post-commit boundary');
+    expect(sdkGuide).toContain('must not reverse an order, subscription, membership, access decision');
+  });
 });

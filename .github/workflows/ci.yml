@@ -2,9 +2,9 @@ name: CI/CD Pipeline
 
 on:
   push:
-    branches: [master, development]
+    branches: [master, development, phase-1/small-medium-completion]
   pull_request:
-    branches: [master, development]
+    branches: [master, development, phase-1/small-medium-completion]
 
 permissions:
   contents: write
@@ -61,6 +61,8 @@ jobs:
         run: cd apps/api && npx tsc --noEmit
       - name: Check Web TypeScript
         run: cd apps/web && npx tsc --noEmit
+      - name: Build reusable Application Connector SDK
+        run: npm run build --workspace=@amarktai/application-connector-sdk
 
   build:
     name: Production Build
@@ -79,6 +81,8 @@ jobs:
         env:
           NEXT_PUBLIC_API_URL: /api
         run: cd apps/web && npm run build
+      - name: Build reusable Application Connector SDK
+        run: npm run build --workspace=@amarktai/application-connector-sdk
 
   test:
     name: Run Tests
