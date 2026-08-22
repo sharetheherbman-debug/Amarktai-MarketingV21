@@ -15,7 +15,6 @@ describe('generic multi-product campaign propagation', () => {
   const campaignRoute = source('src/routes/campaigns.ts');
   const campaignAiRoute = source('src/routes/campaign-ai.ts');
   const validation = source('src/utils/validation.ts');
-  const worker = source('src/workers/generation-worker.ts');
   const plannerUi = readFileSync(resolve(root, '../web/app/(dashboard)/campaign-planner/page.tsx'), 'utf8');
 
   it('keeps legacy migration history immutable and adds a forward generic multi-scope migration', () => {
@@ -68,11 +67,11 @@ describe('generic multi-product campaign propagation', () => {
     expect(campaignAiRoute).not.toContain("product_line must be management, academy, or shop");
   });
 
-  it('propagates multi-scope context into durable asset runs and generated content', () => {
-    expect(production).toContain('product_lines');
+  it('propagates multi-scope context into durable asset runs and every queued generation request', () => {
+    expect(production).toContain('(organization_id,campaign_plan_id,brief_id,variant_number,product_line,product_lines,generation_kind,status,created_by)');
+    expect(production).toContain('product_lines: productLines');
+    expect(production).toContain('product_lines: productLines,');
     expect(production).toContain('normalizeProductScopes');
-    expect(worker).toContain('product_lines');
-    expect(worker).toContain('product_line');
   });
 
   it('exposes reusable multi-product scope in the Campaign Planner UI', () => {
