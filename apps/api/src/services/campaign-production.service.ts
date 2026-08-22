@@ -114,7 +114,7 @@ export async function queueCampaignProduction(planId: string, orgId: string, use
             [generation.id, run.id]
           );
         } else {
-          const request: GenerateContentRequest = {
+          const request = {
             type: contentType(String(brief.format || ''), String(brief.platform || '')),
             platform: (brief.platform || undefined) as ContentPlatform | undefined,
             title: `${String(plan.name)} - ${String(brief.purpose || brief.format || briefId)} - variation ${variant}`,
@@ -122,13 +122,14 @@ export async function queueCampaignProduction(planId: string, orgId: string, use
             campaign_plan_id: planId,
             brief_id: briefId,
             product_line: (productLine || undefined) as GenerateContentRequest['product_line'],
+            product_lines: productLines,
             audience: JSON.stringify(asObject(plan.brief).audience_segments || []),
             objective: String(asObject(plan.brief).objective || plan.goal || ''),
             offer: String(asObject(plan.brief).offer || ''),
             calls_to_action: asObject(plan.brief).calls_to_action || [],
             prohibited_claims: asObject(plan.constraints).prohibited_claims || [],
             idempotency_key: `campaign-asset:${run.id}`,
-          };
+          } as GenerateContentRequest & { product_lines: string[] };
           const job = await generationQueue.add('campaign-text', {
             kind: 'campaign-text', runId: run.id, organizationId: orgId, userId, request,
           }, {
