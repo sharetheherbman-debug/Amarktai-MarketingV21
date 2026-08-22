@@ -20,6 +20,23 @@ const cookieOptions = {
   path: '/',
 };
 
+router.post('/health', async (req: Request, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
+  try {
+    const application = await authenticateApplicationRequest(req, req.body || {});
+    res.json({
+      success: true,
+      data: {
+        connected: true,
+        application_id: application.applicationId,
+        application_name: application.name,
+        connector_version: 2,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 router.post('/sso/issue', async (req: Request, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
   try {
     const application = await authenticateApplicationRequest(req, req.body);
