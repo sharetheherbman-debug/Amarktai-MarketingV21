@@ -7,7 +7,13 @@ import { hashPassword } from '../utils/encryption';
 import { generateAccessToken, generateRefreshToken } from '../utils/jwt';
 import { logger } from '../utils/logger';
 
-export type HostProductLine = 'management' | 'academy' | 'shop';
+/**
+ * Generic product/service scope key supplied by a connected application.
+ * Examples: management, academy, shop, crm-pro, payroll, consulting.
+ */
+export type ProductScopeKey = string;
+/** LEGACY_COMPAT_ONLY: historical name retained for existing imports. */
+export type HostProductLine = ProductScopeKey;
 
 export interface TrustedApplication {
   applicationId: string;
@@ -45,7 +51,7 @@ export interface BusinessSnapshotPayload {
     domain: string;
     description?: string;
     status?: string;
-    product_lines?: HostProductLine[];
+    product_lines?: ProductScopeKey[];
   };
   products?: Array<Record<string, unknown>>;
   plans?: Array<Record<string, unknown>>;
@@ -97,18 +103,25 @@ function canonicalize(value: unknown): string {
   return `{${Object.keys(object).sort().map((key) => `${JSON.stringify(key)}:${canonicalize(object[key])}`).join(',')}}`;
 }
 
-export function normalizeProductLine(value: unknown): HostProductLine | null {
+export function normalizeProductLine(value: unknown): ProductScopeKey | null {
   const normalized = String(value || '').trim().toLowerCase();
-  return ['management', 'academy', 'shop'].includes(normalized) ? (normalized as HostProductLine) : null;
+  return /^[a-z0-9][a-z0-9_-]{0,63}$/.test(normalized) ? normalized : null;
+}
+
+export function normalizeProductLines(value: unknown): ProductScopeKey[] {
+  const values = Array.isArray(value) ? value : value == null || value === '' ? [] : [value];
+  if (values.length > 32) {
+    throw new AppError(400, 'No more than 32 product/service scopes may be supplied', 'PRODUCT_SCOPE_TOO_LARGE');
+  }
+  const normalized = values.map((item) => normalizeProductLine(item));
+  if (normalized.some((item) => !item)) {
+    throw new AppError(400, 'Product/service scopes must be lowercase slug keys', 'PRODUCT_SCOPE_INVALID');
+  }
+  return [...new Set(normalized as string[])];
 }
 
 function validateSnapshotProductLines(payload: BusinessSnapshotPayload): void {
-  const declared = payload.app.product_lines || [];
-  for (const productLine of declared) {
-    if (!normalizeProductLine(productLine)) {
-      throw new AppError(400, 'Business snapshot contains an unsupported product line', 'BUSINESS_SNAPSHOT_PRODUCT_LINE_INVALID');
-    }
-  }
+  normalizeProductLines(payload.app.product_lines || []);
   for (const collection of [
     payload.products,
     payload.plans,
@@ -119,9 +132,8 @@ function validateSnapshotProductLines(payload: BusinessSnapshotPayload): void {
     payload.status_changes,
   ]) {
     for (const record of collection || []) {
-      if (record.product_line !== undefined && !normalizeProductLine(record.product_line)) {
-        throw new AppError(400, 'Business snapshot record contains an unsupported product line', 'BUSINESS_SNAPSHOT_PRODUCT_LINE_INVALID');
-      }
+      if (record.product_line !== undefined) normalizeProductLines(record.product_line);
+      if (record.product_lines !== undefined) normalizeProductLines(record.product_lines);
     }
   }
 }
@@ -400,16 +412,16 @@ export async function recordConversionEvent(application: TrustedApplication, pay
   }
 
   const properties = payload.properties || {};
-  const productLine = normalizeProductLine(properties.product_line);
-  if (properties.product_line !== undefined && !productLine) {
-    throw new AppError(400, 'Conversion event contains an unsupported product_line', 'CONVERSION_PRODUCT_LINE_INVALID');
-  }
+  const productLines = normalizeProductLines(
+    properties.product_lines !== undefined ? properties.product_lines : properties.product_line,
+  );
+  const productLine = productLines.length === 1 ? productLines[0] : null;
 
   const result = await query(
-      `INSERT INTO application_conversion_events
+    `INSERT INTO application_conversion_events
        (application_id,event_id,event_type,occurred_at,external_user_id,
-        external_organization_id,value_pence,currency,consent_basis,product_line,properties)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,'GBP',$8,$9,$10)
+        external_organization_id,value_pence,currency,consent_basis,product_line,product_lines,properties)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,'GBP',$8,$9,$10,$11)
      ON CONFLICT (application_id,event_id) DO NOTHING
      RETURNING id`,
     [
@@ -420,9 +432,10 @@ export async function recordConversionEvent(application: TrustedApplication, pay
       payload.external_user_id || null,
       payload.external_organization_id || null,
       payload.value_pence ?? null,
-        payload.consent_basis,
-        productLine,
-        JSON.stringify(properties),
+      payload.consent_basis,
+      productLine,
+      JSON.stringify(productLines),
+      JSON.stringify({ ...properties, product_lines: productLines, ...(productLine ? { product_line: productLine } : {}) }),
     ]
   );
   const connector = await query('SELECT default_organization_id FROM application_connectors WHERE id=$1', [application.connectorId]);
@@ -432,8 +445,8 @@ export async function recordConversionEvent(application: TrustedApplication, pay
     await query(
       `INSERT INTO marketing_performance_events
          (organization_id,event_id,event_type,occurred_at,campaign_id,campaign_plan_id,
-          content_id,platform,source,medium,variation_id,pseudonymous_subject,value_pence,product_line,metrics)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+          content_id,platform,source,medium,variation_id,pseudonymous_subject,value_pence,product_line,product_lines,metrics)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
        ON CONFLICT (organization_id,event_id) DO NOTHING`,
       [
         organizationId, crypto.createHash('sha256').update(`${application.applicationId}:${payload.event_id}`).digest('hex'), payload.event_type, occurredAt,
@@ -445,9 +458,11 @@ export async function recordConversionEvent(application: TrustedApplication, pay
         payload.external_user_id ? hashOpaqueValue(`${application.applicationId}:${payload.external_user_id}`) : null,
         payload.value_pence || 0,
         productLine,
+        JSON.stringify(productLines),
         JSON.stringify({
           event_type: payload.event_type,
           consent_basis: payload.consent_basis,
+          product_lines: productLines,
           ...(productLine ? { product_line: productLine } : {}),
           ...(properties.entity_type ? { entity_type: String(properties.entity_type) } : {}),
         }),
@@ -459,12 +474,13 @@ export async function recordConversionEvent(application: TrustedApplication, pay
        VALUES ($1,'conversion','conversion_signal','minor',$2,$3)`,
       [
         organizationId,
-        `${productLine || 'unclassified'} conversion signal received`,
+        `${productLines.join('+') || 'unclassified'} conversion signal received`,
         JSON.stringify({
           application_id: application.applicationId,
           event_id: payload.event_id,
           event_type: payload.event_type,
           product_line: productLine,
+          product_lines: productLines,
           occurred_at: occurredAt.toISOString(),
         }),
       ]
@@ -521,7 +537,7 @@ export async function recordBusinessSnapshot(
       `INSERT INTO marketing_change_events
          (organization_id,source_type,event_type,materiality,summary,payload)
        VALUES ($1,'connector','structured_business_change','material',$2,$3)`,
-      [organizationId, `${application.name} business knowledge advanced to version ${version}`, JSON.stringify({ application_id: application.applicationId, version, snapshot_id: payload.snapshot_id, occurred_at: occurredAt.toISOString(), product_lines: payload.app.product_lines || [] })]
+      [organizationId, `${application.name} business knowledge advanced to version ${version}`, JSON.stringify({ application_id: application.applicationId, version, snapshot_id: payload.snapshot_id, occurred_at: occurredAt.toISOString(), product_lines: normalizeProductLines(payload.app.product_lines || []) })]
     );
     return { accepted: true, duplicate: false, version, material_change: true };
   });
