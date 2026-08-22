@@ -27,14 +27,16 @@ const marketing = new ApplicationConnectorClient({
   connectorKey: process.env.HOST_APP_CONNECTOR_KEY!,
 });
 
-await marketing.recordConversion({
+await marketing.testConnection();
+
+await marketing.publishConversion({
   event_id: crypto.randomUUID(),
   event_type: 'subscription_started',
   occurred_at: new Date().toISOString(),
   external_organization_id: 'org_123',
   consent_basis: 'contract',
   properties: {
-    product_line: 'subscriptions',
+    product_lines: ['subscriptions', 'premium-support'],
     entity_type: 'subscription',
   },
 });
@@ -48,16 +50,23 @@ All routes are rooted at `/api/v1/application-connectors`.
 
 | Method and path | Authentication | Result |
 | --- | --- | --- |
+| `POST /health` | Signed | Verifies the connector identity/signing path without mutating business data. |
 | `POST /sso/issue` | Signed | Creates a short-lived Marketing SSO redirect for a host `admin` or `superadmin`. |
 | `POST /sso/redeem` | One-time code | Redeems a browser-facing SSO code. This endpoint is intentionally not SDK-signed. |
 | `POST /events/conversion` | Signed | Stores an idempotent, GBP-denominated conversion signal. |
 | `POST /business-snapshot` | Signed | Stores a versioned current business-knowledge snapshot. |
 
-`recordConversion` and `recordBusinessSnapshot` return HTTP `201` for a new event and `200` for an idempotent duplicate. A `409 APPLICATION_REPLAY_DETECTED` means the nonce was already used and the host must create a new signed request rather than retrying headers.
+`publishConversion`/`recordConversion` and `publishBusinessSnapshot`/`recordBusinessSnapshot` return HTTP `201` for a new record and `200` for an idempotent duplicate. A `409 APPLICATION_REPLAY_DETECTED` means the nonce was already used; each safe retry is re-signed with a fresh timestamp/nonce.
 
-## Product-line scope and consent
+## Product/service scope and consent
 
-`product_line` is optional context, not a brand or tenant credential. Hosts should use a stable lowercase product scope and must match the values permitted by their Marketing deployment. Conversion payloads require an explicit `consent_basis`; hosts must not invent consent or transfer direct identifiers unless the basis and data-minimization rules allow it.
+`product_lines` is the canonical optional array of product/service scope keys. Keys are host-defined lowercase slugs; Marketing does **not** require EquiProfile-specific names. A campaign can therefore target one product, any combination of products, or remain unscoped. The legacy scalar `product_line` is retained only for backward compatibility when exactly one scope is present.
+
+Examples include `management`, `crm-pro`, `consulting`, or `premium-membership`. Hosts should keep keys stable after publishing them. Conversion payloads require an explicit `consent_basis`; hosts must not invent consent or transfer direct identifiers unless the basis and data-minimization rules allow it.
+
+## Reliability
+
+The server-side client applies a bounded request timeout and retries only retry-safe failures such as network errors, HTTP `408`, `429`, and `5xx`. Each retry receives a fresh nonce/signature. Non-retryable application errors fail immediately with a typed `ApplicationConnectorError`.
 
 ## Deployment configuration
 
@@ -71,4 +80,4 @@ Build the SDK with:
 npm run build --workspace=@amarktai/application-connector-sdk
 ```
 
-The Marketing API’s connector contract tests verify that the SDK continues to use the exact canonical headers, sorted JSON signature convention, route root, and replay-safe request shape.
+The Marketing API connector and product-scope tests verify the canonical headers/signature convention, replay protection, generic multi-scope contract, durable attribution, and route root.
