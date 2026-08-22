@@ -1,227 +1,215 @@
-# Integration Guide
+# AmarktAI Marketing Integration Guide
 
-AmarktAI Marketing Integration & Omnichannel Automation Platform
+## Purpose
 
-## Overview
+AmarktAI Marketing has two separate integration surfaces:
 
-The Integration Framework provides a unified connector system for publishing, syncing, and automating across 21+ marketing platforms. Every connector implements the shared SDK interface with consistent authentication, health monitoring, rate limiting, and audit logging.
+1. **Application Connector** — trusted server-to-server integration between a host application and its Marketing workspace.
+2. **Provider integrations** — user/owner-configured marketing destinations and data sources such as social, email, analytics, CMS, calendars and webhooks.
 
-## Architecture
+The two surfaces must not share deployment secrets or failure domains.
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    Integration Framework                     │
-├─────────────────────────────────────────────────────────────┤
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐      │
-│  │  Providers    │  │  Connections │  │  Sync Logs   │      │
-│  │  Registry     │  │  Manager     │  │  & Audit     │      │
-│  └──────────────┘  └──────────────┘  └──────────────┘      │
-├─────────────────────────────────────────────────────────────┤
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐      │
-│  │  Webhooks    │  │  Email       │  │  Import/     │      │
-│  │  Engine      │  │  Providers   │  │  Export      │      │
-│  └──────────────┘  └──────────────┘  └──────────────┘      │
-└─────────────────────────────────────────────────────────────┘
-```
-
-## Supported Providers
-
-### CMS Connectors (M6.2)
-| Provider | Auth | Capabilities |
-|----------|------|--------------|
-| WordPress | API Key | publish, draft, update, media, categories, tags, seo |
-| Webflow | API Key | publish, draft, update |
-| Ghost | API Key | publish, draft, update, tags |
-
-### Social Media Connectors (M6.3)
-| Provider | Auth | Capabilities |
-|----------|------|--------------|
-| Facebook Pages | OAuth2 | publish, schedule, analytics, media |
-| Instagram Business | OAuth2 | publish, schedule, analytics, media |
-| LinkedIn Pages | OAuth2 | publish, schedule, analytics |
-| X (Twitter) | OAuth2 | publish, schedule, analytics |
-| YouTube | OAuth2 | upload, schedule, analytics |
-| Pinterest | OAuth2 | publish, schedule, analytics |
-
-### Google Ecosystem (M6.4)
-| Provider | Auth | Capabilities |
-|----------|------|--------------|
-| Google Analytics 4 | OAuth2 | traffic, conversions, events |
-| Google Search Console | OAuth2 | keywords, impressions, clicks, ctr |
-| Google Business Profile | OAuth2 | profile, reviews, posts |
-| Google Calendar | OAuth2 | events, reminders |
-| Google Drive | OAuth2 | upload, folders |
-
-### Email Providers (M6.5)
-| Provider | Auth | Capabilities |
-|----------|------|--------------|
-| SMTP | Basic | email |
-| Gmail | OAuth2 | email |
-| Microsoft 365 | OAuth2 | email, calendar |
-| Mailgun | API Key | email, tracking, bounces |
-| SendGrid | API Key | email, tracking, templates |
-| Amazon SES | API Key | email |
-
-### Calendar Providers (M6.6)
-| Provider | Auth | Capabilities |
-|----------|------|--------------|
-| Google Calendar | OAuth2 | events, reminders |
-| Outlook Calendar | OAuth2 | events, reminders |
-
-## API Endpoints
-
-### Providers
-```
-GET  /api/v1/integrations/providers          # List available providers
-GET  /api/v1/integrations/providers?category=cms  # Filter by category
-```
-
-### Connections
-```
-GET    /api/v1/integrations/connections           # List connections
-GET    /api/v1/integrations/connections/:id       # Get connection
-POST   /api/v1/integrations/connections           # Create connection
-PUT    /api/v1/integrations/connections/:id       # Update connection
-DELETE /api/v1/integrations/connections/:id       # Delete connection
-POST   /api/v1/integrations/connections/:id/test  # Test connection
-GET    /api/v1/integrations/health                # Health check all
-```
-
-### Sync Logs
-```
-GET  /api/v1/integrations/logs                   # Get sync logs
-GET  /api/v1/integrations/logs?connection_id=xxx # Filter by connection
-```
-
-### Webhooks
-```
-GET    /api/v1/integrations/webhooks/incoming     # List incoming webhooks
-POST   /api/v1/integrations/webhooks/incoming     # Create incoming webhook
-DELETE /api/v1/integrations/webhooks/incoming/:id # Delete incoming webhook
-
-GET    /api/v1/integrations/webhooks/outgoing     # List outgoing webhooks
-POST   /api/v1/integrations/webhooks/outgoing     # Create outgoing webhook
-DELETE /api/v1/integrations/webhooks/outgoing/:id # Delete outgoing webhook
-
-GET    /api/v1/integrations/webhooks/deliveries   # Get delivery history
-```
-
-### Email Providers
-```
-GET  /api/v1/integrations/email-providers        # List email providers
-POST /api/v1/integrations/email-providers        # Create email provider
-```
-
-### Import/Export
-```
-GET  /api/v1/integrations/import-export          # List jobs
-POST /api/v1/integrations/import-export          # Create job
-GET  /api/v1/integrations/import-export/:id      # Get job status
-```
-
-## Database Schema
-
-### Tables
-- `integration_providers` - Available integration providers (seeded)
-- `integration_connections` - User-configured connections
-- `integration_sync_logs` - Audit trail for all sync operations
-- `webhooks_incoming` - Incoming webhook configurations
-- `webhooks_outgoing` - Outgoing webhook configurations
-- `webhook_deliveries` - Webhook delivery history
-- `analytics_google` - Google Analytics data cache
-- `analytics_search_console` - Google Search Console data cache
-- `email_providers` - Email provider configurations
-- `import_export_jobs` - Import/export job tracking
-
-### Indexes
-All high-volume queries are indexed for performance:
-- Organization-scoped queries
-- Status-based filtering
-- Date-range queries
-- Connection lookups
-
-## Frontend Pages
-
-### Integrations Dashboard (`/integrations`)
-- Provider browser with category filtering
-- Connection management with health status
-- Quick actions for testing and configuring
-
-### Webhook Management (`/integrations/webhooks`)
-- Incoming webhook configuration
-- Outgoing webhook setup
-- Delivery history and retry status
-
-### Import/Export (`/integrations/import-export`)
-- CSV, Excel, JSON format support
-- Entity type selection (contacts, companies, deals, content, campaigns)
-- Job progress tracking
-
-## Adding a New Connector
-
-To add a new integration provider:
-
-1. **Add provider to database seed** in `007_integrations.sql`:
-```sql
-INSERT INTO integration_providers (slug, name, category, description, auth_type, capabilities)
-VALUES ('my_provider', 'My Provider', 'cms', 'Description', 'api_key', '["publish","draft"]');
-```
-
-2. **Implement connector logic** following the IntegrationProvider interface:
-```typescript
-interface IntegrationProvider {
-  id: string;
-  slug: string;
-  name: string;
-  category: string;
-  auth_type: 'oauth2' | 'api_key' | 'basic' | 'none';
-  capabilities: string[];
-}
-```
-
-3. **Use existing service methods** for connection management, health checks, and sync logging.
-
-## Security
-
-- All connections store encrypted auth data
-- Webhook secrets for signature validation
-- Rate limiting per connection
-- Audit logging for all operations
-- Permission scoping per connection
-
-## Related Documentation
-
-- [API Documentation](./API.md)
-- [Database Schema](./DATABASE.md)
-- [Architecture Overview](./ARCHITECTURE.md)
+---
 
 ## Application Connector
 
-The **Application Connector** is the generic, server-to-server integration surface for a trusted host product. It is separate from user-configured provider integrations. A host uses a deployment-managed application identifier and connector key, while Marketing stores only a derived key hash and rejects expired, malformed, or replayed signed requests.
+The Application Connector is the reusable white-label integration for any trusted host application. EquiProfile Management is one host example; the protocol does not depend on EquiProfile-specific product names.
 
-| Route | Signed request | Purpose | Idempotency behavior |
-| --- | --- | --- | --- |
-| `POST /api/v1/application-connectors/sso/issue` | Yes | Issues a short-lived Marketing SSO redirect for a trusted host administrator. | Each code is single-use and time-limited. |
-| `POST /api/v1/application-connectors/sso/redeem` | No; one-time code | Redeems an SSO code in the user’s browser. | Reused or expired codes are rejected. |
-| `POST /api/v1/application-connectors/events/conversion` | Yes | Records a consent-bounded conversion event. | `event_id` is unique per application; duplicate delivery returns `200`. |
-| `POST /api/v1/application-connectors/business-snapshot` | Yes | Records a versioned, authoritative business snapshot. | A matching canonical payload returns the current version without creating a duplicate. |
+### Security contract
 
-All signed calls use `X-Application-Id`, `X-Application-Key`, `X-Application-Timestamp`, `X-Application-Nonce`, and `X-Application-Signature`. The signature is HMAC-SHA-256 over the Unix timestamp, nonce, and recursively key-sorted JSON body, each separated by a newline. Marketing accepts only requests within the configured clock-skew window and records nonces to prevent replay.
+Signed requests use:
 
-The workspace package [`@amarktai/application-connector-sdk`](../packages/application-connector-sdk/README.md) implements this exact wire protocol for server-side hosts. It does not contain deployment credentials or customer-specific configuration. Hosts must send it only after their own durable transaction commits; delivery failures must be contained and cannot reverse payment, entitlement, membership, or fulfilment decisions.
+- `X-Application-Id`
+- `X-Application-Key`
+- `X-Application-Timestamp`
+- `X-Application-Nonce`
+- `X-Application-Signature`
 
-### Product-line context and attribution
+`X-Application-Signature` is HMAC-SHA-256 over:
 
-A host may send an optional `product_line` in conversion properties and business-snapshot records. Marketing persists that context through conversion storage, performance attribution, campaign plans, campaign assets, and Growth Director learning. The supplied value must be one of the product scopes enabled by the Marketing deployment; unclassified historic records remain valid but are never silently reclassified. Conversion events require an explicit `consent_basis` and should use pseudonymous or aggregate data wherever practical.
+```text
+timestamp + "\n" + nonce + "\n" + canonical-json-body
+```
 
-### Deployment configuration
+Canonical JSON recursively sorts object keys and preserves array order. Marketing rejects expired timestamps, invalid signatures, unknown/disabled connectors and replayed nonces.
 
-Connector values are supplied only during controlled deployment. The host needs a Marketing base URL, application identifier, and connector key. Marketing needs its signing secret plus the corresponding host connector configuration. Never place a connector key in browser code, a repository, a log, or a user-visible response.
+Connector keys are server-side deployment secrets. They must never appear in browser bundles, repositories, logs or user-visible errors.
+
+### Routes
+
+All connector routes are rooted at `/api/v1/application-connectors`.
+
+| Route | Signed | Purpose |
+| --- | --- | --- |
+| `POST /health` | Yes | Non-business-data connection/signing test. |
+| `POST /sso/issue` | Yes | Issues a short-lived owner/admin SSO redirect. |
+| `POST /sso/redeem` | No — one-time code | Redeems the browser-facing SSO code. |
+| `POST /events/conversion` | Yes | Records an idempotent conversion/performance signal. |
+| `POST /business-snapshot` | Yes | Stores a versioned authoritative host-business snapshot. |
+
+### Failure isolation
+
+Host applications should publish connector events **after** their own durable transaction commits. A Marketing outage or connector timeout must not reverse a host payment, entitlement, membership, order, fulfilment, access or account decision.
+
+The SDK retries only retry-safe failures and re-signs every retry with a fresh nonce.
+
+---
+
+## Generic multi-product/service scope
+
+`product_lines` is the canonical optional array of host-defined product/service scope keys.
+
+Examples:
+
+```json
+{
+  "product_lines": ["crm-pro", "consulting"]
+}
+```
+
+or, for EquiProfile Management:
+
+```json
+{
+  "product_lines": ["management"]
+}
+```
+
+Rules:
+
+- keys are normalized stable lowercase slugs;
+- a campaign can target one scope, multiple scopes or remain unscoped;
+- Marketing does not maintain a fixed global product enum;
+- the legacy scalar `product_line` is compatibility-only and represents a campaign/event only when exactly one canonical scope exists;
+- historical unclassified records are never silently assigned to a product;
+- combined-scope prompts are required to keep facts/offers correctly attributed to the product they belong to.
+
+The canonical scope is propagated through connector conversions, business snapshots, campaign plans, campaign asset runs, generation jobs, Growth Director opportunity selection, attribution and performance learning.
+
+Migration `034_generic_multi_product_scope.sql` is additive and preserves legacy scalar data while introducing canonical JSON arrays. It must be applied through the normal controlled Marketing migration process after database backup and pre-deployment inspection.
+
+---
+
+## Business snapshots
+
+A business snapshot is versioned by canonical payload fingerprint. An unchanged snapshot is idempotent rather than creating a new knowledge version.
+
+The host can declare scope at the app level and on individual records:
+
+```json
+{
+  "snapshot_id": "host-business-2026-08-22",
+  "occurred_at": "2026-08-22T12:00:00.000Z",
+  "app": {
+    "id": "host-app",
+    "name": "Host App",
+    "domain": "example.com",
+    "product_lines": ["crm-pro", "consulting"]
+  },
+  "products": [
+    {"name": "CRM Pro", "product_line": "crm-pro"},
+    {"name": "Consulting", "product_line": "consulting"}
+  ],
+  "authoritative_fields": ["products", "plans", "pricing", "features", "offers"]
+}
+```
+
+Only current, approved business facts should be published as authoritative. Do not place passwords, API keys, payment details, health data or unrelated personal data in snapshots.
+
+---
+
+## Conversion and attribution events
+
+Conversion events require:
+
+- `event_id`
+- `event_type`
+- `occurred_at`
+- `consent_basis`
+
+`event_id` is unique per application so retries are idempotent. GBP value can be supplied as integer `value_pence` when relevant.
+
+Use `properties.product_lines` for canonical multi-scope attribution. `properties.product_line` remains accepted for old single-scope clients.
+
+Prefer pseudonymous or aggregate subject identifiers. A valid consent/legal basis must never be inferred or fabricated by Marketing.
+
+---
+
+## SDK
+
+Use the server-side workspace package:
+
+`@amarktai/application-connector-sdk`
+
+Key methods:
+
+- `testConnection()`
+- `issueSso()`
+- `publishConversion()` / `recordConversion()`
+- `publishEvent()`
+- `publishBusinessSnapshot()` / `recordBusinessSnapshot()`
+
+The SDK enforces production HTTPS/secret requirements, request timeout, canonical signing, bounded retry/backoff and typed connector errors.
+
+See [`packages/application-connector-sdk/README.md`](../packages/application-connector-sdk/README.md).
+
+---
+
+## Provider integrations
+
+Provider integrations are configured independently from host Application Connectors. The repository contains integration routes/services for areas including:
+
+- social publishing and performance sync;
+- email delivery/provider configuration;
+- CMS/web publishing;
+- analytics/search data;
+- calendars;
+- inbound/outbound webhooks;
+- import/export and external platform connections.
+
+Availability of a specific live provider depends on its required OAuth/API credentials, provider-side approval and the current connection health state. The product must show an unavailable/needs-setup state rather than reporting false success when credentials are absent.
+
+### Provider API surface
+
+Common integration routes are under `/api/v1/integrations`, including provider discovery, connection management, connection testing, health, logs, webhooks and import/export.
+
+External publishing remains subject to existing owner approval/control policies. A generated or approved Marketing asset is not proof that a third-party network accepted or published it.
+
+---
+
+## Deployment configuration
+
+A host needs, at minimum:
+
+- Marketing base URL;
+- stable host application ID;
+- strong connector key.
+
+Marketing needs:
+
+- `APPLICATION_CONNECTOR_SIGNING_SECRET`;
+- the matching connector registry/configuration;
+- its own DB/Redis/session configuration;
+- provider-specific credentials only for providers that are intentionally activated.
+
+Do not reuse Marketing database/session secrets in the host application.
+
+Before activating a host connector:
+
+1. deploy both exact approved SHAs;
+2. run each service's health/readiness checks;
+3. run the signed connector `testConnection()` path;
+4. provision/redeem owner SSO;
+5. publish a non-sensitive business snapshot;
+6. send an idempotent test conversion;
+7. verify Marketing receives the correct application and `product_lines` scope;
+8. verify a simulated Marketing failure does not roll back the host transaction.
+
+---
 
 ## References
 
-[1] [Application Connector SDK](../packages/application-connector-sdk/README.md)
-
-[2] [Application Connector server routes](../apps/api/src/routes/application-connectors.ts)
-
-[3] [Application Connector authentication and persistence service](../apps/api/src/services/application-connector.service.ts)
+- [Application Connector SDK](../packages/application-connector-sdk/README.md)
+- [Application Connector routes](../apps/api/src/routes/application-connectors.ts)
+- [Application Connector service](../apps/api/src/services/application-connector.service.ts)
+- [Generic multi-product migration](../apps/api/src/db/migrations/034_generic_multi_product_scope.sql)
