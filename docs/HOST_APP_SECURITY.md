@@ -59,6 +59,12 @@ Production Marketing and host application URLs must use HTTPS. TLS termination/p
 
 Do not send connector requests directly to an unencrypted public HTTP endpoint.
 
+## Runtime and dependency baseline
+
+Production application images use the supported Node.js 22 LTS line. The pull-request pipeline regenerates the npm lockfile from reviewed direct-dependency pins, runs TypeScript/tests/builds on that locked graph, and rejects high-severity `npm audit` findings before a candidate may be frozen.
+
+Security-sensitive direct upload middleware is pinned to the maintained Multer 2.2.0 line with matching TypeScript declarations. Dependency upgrades are accepted only after the complete release pipeline passes on the resulting exact commit SHA.
+
 ## Secret requirements and rotation
 
 Production connector/signing secrets must be at least 32 characters and must not use placeholder values.
