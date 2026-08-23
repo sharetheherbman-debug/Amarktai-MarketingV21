@@ -20,6 +20,20 @@ describe('production deployment contract', () => {
     expect(compose).toContain('FIRST_RUN: ${FIRST_RUN:-false}');
   });
 
+  test('reverse proxies resolve Compose service names rather than fixed container names', () => {
+    const nginx = read('docker/nginx/nginx.conf');
+    const caddy = read('docker/caddy/Caddyfile');
+
+    expect(nginx).toContain('server web:3000;');
+    expect(nginx).toContain('server api:4000;');
+    expect(nginx).not.toContain('amarktai-web:3000');
+    expect(nginx).not.toContain('amarktai-api:4000');
+    expect(caddy).toContain('ask http://api:4000/api/v1/white-label/domains/authorize');
+    expect(caddy).toContain('reverse_proxy nginx:80');
+    expect(caddy).not.toContain('amarktai-api:4000');
+    expect(caddy).not.toContain('amarktai-nginx:80');
+  });
+
   test('white-label browser variables are passed into the production Next.js build', () => {
     const compose = read('docker/docker-compose.yml');
     const dockerfile = read('apps/web/Dockerfile');
@@ -46,6 +60,20 @@ describe('production deployment contract', () => {
       expect(source).not.toContain('FROM node:20');
     }
     expect(rootPackage).toContain('"node": ">=22.0.0"');
+  });
+
+  test('CI validates the generic production contract without legacy host defaults', () => {
+    const workflow = read('.github/workflows/ci.yml');
+
+    expect(workflow).toContain('actions/checkout@v5');
+    expect(workflow).toContain('actions/setup-node@v5');
+    expect(workflow).toContain('HOST_APP_CONNECTOR_KEY:');
+    expect(workflow).toContain('HOST_APP_ID: ci-host');
+    expect(workflow).toContain('HOST_APP_URL: https://app.example.com');
+    expect(workflow).toContain('SMTP_FROM: CI Marketing <noreply@example.com>');
+    expect(workflow).not.toContain('EQUIPROFILE_CONNECTOR_KEY: docker-');
+    expect(workflow).toContain('--add-host web:127.0.0.1');
+    expect(workflow).toContain('--add-host api:127.0.0.1');
   });
 
   test('release gate pins exact SHA and requires generic host connector configuration', () => {
