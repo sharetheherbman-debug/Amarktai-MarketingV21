@@ -14,6 +14,7 @@ describe('reusable Application Connector release boundaries', () => {
     expect(service).toContain("requiredConnectorSecret(['HOST_APP_CONNECTOR_KEY', 'EQUIPROFILE_CONNECTOR_KEY']");
     expect(service).toContain("requiredConnectorSecret(['APPLICATION_CONNECTOR_SIGNING_SECRET']");
     expect(service).toContain("env.NODE_ENV === 'production' ? '' : developmentDefault");
+    expect(service).toContain('value.length < 32');
     expect(service).toContain("parsedApplicationUrl.protocol !== 'https:'");
     expect(service).toContain('Host application ID must be a stable lowercase slug');
   });
@@ -52,6 +53,9 @@ describe('reusable Application Connector release boundaries', () => {
     expect(releaseGate).toContain('HOST_APP_ID HOST_APP_NAME HOST_APP_URL');
     expect(releaseGate).toContain('HOST_APP_URL must use HTTPS in production');
     expect(releaseGate).toContain('ALLOW_FIRST_RUN_BOOTSTRAP');
+    expect(releaseGate).toContain('require_secret_length "APPLICATION_CONNECTOR_SIGNING_SECRET" "${APPLICATION_CONNECTOR_SIGNING_SECRET:-}" 32');
+    expect(releaseGate).toContain('require_secret_length "HOST_APP_CONNECTOR_KEY" "${host_connector_key}" 32');
+    expect(releaseGate).toContain('require_secret_length "BACKUP_ENCRYPTION_PASSPHRASE" "${BACKUP_ENCRYPTION_PASSPHRASE:-}" 24');
     expect(releaseGate).not.toContain('use the same EquiProfile connector secret');
   });
 
