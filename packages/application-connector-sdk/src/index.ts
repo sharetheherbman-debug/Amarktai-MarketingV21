@@ -1,6 +1,8 @@
 import { createHmac, randomBytes } from 'node:crypto';
 
-export type ProductLine = string;
+export type ProductScopeKey = string;
+/** Legacy type name retained for existing host integrations. */
+export type ProductLine = ProductScopeKey;
 
 export interface ConversionEventPayload {
   event_id: string;
@@ -11,7 +13,7 @@ export interface ConversionEventPayload {
   value_pence?: number;
   currency?: 'GBP';
   consent_basis: 'contract' | 'consent' | 'legitimate_interest' | 'anonymous_aggregate';
-  properties?: Record<string, unknown> & { product_line?: ProductLine; product_lines?: ProductLine[] };
+  properties?: Record<string, unknown> & { product_line?: ProductScopeKey; product_lines?: ProductScopeKey[] };
 }
 
 export interface BusinessSnapshotPayload {
@@ -23,15 +25,15 @@ export interface BusinessSnapshotPayload {
     domain: string;
     description?: string;
     status?: string;
-    product_lines?: ProductLine[];
+    product_lines?: ProductScopeKey[];
   };
-  products?: Array<Record<string, unknown> & { product_line?: ProductLine; product_lines?: ProductLine[] }>;
-  plans?: Array<Record<string, unknown> & { product_line?: ProductLine; product_lines?: ProductLine[] }>;
-  pricing?: Array<Record<string, unknown> & { product_line?: ProductLine; product_lines?: ProductLine[] }>;
-  features?: Array<Record<string, unknown> & { product_line?: ProductLine; product_lines?: ProductLine[] }>;
-  offers?: Array<Record<string, unknown> & { product_line?: ProductLine; product_lines?: ProductLine[] }>;
-  promotions?: Array<Record<string, unknown> & { product_line?: ProductLine; product_lines?: ProductLine[] }>;
-  status_changes?: Array<Record<string, unknown> & { product_line?: ProductLine; product_lines?: ProductLine[] }>;
+  products?: Array<Record<string, unknown> & { product_line?: ProductScopeKey; product_lines?: ProductScopeKey[] }>;
+  plans?: Array<Record<string, unknown> & { product_line?: ProductScopeKey; product_lines?: ProductScopeKey[] }>;
+  pricing?: Array<Record<string, unknown> & { product_line?: ProductScopeKey; product_lines?: ProductScopeKey[] }>;
+  features?: Array<Record<string, unknown> & { product_line?: ProductScopeKey; product_lines?: ProductScopeKey[] }>;
+  offers?: Array<Record<string, unknown> & { product_line?: ProductScopeKey; product_lines?: ProductScopeKey[] }>;
+  promotions?: Array<Record<string, unknown> & { product_line?: ProductScopeKey; product_lines?: ProductScopeKey[] }>;
+  status_changes?: Array<Record<string, unknown> & { product_line?: ProductScopeKey; product_lines?: ProductScopeKey[] }>;
   authoritative_fields?: string[];
 }
 
@@ -116,12 +118,38 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function validatedBaseUrl(value: string): string {
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    throw new ApplicationConnectorError('Marketing connector URL is invalid', null, 'CONNECTOR_URL_INVALID');
+  }
+
+  const loopback = parsed.hostname === 'localhost'
+    || parsed.hostname === '127.0.0.1'
+    || parsed.hostname === '::1'
+    || parsed.hostname === '[::1]';
+  if (parsed.protocol !== 'https:' && !(parsed.protocol === 'http:' && loopback)) {
+    throw new ApplicationConnectorError('Marketing connector URL must use HTTPS except on loopback development hosts', null, 'HTTPS_REQUIRED');
+  }
+  if (parsed.username || parsed.password) {
+    throw new ApplicationConnectorError('Marketing connector URL must not contain embedded credentials', null, 'CONNECTOR_URL_CREDENTIALS');
+  }
+  parsed.pathname = parsed.pathname.replace(/\/$/, '');
+  parsed.search = '';
+  parsed.hash = '';
+  return parsed.toString().replace(/\/$/, '');
+}
+
 export class ApplicationConnectorClient {
   private readonly fetchImplementation: typeof fetch;
+  private readonly baseUrl: string;
 
   constructor(private readonly options: ConnectorClientOptions) {
-    if (!/^https:\/\//i.test(options.baseUrl) && process.env.NODE_ENV === 'production') {
-      throw new ApplicationConnectorError('Production Marketing connector URL must use HTTPS', null, 'HTTPS_REQUIRED');
+    this.baseUrl = validatedBaseUrl(options.baseUrl);
+    if (!/^[a-z0-9][a-z0-9_-]{0,99}$/.test(options.applicationId)) {
+      throw new ApplicationConnectorError('Application ID must be a stable lowercase slug', null, 'APPLICATION_ID_INVALID');
     }
     if (options.connectorKey.length < 32) {
       throw new ApplicationConnectorError('Connector key must be at least 32 characters', null, 'CONNECTOR_KEY_WEAK');
@@ -164,7 +192,7 @@ export class ApplicationConnectorClient {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), timeoutMs);
       try {
-        const response = await this.fetchImplementation(`${this.options.baseUrl.replace(/\/$/, '')}/api/v1/application-connectors${path}`, {
+        const response = await this.fetchImplementation(`${this.baseUrl}/api/v1/application-connectors${path}`, {
           method: 'POST',
           headers: { ...createSignedHeaders(this.options.applicationId, this.options.connectorKey, body, now, nonce) },
           body: JSON.stringify(body),
