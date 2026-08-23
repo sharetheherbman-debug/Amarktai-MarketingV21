@@ -6,6 +6,7 @@ import { AppError, UnauthorizedError } from '../middleware/errorHandler';
 import { hashPassword } from '../utils/encryption';
 import { generateAccessToken, generateRefreshToken } from '../utils/jwt';
 import { logger } from '../utils/logger';
+import { normalizeProductScopeKey, normalizeProductScopes } from '../utils/product-scope';
 
 /**
  * Generic product/service scope key supplied by a connected application.
@@ -103,25 +104,8 @@ function canonicalize(value: unknown): string {
   return `{${Object.keys(object).sort().map((key) => `${JSON.stringify(key)}:${canonicalize(object[key])}`).join(',')}}`;
 }
 
-export function normalizeProductLine(value: unknown): ProductScopeKey | null {
-  const normalized = String(value || '').trim().toLowerCase();
-  return /^[a-z0-9][a-z0-9_-]{0,63}$/.test(normalized) ? normalized : null;
-}
-
-export function normalizeProductLines(value: unknown): ProductScopeKey[] {
-  const values = Array.isArray(value) ? value : value == null || value === '' ? [] : [value];
-  if (values.length > 32) {
-    throw new AppError(400, 'No more than 32 product/service scopes may be supplied', 'PRODUCT_SCOPE_TOO_LARGE');
-  }
-  const normalized = values.map((item) => normalizeProductLine(item));
-  if (normalized.some((item) => !item)) {
-    throw new AppError(400, 'Product/service scopes must be lowercase slug keys', 'PRODUCT_SCOPE_INVALID');
-  }
-  return [...new Set(normalized as string[])];
-}
-
 function validateSnapshotProductLines(payload: BusinessSnapshotPayload): void {
-  normalizeProductLines(payload.app.product_lines || []);
+  normalizeProductScopes(payload.app.product_lines || []);
   for (const collection of [
     payload.products,
     payload.plans,
@@ -132,8 +116,8 @@ function validateSnapshotProductLines(payload: BusinessSnapshotPayload): void {
     payload.status_changes,
   ]) {
     for (const record of collection || []) {
-      if (record.product_line !== undefined) normalizeProductLines(record.product_line);
-      if (record.product_lines !== undefined) normalizeProductLines(record.product_lines);
+      if (record.product_line !== undefined) normalizeProductScopes(record.product_line);
+      if (record.product_lines !== undefined) normalizeProductScopes(record.product_lines);
     }
   }
 }
@@ -362,20 +346,23 @@ export async function redeemSsoCode(code: string): Promise<{
     if (organizationResult.rows.length === 0) throw new AppError(500, 'Connected Marketing workspace is unavailable', 'CONNECTOR_ORGANIZATION_MISSING');
     const organization = organizationResult.rows[0];
 
+    // Serialize owner provisioning so concurrent first-time SSO redemptions cannot
+    // create multiple owners for the same Marketing workspace.
+    await client.query('SELECT id FROM organizations WHERE id=$1 FOR UPDATE', [organization.id]);
     const ownerCount = await client.query(
       "SELECT COUNT(*)::int AS count FROM organization_members WHERE organization_id=$1 AND role='owner'",
       [organization.id]
     );
-    if (Number(ownerCount.rows[0]?.count || 0) > 0) {
-      const existingOwner = await client.query("SELECT user_id FROM organization_members WHERE organization_id=$1 AND role='owner'", [organization.id]);
-      if (String(existingOwner.rows[0]?.user_id) !== String(user.id)) throw new AppError(409, 'This application already has a Marketing owner', 'OWNER_ALREADY_PROVISIONED');
-    }
-    const membershipRole = 'owner';
+    const membershipRole = Number(ownerCount.rows[0]?.count || 0) === 0 ? 'owner' : 'admin';
     await client.query(
       `INSERT INTO organization_members (organization_id,user_id,role,invited_by)
        VALUES ($1,$2,$3,$2)
        ON CONFLICT (organization_id,user_id) DO UPDATE SET
-         role=CASE WHEN organization_members.role='owner' THEN 'owner' ELSE EXCLUDED.role END`,
+         role=CASE
+           WHEN organization_members.role='owner' THEN 'owner'
+           WHEN EXCLUDED.role='owner' THEN 'owner'
+           ELSE EXCLUDED.role
+         END`,
       [organization.id, user.id, membershipRole]
     );
 
@@ -412,7 +399,7 @@ export async function recordConversionEvent(application: TrustedApplication, pay
   }
 
   const properties = payload.properties || {};
-  const productLines = normalizeProductLines(
+  const productLines = normalizeProductScopes(
     properties.product_lines !== undefined ? properties.product_lines : properties.product_line,
   );
   const productLine = productLines.length === 1 ? productLines[0] : null;
@@ -537,7 +524,7 @@ export async function recordBusinessSnapshot(
       `INSERT INTO marketing_change_events
          (organization_id,source_type,event_type,materiality,summary,payload)
        VALUES ($1,'connector','structured_business_change','material',$2,$3)`,
-      [organizationId, `${application.name} business knowledge advanced to version ${version}`, JSON.stringify({ application_id: application.applicationId, version, snapshot_id: payload.snapshot_id, occurred_at: occurredAt.toISOString(), product_lines: normalizeProductLines(payload.app.product_lines || []) })]
+      [organizationId, `${application.name} business knowledge advanced to version ${version}`, JSON.stringify({ application_id: application.applicationId, version, snapshot_id: payload.snapshot_id, occurred_at: occurredAt.toISOString(), product_lines: normalizeProductScopes(payload.app.product_lines || []) })]
     );
     return { accepted: true, duplicate: false, version, material_change: true };
   });
