@@ -11,7 +11,9 @@ require_command tar
 require_command sha256sum
 load_production_env
 
-backup_dir="${BACKUP_DIR:-/opt/equiprofile-marketing/backups}"
+project_name="${COMPOSE_PROJECT_NAME:-amarktai-marketing}"
+[[ "${project_name}" =~ ^[A-Za-z0-9._-]+$ ]] || fail "COMPOSE_PROJECT_NAME contains characters that are unsafe for backup filenames"
+backup_dir="${BACKUP_DIR:-/opt/marketing/backups}"
 retention_days="${BACKUP_RETENTION_DAYS:-30}"
 passphrase="${BACKUP_ENCRYPTION_PASSPHRASE:-}"
 
@@ -25,14 +27,14 @@ chmod 700 "${backup_dir}"
 timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
 work_dir="$(mktemp -d)"
 chmod 700 "${work_dir}"
-plain_bundle="${backup_dir}/equiprofile-marketing-${timestamp}.tar.gz"
+plain_bundle="${backup_dir}/${project_name}-${timestamp}.tar.gz"
 encrypted_bundle="${plain_bundle}.enc"
 trap 'rm -rf "${work_dir}" "${plain_bundle}"' EXIT
 
 log "Creating PostgreSQL backup"
 compose exec -T postgres pg_dump \
-  --username "${POSTGRES_USER:-amarktai}" \
-  --dbname "${POSTGRES_DB:-amarktai_marketing}" \
+  --username "${POSTGRES_USER:-marketing}" \
+  --dbname "${POSTGRES_DB:-marketing}" \
   --format custom \
   --no-owner \
   --no-acl > "${work_dir}/database.dump"
@@ -74,8 +76,8 @@ fi
   printf 'git_commit=%s\n' "$(git -C "${ROOT_DIR}" rev-parse HEAD 2>/dev/null || echo unknown)"
   printf 'git_branch=%s\n' "$(git -C "${ROOT_DIR}" symbolic-ref --short -q HEAD 2>/dev/null || echo detached)"
   printf 'reviewed_deploy_sha=%s\n' "${DEPLOY_SHA:-unset}"
-  printf 'database=%s\n' "${POSTGRES_DB:-amarktai_marketing}"
-  printf 'compose_project=%s\n' "${COMPOSE_PROJECT_NAME:-equiprofile-marketing}"
+  printf 'database=%s\n' "${POSTGRES_DB:-marketing}"
+  printf 'compose_project=%s\n' "${project_name}"
   printf 'shared_host_nginx=%s\n' "${SHARED_HOST_NGINX:-false}"
   printf 'host_nginx_config=%s\n' "${host_nginx_path:-not-configured}"
 } > "${work_dir}/manifest.env"
@@ -103,7 +105,7 @@ openssl enc -aes-256-cbc -salt -pbkdf2 -iter 200000 \
 chmod 600 "${encrypted_bundle}" "${encrypted_bundle}.sha256"
 rm -f "${plain_bundle}"
 
-find "${backup_dir}" -type f -name 'equiprofile-marketing-*.tar.gz.enc*' -mtime "+${retention_days}" -delete
+find "${backup_dir}" -type f -name "${project_name}-*.tar.gz.enc*" -mtime "+${retention_days}" -delete
 
 log "Encrypted rollback bundle completed: ${encrypted_bundle}"
 log "Bundle contains PostgreSQL, Redis, Studio media, production environment, release inventory and available host/TLS metadata"
