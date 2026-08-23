@@ -17,27 +17,54 @@ current_sha="$(git rev-parse HEAD)"
 
 git diff --quiet && git diff --cached --quiet || fail "Repository has uncommitted changes; refusing deployment"
 
-[[ "${FIRST_RUN:-false}" != "true" ]] || fail "FIRST_RUN=true is not allowed for this existing production workspace; preserve the current owner/workspace and use Management provisioning/SSO"
 [[ "${SHARED_HOST_NGINX:-false}" =~ ^(1|true|yes|on)$ ]] || log "Standalone HTTPS edge selected; ensure this VPS is intended to own public ports 80/443"
 
-for key in APPLICATION_CONNECTOR_SIGNING_SECRET EQUIPROFILE_CONNECTOR_KEY BACKUP_ENCRYPTION_PASSPHRASE; do
-  value="${!key:-}"
+if [[ "${FIRST_RUN:-false}" == "true" ]]; then
+  [[ "${ALLOW_FIRST_RUN_BOOTSTRAP:-false}" =~ ^(1|true|yes|on)$ ]] || fail "FIRST_RUN=true requires explicit ALLOW_FIRST_RUN_BOOTSTRAP=true; refusing accidental production bootstrap"
+  log "Explicit first-run bootstrap mode enabled"
+else
+  log "Existing or host-provisioned workspace mode enabled"
+fi
+
+host_connector_key="${HOST_APP_CONNECTOR_KEY:-${EQUIPROFILE_CONNECTOR_KEY:-}}"
+required_pairs=(
+  "APPLICATION_CONNECTOR_SIGNING_SECRET:${APPLICATION_CONNECTOR_SIGNING_SECRET:-}"
+  "HOST_APP_CONNECTOR_KEY:${host_connector_key}"
+  "BACKUP_ENCRYPTION_PASSPHRASE:${BACKUP_ENCRYPTION_PASSPHRASE:-}"
+)
+for pair in "${required_pairs[@]}"; do
+  key="${pair%%:*}"
+  value="${pair#*:}"
   [[ "${#value}" -ge 24 ]] || fail "${key} must be configured with at least 24 characters"
-  [[ "${value}" != replace-with-* ]] || fail "${key} still contains a placeholder"
+  [[ "${value}" != replace-with-* && "${value}" != change-me-* ]] || fail "${key} still contains a placeholder"
 done
 
-if [[ -n "${HOST_APP_CONNECTOR_KEY:-}" && "${HOST_APP_CONNECTOR_KEY}" != "${EQUIPROFILE_CONNECTOR_KEY}" ]]; then
-  fail "HOST_APP_CONNECTOR_KEY and EQUIPROFILE_CONNECTOR_KEY conflict; use the same EquiProfile connector secret or leave HOST_APP_CONNECTOR_KEY empty"
+for key in HOST_APP_ID HOST_APP_NAME HOST_APP_URL; do
+  value="${!key:-}"
+  [[ -n "${value}" ]] || fail "${key} is required for a production host application connector"
+  [[ "${value}" != replace-with-* && "${value}" != change-me-* ]] || fail "${key} still contains a placeholder"
+done
+[[ "${HOST_APP_ID}" =~ ^[a-z0-9]+([._-][a-z0-9]+)*$ ]] || fail "HOST_APP_ID must be a stable lowercase slug"
+[[ "${HOST_APP_URL}" == https://* ]] || fail "HOST_APP_URL must use HTTPS in production"
+
+if [[ -n "${HOST_APP_CONNECTOR_KEY:-}" && -n "${EQUIPROFILE_CONNECTOR_KEY:-}" && "${HOST_APP_CONNECTOR_KEY}" != "${EQUIPROFILE_CONNECTOR_KEY}" ]]; then
+  fail "HOST_APP_CONNECTOR_KEY conflicts with the legacy EQUIPROFILE_CONNECTOR_KEY compatibility alias"
+fi
+if [[ -n "${EQUIPROFILE_APP_ID:-}" && "${EQUIPROFILE_APP_ID}" != "${HOST_APP_ID}" ]]; then
+  fail "EQUIPROFILE_APP_ID conflicts with HOST_APP_ID; remove the legacy alias or make it identical"
+fi
+if [[ -n "${EQUIPROFILE_APP_URL:-}" && "${EQUIPROFILE_APP_URL}" != "${HOST_APP_URL}" ]]; then
+  fail "EQUIPROFILE_APP_URL conflicts with HOST_APP_URL; remove the legacy alias or make it identical"
 fi
 
 if [[ -n "${STRIPE_SECRET_KEY:-}" || -n "${STRIPE_WEBHOOK_SECRET:-}" ]]; then
   [[ "${STRIPE_SECRET_KEY:-}" == sk_* ]] || fail "STRIPE_SECRET_KEY is non-empty but not a valid-looking Stripe secret"
   [[ "${STRIPE_WEBHOOK_SECRET:-}" == whsec_* ]] || fail "STRIPE_WEBHOOK_SECRET is non-empty but not a valid-looking Stripe webhook secret"
 else
-  log "Stripe credit checkout remains disabled for controlled Phase 1 proving"
+  log "Stripe credit checkout remains disabled unless deliberately configured and accepted"
 fi
 
 log "Release gate passed"
 log "Reviewed Marketing SHA: ${reviewed_sha}"
-log "Existing owner/workspace preservation: enforced"
+log "Host application: ${HOST_APP_ID} (${HOST_APP_URL})"
 log "Connector and encrypted-backup prerequisites: configured"
