@@ -8,8 +8,10 @@ source "${SCRIPT_DIR}/lib/vps-common.sh"
 require_command git
 load_production_env
 
-branch="${DEPLOY_BRANCH:-phase-1/equiprofile-relaunch-genx-credits}"
+branch="${DEPLOY_BRANCH:-}"
 reviewed_sha="${DEPLOY_SHA:-}"
+[[ -n "${branch}" ]] || fail "DEPLOY_BRANCH must be explicitly configured for a controlled update"
+git check-ref-format --branch "${branch}" >/dev/null 2>&1 || fail "DEPLOY_BRANCH is not a valid Git branch name"
 [[ "${reviewed_sha}" =~ ^[0-9a-f]{40}$ ]] || fail "DEPLOY_SHA must be the exact reviewed 40-character Marketing SHA"
 cd "${ROOT_DIR}"
 
