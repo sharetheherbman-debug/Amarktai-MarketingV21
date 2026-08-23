@@ -41,6 +41,16 @@ describe('EquiProfile connector wire contract', () => {
     expect(service).toContain('Only authorized host-application administrators may use Marketing SSO');
   });
 
+  test('SSO provisions one owner safely and later authorized host admins as Marketing admins', () => {
+    const service = read('apps/api/src/services/application-connector.service.ts');
+
+    expect(service).toContain("SELECT id FROM organizations WHERE id=$1 FOR UPDATE");
+    expect(service).toContain("role='owner'");
+    expect(service).toContain("=== 0 ? 'owner' : 'admin'");
+    expect(service).toContain("WHEN organization_members.role='owner' THEN 'owner'");
+    expect(service).not.toContain('OWNER_ALREADY_PROVISIONED');
+  });
+
   test('connector secrets are environment-managed and plaintext is never stored', () => {
     const service = read('apps/api/src/services/application-connector.service.ts');
     const migration = read('apps/api/src/db/migrations/026_application_connectors.sql');
@@ -61,7 +71,8 @@ describe('EquiProfile connector wire contract', () => {
 
     expect(service).toContain('export type ProductScopeKey = string');
     expect(service).toContain('export type HostProductLine = ProductScopeKey');
-    expect(service).toContain('normalizeProductLines(');
+    expect(service).toContain("from '../utils/product-scope'");
+    expect(service).toContain('normalizeProductScopes(');
     expect(service).toContain('product_line: productLine');
     expect(service).toContain('product_lines: productLines');
     expect(service).toContain('application_conversion_events');
@@ -78,7 +89,7 @@ describe('EquiProfile connector wire contract', () => {
 
     expect(service).toContain('product_lines?: ProductScopeKey[]');
     expect(service).toContain('validateSnapshotProductLines(payload)');
-    expect(service).toContain('normalizeProductLines(payload.app.product_lines || [])');
+    expect(service).toContain('normalizeProductScopes(payload.app.product_lines || [])');
     expect(service).toContain('PRODUCT_SCOPE_INVALID');
     expect(service).not.toContain("['management', 'academy', 'shop'].includes");
   });
