@@ -46,7 +46,8 @@ describe('generic multi-product campaign propagation', () => {
   });
 
   it('stores generic connector scope in immutable conversions and derived attribution', () => {
-    expect(connector).toContain('normalizeProductLines(');
+    expect(connector).toContain("from '../utils/product-scope'");
+    expect(connector).toContain('normalizeProductScopes(');
     expect(connector).toContain('product_lines');
     expect(connector).toContain('application_conversion_events');
     expect(connector).toContain('marketing_performance_events');
