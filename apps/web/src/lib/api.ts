@@ -20,10 +20,6 @@ interface ApiError {
 class ApiClient {
   constructor(private baseURL: string) {}
 
-  private getToken(): string | null {
-    return typeof window === 'undefined' ? null : localStorage.getItem('auth_token');
-  }
-
   private getOrganizationId(): string | null {
     return typeof window === 'undefined' ? null : localStorage.getItem('org_id');
   }
@@ -67,7 +63,10 @@ class ApiClient {
   private async handleResponse<T>(response: Response): Promise<T> {
     if (response.status === 401) {
       if (typeof window !== 'undefined') {
+        // Clean credentials left by older releases; current browser auth is
+        // HttpOnly-cookie-only and cannot be read by JavaScript.
         localStorage.removeItem('auth_token');
+        localStorage.removeItem('refresh_token');
         window.location.href = '/login';
       }
       throw new ApiErrorImpl('Unauthorized', 401);
@@ -87,38 +86,53 @@ class ApiClient {
   private getHeaders(body?: unknown): HeadersInit {
     const headers: HeadersInit = {};
     if (!this.isFormData(body)) headers['Content-Type'] = 'application/json';
-    const token = this.getToken();
-    if (token) headers.Authorization = `Bearer ${token}`;
     const organizationId = this.getOrganizationId();
     if (organizationId) headers['X-Organization-Id'] = organizationId;
     return headers;
   }
 
+  private requestInit(method: string, body: unknown, headers?: HeadersInit): RequestInit {
+    return {
+      method,
+      credentials: 'include',
+      headers: { ...this.getHeaders(body), ...headers },
+      body: this.serializeBody(body),
+    };
+  }
+
   async get<T>(endpoint: string, config?: RequestConfig): Promise<T> {
-    const response = await fetch(this.buildURL(endpoint, config?.params), { method: 'GET', headers: { ...this.getHeaders(), ...config?.headers } });
+    const response = await fetch(this.buildURL(endpoint, config?.params), {
+      method: 'GET',
+      credentials: 'include',
+      headers: { ...this.getHeaders(), ...config?.headers },
+    });
     return this.handleResponse<T>(response);
   }
 
   async post<T>(endpoint: string, config?: RequestConfig): Promise<T> {
     const body = this.prepareBody(config?.body);
-    const response = await fetch(this.buildURL(endpoint, config?.params), { method: 'POST', headers: { ...this.getHeaders(body), ...config?.headers }, body: this.serializeBody(body) });
+    const response = await fetch(this.buildURL(endpoint, config?.params), this.requestInit('POST', body, config?.headers));
     return this.handleResponse<T>(response);
   }
 
   async put<T>(endpoint: string, config?: RequestConfig): Promise<T> {
     const body = this.prepareBody(config?.body);
-    const response = await fetch(this.buildURL(endpoint, config?.params), { method: 'PUT', headers: { ...this.getHeaders(body), ...config?.headers }, body: this.serializeBody(body) });
+    const response = await fetch(this.buildURL(endpoint, config?.params), this.requestInit('PUT', body, config?.headers));
     return this.handleResponse<T>(response);
   }
 
   async delete<T>(endpoint: string, config?: RequestConfig): Promise<T> {
-    const response = await fetch(this.buildURL(endpoint, config?.params), { method: 'DELETE', headers: { ...this.getHeaders(), ...config?.headers } });
+    const response = await fetch(this.buildURL(endpoint, config?.params), {
+      method: 'DELETE',
+      credentials: 'include',
+      headers: { ...this.getHeaders(), ...config?.headers },
+    });
     return this.handleResponse<T>(response);
   }
 
   async patch<T>(endpoint: string, config?: RequestConfig): Promise<T> {
     const body = this.prepareBody(config?.body);
-    const response = await fetch(this.buildURL(endpoint, config?.params), { method: 'PATCH', headers: { ...this.getHeaders(body), ...config?.headers }, body: this.serializeBody(body) });
+    const response = await fetch(this.buildURL(endpoint, config?.params), this.requestInit('PATCH', body, config?.headers));
     return this.handleResponse<T>(response);
   }
 }
