@@ -1,4 +1,4 @@
-FROM node:20-alpine AS deps
+FROM node:22-alpine AS deps
 WORKDIR /app
 
 COPY package.json package-lock.json ./
@@ -7,7 +7,7 @@ COPY apps/web/package.json ./apps/web/package.json
 COPY packages/studio/package.json ./packages/studio/package.json
 RUN npm ci
 
-FROM node:20-alpine AS build
+FROM node:22-alpine AS build
 WORKDIR /app
 
 COPY --from=deps /app/node_modules ./node_modules
@@ -26,7 +26,7 @@ ENV NEXT_TELEMETRY_DISABLED=1
 
 RUN npm run build --workspace=@amarktai/web
 
-FROM node:20-alpine AS production
+FROM node:22-alpine AS production
 WORKDIR /app
 
 RUN addgroup --system --gid 1001 nodejs && \
