@@ -26,18 +26,18 @@ else
   log "Existing or host-provisioned workspace mode enabled"
 fi
 
-host_connector_key="${HOST_APP_CONNECTOR_KEY:-${EQUIPROFILE_CONNECTOR_KEY:-}}"
-required_pairs=(
-  "APPLICATION_CONNECTOR_SIGNING_SECRET:${APPLICATION_CONNECTOR_SIGNING_SECRET:-}"
-  "HOST_APP_CONNECTOR_KEY:${host_connector_key}"
-  "BACKUP_ENCRYPTION_PASSPHRASE:${BACKUP_ENCRYPTION_PASSPHRASE:-}"
-)
-for pair in "${required_pairs[@]}"; do
-  key="${pair%%:*}"
-  value="${pair#*:}"
-  [[ "${#value}" -ge 24 ]] || fail "${key} must be configured with at least 24 characters"
+require_secret_length() {
+  local key="$1"
+  local value="$2"
+  local minimum="$3"
+  [[ "${#value}" -ge "${minimum}" ]] || fail "${key} must be configured with at least ${minimum} characters"
   [[ "${value}" != replace-with-* && "${value}" != change-me-* ]] || fail "${key} still contains a placeholder"
-done
+}
+
+host_connector_key="${HOST_APP_CONNECTOR_KEY:-${EQUIPROFILE_CONNECTOR_KEY:-}}"
+require_secret_length "APPLICATION_CONNECTOR_SIGNING_SECRET" "${APPLICATION_CONNECTOR_SIGNING_SECRET:-}" 32
+require_secret_length "HOST_APP_CONNECTOR_KEY" "${host_connector_key}" 32
+require_secret_length "BACKUP_ENCRYPTION_PASSPHRASE" "${BACKUP_ENCRYPTION_PASSPHRASE:-}" 24
 
 for key in HOST_APP_ID HOST_APP_NAME HOST_APP_URL; do
   value="${!key:-}"
