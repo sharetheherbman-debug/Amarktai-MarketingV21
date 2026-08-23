@@ -6,7 +6,7 @@ import { AppError, UnauthorizedError } from '../middleware/errorHandler';
 import { hashPassword } from '../utils/encryption';
 import { generateAccessToken, generateRefreshToken } from '../utils/jwt';
 import { logger } from '../utils/logger';
-import { normalizeProductScopeKey, normalizeProductScopes } from '../utils/product-scope';
+import { normalizeProductScopes } from '../utils/product-scope';
 
 /**
  * Generic product/service scope key supplied by a connected application.
@@ -64,21 +64,58 @@ export interface BusinessSnapshotPayload {
   authoritative_fields?: string[];
 }
 
-function requiredConnectorValue(key: string, developmentDefault = ''): string {
-  const value = process.env[key] || developmentDefault;
-  if (env.NODE_ENV === 'production' && (!value || value.startsWith('replace-with') || value.length < 32)) {
-    throw new Error(`Missing or insecure production connector environment variable: ${key}`);
+function firstConfigured(keys: string[]): string {
+  for (const key of keys) {
+    const value = String(process.env[key] || '').trim();
+    if (value) return value;
+  }
+  return '';
+}
+
+function requiredConnectorSecret(keys: string[], developmentDefault: string): string {
+  const configured = firstConfigured(keys);
+  const value = configured || (env.NODE_ENV === 'production' ? '' : developmentDefault);
+  if (env.NODE_ENV === 'production' && (!value || value.startsWith('change-me') || value.startsWith('replace-with') || value.length < 32)) {
+    throw new Error(`Missing or insecure production connector secret: ${keys.join(' or ')}`);
+  }
+  return value;
+}
+
+function requiredHostValue(keys: string[], developmentDefault: string): string {
+  const configured = firstConfigured(keys);
+  const value = configured || (env.NODE_ENV === 'production' ? '' : developmentDefault);
+  if (env.NODE_ENV === 'production' && !value) {
+    throw new Error(`Missing production host-application setting: ${keys.join(' or ')}`);
   }
   return value;
 }
 
 function connectorConfig() {
+  const applicationId = requiredHostValue(['HOST_APP_ID', 'EQUIPROFILE_APP_ID'], 'equiprofile');
+  const applicationName = requiredHostValue(['HOST_APP_NAME', 'EQUIPROFILE_APP_NAME'], 'EquiProfile');
+  const applicationUrl = requiredHostValue(['HOST_APP_URL', 'EQUIPROFILE_APP_URL'], 'http://localhost:5000');
+  const connectorKey = requiredConnectorSecret(['HOST_APP_CONNECTOR_KEY', 'EQUIPROFILE_CONNECTOR_KEY'], 'development-equiprofile-connector-key');
+  const signingPepper = requiredConnectorSecret(['APPLICATION_CONNECTOR_SIGNING_SECRET'], 'development-connector-signing-pepper');
+
+  if (!/^[a-z0-9][a-z0-9_-]{0,99}$/.test(applicationId)) {
+    throw new Error('Host application ID must be a stable lowercase slug');
+  }
+  let parsedApplicationUrl: URL;
+  try {
+    parsedApplicationUrl = new URL(applicationUrl);
+  } catch {
+    throw new Error('Host application URL is invalid');
+  }
+  if (env.NODE_ENV === 'production' && parsedApplicationUrl.protocol !== 'https:') {
+    throw new Error('Host application URL must use HTTPS in production');
+  }
+
   return {
-    signingPepper: requiredConnectorValue('APPLICATION_CONNECTOR_SIGNING_SECRET', 'development-connector-signing-pepper'),
-    applicationId: process.env.HOST_APP_ID || process.env.EQUIPROFILE_APP_ID || 'equiprofile',
-    applicationName: process.env.HOST_APP_NAME || process.env.EQUIPROFILE_APP_NAME || 'EquiProfile',
-    applicationUrl: process.env.HOST_APP_URL || process.env.EQUIPROFILE_APP_URL || 'http://localhost:5000',
-    connectorKey: process.env.HOST_APP_CONNECTOR_KEY || requiredConnectorValue('EQUIPROFILE_CONNECTOR_KEY', 'development-equiprofile-connector-key'),
+    signingPepper,
+    applicationId,
+    applicationName,
+    applicationUrl: applicationUrl.replace(/\/$/, ''),
+    connectorKey,
     maxClockSkewSeconds: Number(process.env.APPLICATION_CONNECTOR_MAX_CLOCK_SKEW_SECONDS || 300),
     ssoCodeTtlSeconds: Number(process.env.APPLICATION_SSO_CODE_TTL_SECONDS || 120),
   };
@@ -132,10 +169,6 @@ export function signApplicationPayload(key: string, timestamp: string, nonce: st
 
 export async function ensureConfiguredApplicationConnector(): Promise<void> {
   const config = connectorConfig();
-  if (!config.connectorKey && env.NODE_ENV !== 'production') {
-    logger.warn('Host application connector is not configured');
-    return;
-  }
   await query(
     `INSERT INTO application_connectors (application_id,name,base_url,key_hash,active,metadata)
      VALUES ($1,$2,$3,$4,TRUE,$5)
