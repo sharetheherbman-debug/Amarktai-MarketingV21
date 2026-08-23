@@ -63,7 +63,7 @@ import emailUnsubscribeRoutes from './routes/email-unsubscribe';
 import scheduler from './services/scheduler.service';
 import { verifyStripeWebhook } from './services/stripe-client.service';
 import { processStripeEvent } from './services/stripe-webhook.service';
-import { ensureConfiguredEquiProfileConnector } from './services/application-connector.service';
+import { ensureConfiguredApplicationConnector } from './services/application-connector.service';
 import { hardenLegacyEmailProviderConfigs } from './services/integration.service';
 
 const app = express();
@@ -128,7 +128,7 @@ app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use(generalLimiter);
 
-app.get('/', (_req: Request, res: Response) => res.json({ name: 'EquiProfile Marketing API', version: '1.0.0', status: 'running', timestamp: new Date().toISOString() }));
+app.get('/', (_req: Request, res: Response) => res.json({ name: 'Marketing API', version: '1.0.0', status: 'running', timestamp: new Date().toISOString() }));
 app.get('/health', (_req: Request, res: Response) => res.json({ status: 'ok', timestamp: new Date().toISOString() }));
 
 const tenant = [requireAuth, requireOrganizationMembership] as const;
@@ -187,7 +187,7 @@ async function startServer() {
   try {
     if (!await testConnection()) { logger.error('Failed to connect to database'); process.exit(1); }
     if (!await testRedisConnection()) { logger.error('Redis connection failed; queue-backed features cannot start'); process.exit(1); }
-    await ensureConfiguredEquiProfileConnector();
+    await ensureConfiguredApplicationConnector();
     await hardenLegacyEmailProviderConfigs();
     await providerRouter.loadProviders();
 
@@ -220,10 +220,16 @@ async function startServer() {
       });
     };
 
-    process.on('SIGTERM', () => void gracefulShutdown('SIGTERM'));
-    process.on('SIGINT', () => void gracefulShutdown('SIGINT'));
-    process.on('unhandledRejection', (reason, promise) => { logger.error('Unhandled Rejection at:', promise, 'reason:', reason); void gracefulShutdown('unhandledRejection', 1); });
-    process.on('uncaughtException', (error) => { logger.error('Uncaught Exception:', error); void gracefulShutdown('uncaughtException', 1); });
+    process.on('SIGTERM', () => { void gracefulShutdown('SIGTERM'); });
+    process.on('SIGINT', () => { void gracefulShutdown('SIGINT'); });
+    process.on('unhandledRejection', (reason) => {
+      logger.error('Unhandled promise rejection', reason);
+      void gracefulShutdown('unhandledRejection', 1);
+    });
+    process.on('uncaughtException', (error) => {
+      logger.error('Uncaught exception', error);
+      void gracefulShutdown('uncaughtException', 1);
+    });
   } catch (error) {
     logger.error('Failed to start server', error);
     process.exit(1);
@@ -231,4 +237,5 @@ async function startServer() {
 }
 
 void startServer();
+
 export default app;
