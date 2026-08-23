@@ -1,5 +1,11 @@
 import { z } from 'zod';
 
+const productScopeSchema = z
+  .string()
+  .trim()
+  .toLowerCase()
+  .regex(/^[a-z0-9][a-z0-9_-]{0,63}$/, 'Product/service scopes must be lowercase slug keys');
+
 export const registerSchema = z.object({
   email: z.string().email('Invalid email address'),
   password: z
@@ -80,7 +86,8 @@ export const createCampaignSchema = z.object({
   name: z.string().min(1, 'Name is required').max(255),
   description: z.string().optional(),
   type: z.enum(['email', 'social', 'ads', 'content', 'sms']),
-  product_line: z.enum(['management', 'academy', 'shop']).optional(),
+  product_line: productScopeSchema.optional(),
+  product_lines: z.array(productScopeSchema).max(32, 'No more than 32 product/service scopes may be selected').optional(),
   project_id: z.string().uuid().optional(),
   config: z.record(z.unknown()).optional(),
   schedule: z.record(z.unknown()).optional(),
