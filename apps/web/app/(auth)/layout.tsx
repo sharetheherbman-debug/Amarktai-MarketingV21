@@ -1,12 +1,13 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
+import { MARKETING_BRAND_DESCRIPTION, MARKETING_BRAND_NAME } from '@/lib/branding';
 
 export const metadata: Metadata = {
   title: {
     default: 'Authentication',
-    template: '%s | EquiProfile Marketing',
+    template: `%s | ${MARKETING_BRAND_NAME}`,
   },
-  description: 'Secure owner access to EquiProfile Marketing.',
+  description: `Secure access to ${MARKETING_BRAND_NAME}. ${MARKETING_BRAND_DESCRIPTION}`,
 };
 
 export default function AuthLayout({
@@ -28,6 +29,7 @@ export default function AuthLayout({
                 viewBox="0 0 24 24"
                 stroke="currentColor"
                 strokeWidth={2}
+                aria-hidden="true"
               >
                 <path
                   strokeLinecap="round"
@@ -36,11 +38,11 @@ export default function AuthLayout({
                 />
               </svg>
             </div>
-            <span className="text-xl font-bold text-white">EquiProfile Marketing</span>
+            <span className="text-xl font-bold text-white">{MARKETING_BRAND_NAME}</span>
           </Link>
         </div>
         {children}
-        <p className="mt-6 text-center text-xs text-zinc-600">© 2026 EquiProfile Marketing</p>
+        <p className="mt-6 text-center text-xs text-zinc-600">© 2026 {MARKETING_BRAND_NAME}</p>
       </div>
     </div>
   );
