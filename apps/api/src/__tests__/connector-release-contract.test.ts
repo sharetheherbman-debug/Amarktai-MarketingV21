@@ -33,6 +33,28 @@ describe('reusable Application Connector release boundaries', () => {
     expect(server).not.toContain("name: 'EquiProfile Marketing API'");
   });
 
+  test('production template and release gate are reusable rather than EquiProfile-only', () => {
+    const template = read('.env.production.example');
+    const releaseGate = read('scripts/vps-release-gate.sh');
+
+    expect(template).toContain('NEXT_PUBLIC_MARKETING_BRAND_NAME=');
+    expect(template).toContain('HOST_APP_CONNECTOR_KEY=');
+    expect(template).toContain('HOST_APP_ID=host-app');
+    expect(template).toContain('HOST_APP_URL=https://app.example.com');
+    expect(template).toContain('DOMAIN=marketing.example.com');
+    expect(template).not.toContain('marketing.equiprofile.online');
+    expect(template).not.toContain('noreply@equiprofile.online');
+    expect(template).not.toContain('POSTGRES_USER=equiprofile_marketing');
+    expect(template).not.toContain('BACKUP_DIR=/opt/equiprofile-marketing');
+    expect(template).not.toContain('phase-1/equiprofile-relaunch-genx-credits');
+
+    expect(releaseGate).toContain('HOST_APP_CONNECTOR_KEY');
+    expect(releaseGate).toContain('HOST_APP_ID HOST_APP_NAME HOST_APP_URL');
+    expect(releaseGate).toContain('HOST_APP_URL must use HTTPS in production');
+    expect(releaseGate).toContain('ALLOW_FIRST_RUN_BOOTSTRAP');
+    expect(releaseGate).not.toContain('use the same EquiProfile connector secret');
+  });
+
   test('conversion and snapshot routes enforce the sensitive-data boundary', () => {
     const route = read('apps/api/src/routes/application-connectors.ts');
 
