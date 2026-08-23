@@ -8,15 +8,20 @@ const compose = fs.readFileSync(
 );
 
 describe('production compose runtime environment contract', () => {
-  test('passes connector secrets required during API startup', () => {
+  test('passes generic connector runtime settings and keeps EquiProfile aliases optional', () => {
     expect(compose).toContain(
       'APPLICATION_CONNECTOR_SIGNING_SECRET: ${APPLICATION_CONNECTOR_SIGNING_SECRET:?APPLICATION_CONNECTOR_SIGNING_SECRET required}'
     );
-    expect(compose).toContain(
-      'EQUIPROFILE_CONNECTOR_KEY: ${EQUIPROFILE_CONNECTOR_KEY:?EQUIPROFILE_CONNECTOR_KEY required}'
-    );
-    expect(compose).toContain('EQUIPROFILE_APP_ID: ${EQUIPROFILE_APP_ID:-equiprofile}');
-    expect(compose).toContain('EQUIPROFILE_APP_URL: ${EQUIPROFILE_APP_URL:-https://equiprofile.online}');
+    expect(compose).toContain('HOST_APP_CONNECTOR_KEY: ${HOST_APP_CONNECTOR_KEY:-}');
+    expect(compose).toContain('HOST_APP_ID: ${HOST_APP_ID:-}');
+    expect(compose).toContain('HOST_APP_NAME: ${HOST_APP_NAME:-}');
+    expect(compose).toContain('HOST_APP_URL: ${HOST_APP_URL:-}');
+    expect(compose).toContain('EQUIPROFILE_CONNECTOR_KEY: ${EQUIPROFILE_CONNECTOR_KEY:-}');
+    expect(compose).toContain('EQUIPROFILE_APP_ID: ${EQUIPROFILE_APP_ID:-}');
+    expect(compose).toContain('EQUIPROFILE_APP_NAME: ${EQUIPROFILE_APP_NAME:-}');
+    expect(compose).toContain('EQUIPROFILE_APP_URL: ${EQUIPROFILE_APP_URL:-}');
+    expect(compose).not.toContain('EQUIPROFILE_APP_ID: ${EQUIPROFILE_APP_ID:-equiprofile}');
+    expect(compose).not.toContain('EQUIPROFILE_APP_URL: ${EQUIPROFILE_APP_URL:-https://equiprofile.online}');
     expect(compose).toContain(
       'APPLICATION_CONNECTOR_MAX_CLOCK_SKEW_SECONDS: ${APPLICATION_CONNECTOR_MAX_CLOCK_SKEW_SECONDS:-300}'
     );
