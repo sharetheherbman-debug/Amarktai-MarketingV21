@@ -6,16 +6,16 @@ import { ExtendedRequest, UserRole, MemberRole } from '../types';
 
 export interface AuthRequest extends ExtendedRequest {}
 
+function accessTokenFromRequest(req: AuthRequest): string | undefined {
+  const authHeader = req.headers.authorization;
+  if (authHeader && authHeader.startsWith('Bearer ')) return authHeader.substring(7);
+  if (req.cookies?.accessToken) return String(req.cookies.accessToken);
+  return undefined;
+}
+
 export function requireAuth(req: AuthRequest, res: Response, next: NextFunction): void {
   try {
-    let token: string | undefined;
-
-    const authHeader = req.headers.authorization;
-    if (authHeader && authHeader.startsWith('Bearer ')) {
-      token = authHeader.substring(7);
-    } else if (req.cookies?.accessToken) {
-      token = req.cookies.accessToken;
-    }
+    const token = accessTokenFromRequest(req);
 
     if (!token) {
       res.status(401).json({
@@ -48,8 +48,7 @@ export function requireAuth(req: AuthRequest, res: Response, next: NextFunction)
 
 export function requireMfaEnrollment(req: AuthRequest, res: Response, next: NextFunction): void {
   try {
-    const authHeader = req.headers.authorization;
-    const token = authHeader?.startsWith('Bearer ') ? authHeader.substring(7) : undefined;
+    const token = accessTokenFromRequest(req);
     if (!token) throw new Error('missing');
     const payload = verifyAccessToken(token);
     req.user = { userId: payload.userId, email: payload.email, role: payload.role, mfa: payload.mfa };
