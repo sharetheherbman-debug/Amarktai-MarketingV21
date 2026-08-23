@@ -35,14 +35,17 @@ describe('reusable Application Connector release boundaries', () => {
     expect(route).toContain("assertConnectorPayloadSafe(req.body, 'business_snapshot')");
   });
 
-  test('SSO keeps the refresh credential HttpOnly-only and the browser handoff is host-neutral', () => {
+  test('SSO keeps all session credentials HttpOnly-only and the browser handoff is host-neutral', () => {
     const route = read('apps/api/src/routes/application-connectors.ts');
     const page = read('apps/web/app/connector/sso/page.tsx');
 
+    expect(route).toContain("res.cookie('accessToken', session.accessToken");
     expect(route).toContain("res.cookie('refreshToken', session.refreshToken");
+    expect(route).not.toContain('accessToken: session.accessToken');
     expect(route).not.toContain('refreshToken: session.refreshToken');
     expect(page).toContain('Secure application connection');
     expect(page).toContain('Return to previous application');
+    expect(page).not.toContain('accessToken');
     expect(page).not.toContain('EquiProfile');
     expect(page).not.toContain('equiprofile.online');
   });
