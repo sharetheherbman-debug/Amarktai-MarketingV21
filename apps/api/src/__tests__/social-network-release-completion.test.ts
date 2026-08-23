@@ -70,13 +70,14 @@ describe('social network and release completion invariants', () => {
     expect(migration).not.toContain('DROP TABLE');
   });
 
-  test('pins deployment to reviewed SHA and prevents first-run owner recreation', () => {
+  test('pins deployment to reviewed SHA and keeps first-run bootstrap explicit and fail-closed', () => {
     const gate = read('scripts/vps-release-gate.sh');
     const update = read('scripts/vps-update.sh');
     const env = read('.env.production.example');
     expect(gate).toContain('DEPLOY_SHA');
     expect(gate).toContain('does not equal reviewed DEPLOY_SHA');
-    expect(gate).toContain('FIRST_RUN=true is not allowed');
+    expect(gate).toContain('FIRST_RUN=true requires explicit ALLOW_FIRST_RUN_BOOTSTRAP=true');
+    expect(gate).toContain('refusing accidental production bootstrap');
     expect(update).toContain('git checkout --detach "${reviewed_sha}"');
     expect(update).not.toContain('git pull --ff-only');
     expect(env).toContain('FIRST_RUN=false');
