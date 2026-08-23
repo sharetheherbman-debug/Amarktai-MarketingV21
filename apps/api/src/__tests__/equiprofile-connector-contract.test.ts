@@ -55,13 +55,17 @@ describe('EquiProfile connector wire contract', () => {
     expect(migration).not.toContain('connector_key TEXT');
   });
 
-  test('conversion event storage is idempotent, GBP-only and preserves a validated product line', () => {
+  test('conversion event storage is idempotent, GBP-only and preserves validated generic product scopes', () => {
     const service = read('apps/api/src/services/application-connector.service.ts');
     const migration = read('apps/api/src/db/migrations/026_application_connectors.sql');
 
-    expect(service).toContain("export type HostProductLine = 'management' | 'academy' | 'shop'");
-    expect(service).toContain('CONVERSION_PRODUCT_LINE_INVALID');
+    expect(service).toContain('export type ProductScopeKey = string');
+    expect(service).toContain('export type HostProductLine = ProductScopeKey');
+    expect(service).toContain('normalizeProductLines(');
     expect(service).toContain('product_line: productLine');
+    expect(service).toContain('product_lines: productLines');
+    expect(service).toContain('application_conversion_events');
+    expect(service).toContain('marketing_performance_events');
     expect(service).toContain("Conversion value currency must be GBP");
     expect(service).toContain('value_pence must be a non-negative integer');
     expect(service).toContain('duplicate');
@@ -69,13 +73,14 @@ describe('EquiProfile connector wire contract', () => {
     expect(migration).toContain('UNIQUE (application_id, event_id)');
   });
 
-  test('business snapshots may classify Management, Academy and Shop but reject unknown product lines', () => {
+  test('business snapshots accept host-defined product scopes and reject invalid slug syntax', () => {
     const service = read('apps/api/src/services/application-connector.service.ts');
 
-    expect(service).toContain('product_lines?: HostProductLine[]');
+    expect(service).toContain('product_lines?: ProductScopeKey[]');
     expect(service).toContain('validateSnapshotProductLines(payload)');
-    expect(service).toContain('BUSINESS_SNAPSHOT_PRODUCT_LINE_INVALID');
-    expect(service).toContain("['management', 'academy', 'shop']");
+    expect(service).toContain('normalizeProductLines(payload.app.product_lines || [])');
+    expect(service).toContain('PRODUCT_SCOPE_INVALID');
+    expect(service).not.toContain("['management', 'academy', 'shop'].includes");
   });
 
   test('reusable SDK preserves the canonical signed wire protocol without product branding', () => {
