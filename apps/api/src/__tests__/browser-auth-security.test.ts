@@ -23,6 +23,9 @@ describe('Marketing browser authentication and white-label shell', () => {
     const store = read('apps/web/src/stores/auth.store.ts');
     const client = read('apps/web/src/lib/api.ts');
     const mfa = read('apps/web/app/(auth)/mfa/setup/page.tsx');
+    const dashboard = read('apps/web/app/(dashboard)/dashboard/page.tsx');
+    const billing = read('apps/web/app/(dashboard)/billing/page.tsx');
+    const studio = read('apps/web/app/(dashboard)/creative-studio/page.tsx');
 
     expect(store).not.toContain("localStorage.setItem('auth_token'");
     expect(store).not.toContain("localStorage.setItem('refresh_token'");
@@ -31,8 +34,12 @@ describe('Marketing browser authentication and white-label shell', () => {
     expect(client).not.toContain('getToken()');
     expect(client).not.toContain('headers.Authorization');
     expect(client).toContain("credentials: 'include'");
-    expect(mfa).not.toContain('Authorization: `Bearer');
-    expect(mfa).toContain("credentials: 'include'");
+    for (const source of [mfa, dashboard, billing, studio]) {
+      expect(source).not.toContain('Authorization: `Bearer');
+      expect(source).not.toContain("localStorage.getItem('auth_token'");
+      expect(source).toContain("credentials: 'include'");
+    }
+    expect(studio).not.toContain('getToken:');
   });
 
   test('dashboard always revalidates authentication with the server', () => {
@@ -50,17 +57,19 @@ describe('Marketing browser authentication and white-label shell', () => {
     const authLayout = read('apps/web/app/(auth)/layout.tsx');
     const login = read('apps/web/app/(auth)/login/page.tsx');
     const mfa = read('apps/web/app/(auth)/mfa/setup/page.tsx');
-    const dashboard = read('apps/web/app/(dashboard)/layout.tsx');
+    const dashboardLayout = read('apps/web/app/(dashboard)/layout.tsx');
+    const dashboardHome = read('apps/web/app/(dashboard)/dashboard/page.tsx');
+    const studio = read('apps/web/app/(dashboard)/creative-studio/page.tsx');
     const register = read('apps/web/app/(auth)/register/page.tsx');
 
     expect(branding).toContain('NEXT_PUBLIC_MARKETING_BRAND_NAME');
-    expect(root).not.toContain('equiprofile.online');
-    expect(root).not.toContain('EquiProfile');
-    expect(authLayout).not.toContain('EquiProfile');
-    expect(login).not.toContain('EquiProfile');
-    expect(mfa).not.toContain('EquiProfile');
-    expect(dashboard).not.toContain('EquiProfile');
-    expect(register).not.toContain('EquiProfile');
+    for (const source of [root, authLayout, login, mfa, dashboardLayout, dashboardHome, studio, register]) {
+      expect(source).not.toContain('equiprofile.online');
+      expect(source).not.toContain('EquiProfile');
+    }
+    expect(dashboardHome).toContain('MARKETING_BRAND_NAME');
+    expect(studio).toContain('MARKETING_BRAND_NAME');
+    expect(studio).not.toContain('equiprofile-');
     expect(register).toContain('Public self-registration is disabled');
   });
 });
