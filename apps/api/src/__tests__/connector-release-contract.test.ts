@@ -18,14 +18,19 @@ describe('reusable Application Connector release boundaries', () => {
     expect(service).toContain('Host application ID must be a stable lowercase slug');
   });
 
-  test('shared production environment has neutral deployment defaults', () => {
+  test('shared production environment and public API startup use neutral deployment defaults', () => {
     const environment = read('apps/api/src/config/env.ts');
+    const server = read('apps/api/src/server.ts');
 
     expect(environment).toContain("APP_URL must use HTTPS in production");
     expect(environment).toContain("BILLING_CURRENCY must be GBP for this deployment");
     expect(environment).toContain("SMTP_FROM: isProduction ? getEnv('SMTP_FROM')");
     expect(environment).not.toContain('noreply@equiprofile.online');
     expect(environment).not.toContain('EquiProfile launch deployment');
+    expect(server).toContain('ensureConfiguredApplicationConnector');
+    expect(server).not.toContain('ensureConfiguredEquiProfileConnector');
+    expect(server).toContain("name: 'Marketing API'");
+    expect(server).not.toContain("name: 'EquiProfile Marketing API'");
   });
 
   test('conversion and snapshot routes enforce the sensitive-data boundary', () => {
@@ -48,5 +53,16 @@ describe('reusable Application Connector release boundaries', () => {
     expect(page).not.toContain('accessToken');
     expect(page).not.toContain('EquiProfile');
     expect(page).not.toContain('equiprofile.online');
+  });
+
+  test('server-side SDK refuses remote plaintext transport, embedded credentials, weak keys and invalid app IDs', () => {
+    const sdk = read('packages/application-connector-sdk/src/index.ts');
+
+    expect(sdk).toContain("parsed.protocol === 'http:' && loopback");
+    expect(sdk).toContain('CONNECTOR_URL_CREDENTIALS');
+    expect(sdk).toContain('CONNECTOR_KEY_WEAK');
+    expect(sdk).toContain('APPLICATION_ID_INVALID');
+    expect(sdk).toContain("/^[a-z0-9][a-z0-9_-]{0,99}$/");
+    expect(sdk).toContain('ProductScopeKey = string');
   });
 });
