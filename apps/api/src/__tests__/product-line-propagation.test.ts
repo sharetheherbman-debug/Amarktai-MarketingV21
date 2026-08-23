@@ -46,7 +46,7 @@ describe('generic multi-product campaign propagation', () => {
   });
 
   it('stores generic connector scope in immutable conversions and derived attribution', () => {
-    expect(connector).toContain('normalizeProductScopes');
+    expect(connector).toContain('normalizeProductLines(');
     expect(connector).toContain('product_lines');
     expect(connector).toContain('application_conversion_events');
     expect(connector).toContain('marketing_performance_events');
@@ -63,8 +63,12 @@ describe('generic multi-product campaign propagation', () => {
   });
 
   it('validates and persists generic scope arrays in campaign CRUD', () => {
-    expect(validation).toContain('product_lines');
+    expect(validation).toContain('const productScopeSchema');
+    expect(validation).toContain('product_line: productScopeSchema.optional()');
+    expect(validation).toContain('product_lines: z.array(productScopeSchema)');
+    expect(validation).not.toContain("product_line: z.enum(['management', 'academy', 'shop'])");
     expect(campaignRoute).toContain('product_lines');
+    expect(campaignRoute).toContain('normalizeProductScopes');
     expect(campaignAiRoute).toContain('product_lines');
     expect(campaignAiRoute).toContain('normalizeProductScopes');
     expect(campaignAiRoute).not.toContain("product_line must be management, academy, or shop");
@@ -77,9 +81,11 @@ describe('generic multi-product campaign propagation', () => {
     expect(production).toContain('normalizeProductScopes');
   });
 
-  it('exposes reusable multi-product scope in the Campaign Planner UI', () => {
-    expect(plannerUi).toContain('Product/service scopes');
+  it('exposes reusable multi-product scope in the Campaign Planner UI without host-specific examples', () => {
+    expect(plannerUi).toContain('Product / service scopes');
     expect(plannerUi).toContain('product_lines');
+    expect(plannerUi).toContain('Use the lowercase keys declared by the connected application');
+    expect(plannerUi).not.toContain('management, academy');
     expect(plannerUi).not.toContain('<option value="management">Management</option>');
     expect(plannerUi).not.toContain('<option value="academy">Academy</option>');
     expect(plannerUi).not.toContain('<option value="shop">Shop</option>');
