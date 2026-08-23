@@ -10,14 +10,13 @@ interface RedeemResponse {
   data?: {
     user: User;
     organization: Organization;
-    accessToken: string;
     target_path: string;
     mfa_enrollment_required?: boolean;
   };
   error?: { message?: string };
 }
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api/v1';
+const API_URL = String(process.env.NEXT_PUBLIC_API_URL || '/api/v1').replace(/\/+$/, '');
 
 function ConnectorSsoContent() {
   const router = useRouter();
@@ -50,7 +49,6 @@ function ConnectorSsoContent() {
         if (cancelled) return;
         acceptTrustedSession({
           user: payload.data.user,
-          accessToken: payload.data.accessToken,
           organization: payload.data.organization,
           target_path: payload.data.target_path,
         });
