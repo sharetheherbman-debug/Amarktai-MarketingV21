@@ -196,7 +196,7 @@ export default function CampaignPlannerPage() {
               </select></div>
             <div><label className="block text-sm font-medium text-zinc-300 mb-1.5">Product / service scopes</label>
               <input type="text" value={form.product_scopes} onChange={e => setForm({ ...form, product_scopes: e.target.value })}
-                placeholder="management, academy — comma separated"
+                placeholder="crm-pro, consulting — comma separated"
                 className="h-10 w-full rounded-lg border border-white/[0.06] bg-white/[0.03] px-4 text-sm text-white placeholder-zinc-500 outline-none focus:border-brand-500/50" />
               <p className="mt-1 text-[11px] text-zinc-500">Use the lowercase keys declared by the connected application. Multiple scopes create one combined campaign.</p></div>
             <div><label className="block text-sm font-medium text-zinc-300 mb-1.5">Target Audience</label>
