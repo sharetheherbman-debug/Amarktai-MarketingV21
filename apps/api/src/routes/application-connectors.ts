@@ -1,5 +1,6 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { ApiResponse } from '../types';
+import { assertConnectorPayloadSafe } from '../utils/connector-data-boundary';
 import {
   authenticateApplicationRequest,
   issueSsoCode,
@@ -80,6 +81,7 @@ router.post('/sso/redeem', async (req: Request, res: Response<ApiResponse>, next
 router.post('/events/conversion', async (req: Request, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
   try {
     const application = await authenticateApplicationRequest(req, req.body);
+    assertConnectorPayloadSafe(req.body?.properties || {}, 'conversion.properties');
     const result = await recordConversionEvent(application, req.body as ConversionEventPayload);
     res.status(result.duplicate ? 200 : 201).json({ success: true, data: result });
   } catch (error) {
@@ -90,6 +92,7 @@ router.post('/events/conversion', async (req: Request, res: Response<ApiResponse
 router.post('/business-snapshot', async (req: Request, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
   try {
     const application = await authenticateApplicationRequest(req, req.body);
+    assertConnectorPayloadSafe(req.body, 'business_snapshot');
     const result = await recordBusinessSnapshot(application, req.body as BusinessSnapshotPayload);
     res.status(result.duplicate ? 200 : 201).json({ success: true, data: result });
   } catch (error) { next(error); }
