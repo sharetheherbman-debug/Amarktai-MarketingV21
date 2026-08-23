@@ -48,7 +48,7 @@ export default function LoginPage() {
   return (
     <AuthCard
       title="Welcome back"
-      subtitle="Sign in to EquiProfile Marketing"
+      subtitle="Sign in to your Marketing workspace"
     >
       <form onSubmit={handleSubmit} className="space-y-5">
         <div>
@@ -135,7 +135,7 @@ export default function LoginPage() {
       </form>
 
       <p className="mt-6 text-center text-xs leading-5 text-zinc-500">
-        Owner access only. Accounts are provisioned through the secure EquiProfile Marketing onboarding flow.
+        Workspace access is provisioned by an administrator or through a trusted connected application.
       </p>
     </AuthCard>
   );
