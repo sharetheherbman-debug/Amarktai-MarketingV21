@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { AuthCard } from '@/components/auth/AuthCard';
-import { useAuthStore } from '@/stores/auth.store';
+import { useAuthStore, type User } from '@/stores/auth.store';
 
 const API_URL = String(process.env.NEXT_PUBLIC_API_URL || '/api/v1').replace(/\/+$/, '');
 
@@ -15,7 +15,7 @@ interface MfaSetup {
 interface ConfirmPayload {
   success?: boolean;
   data?: {
-    user: Parameters<ReturnType<typeof useAuthStore.getState>['setUser']>[0];
+    user: User;
     recovery_codes: string[];
   };
   error?: { message?: string };
