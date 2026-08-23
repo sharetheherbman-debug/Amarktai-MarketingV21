@@ -70,13 +70,14 @@ describe('social network and release completion invariants', () => {
     expect(migration).not.toContain('DROP TABLE');
   });
 
-  test('pins deployment to reviewed SHA and prevents first-run owner recreation', () => {
+  test('pins deployment to reviewed SHA and keeps first-run bootstrap explicit and fail-closed', () => {
     const gate = read('scripts/vps-release-gate.sh');
     const update = read('scripts/vps-update.sh');
     const env = read('.env.production.example');
     expect(gate).toContain('DEPLOY_SHA');
     expect(gate).toContain('does not equal reviewed DEPLOY_SHA');
-    expect(gate).toContain('FIRST_RUN=true is not allowed');
+    expect(gate).toContain('FIRST_RUN=true requires explicit ALLOW_FIRST_RUN_BOOTSTRAP=true');
+    expect(gate).toContain('refusing accidental production bootstrap');
     expect(update).toContain('git checkout --detach "${reviewed_sha}"');
     expect(update).not.toContain('git pull --ff-only');
     expect(env).toContain('FIRST_RUN=false');
@@ -108,14 +109,18 @@ describe('social network and release completion invariants', () => {
     expect(restore).toContain('RESTORE_WORKERS');
   });
 
-  test('documents the real EquiProfile shared-host release topology', () => {
+  test('documents the real EquiProfile shared-host release topology and current migration tail', () => {
     const runbook = read('docs/VPS_DEPLOYMENT.md');
     const short = read('docs/DEPLOYMENT.md');
     for (const document of [runbook, short]) {
       expect(document).toContain('marketing.equiprofile.online');
       expect(document).not.toContain('marketing.amarktai.co.za');
     }
-    expect(runbook).toContain('migrations, including 030/031/032');
+    for (const expected of [
+      '030/031/032',
+      '033_product_line_campaign_intelligence.sql',
+      '034_generic_multi_product_scope.sql',
+    ]) expect(runbook).toContain(expected);
     expect(runbook).toContain('generation → long-form still-motion → render');
     expect(runbook).toContain('TikTok public Direct Post remains dependent');
   });

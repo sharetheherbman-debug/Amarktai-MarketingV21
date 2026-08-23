@@ -4,6 +4,7 @@ import { logger } from '../utils/logger';
 import { NotFoundError, AppError } from '../middleware/errorHandler';
 import { contextEngine } from './context-engine.service';
 import { generateGovernedText } from './governed-text-generation.service';
+import { legacyProductLine, normalizeProductScopes } from '../utils/product-scope';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -14,6 +15,10 @@ export interface CampaignPlan {
   goal: string | null;
   target_audience: Record<string, unknown>;
   budget_cents: number;
+  /** Legacy scalar compatibility when exactly one scope is selected. */
+  product_line: string | null;
+  /** Canonical multi-product/service scope. */
+  product_lines: string[];
   strategy: Record<string, unknown>;
   channels: Record<string, unknown>;
   kpis: Record<string, unknown>;
@@ -50,6 +55,9 @@ export interface CampaignPlanInput {
   goal: string;
   target_audience: string;
   budget_cents: number;
+  /** Legacy input accepted for existing clients. */
+  product_line?: string;
+  product_lines?: string[];
   products: string;
   location: string;
   duration_weeks?: number;
@@ -81,6 +89,8 @@ export interface CampaignPlanUpdate {
   optimization_plan?: Record<string, unknown>;
   constraints?: Record<string, unknown>;
   generation_credit_limit?: number;
+  product_line?: string | null;
+  product_lines?: string[];
   change_summary?: string;
 }
 
@@ -124,6 +134,8 @@ async function savePlanVersion(plan: CampaignPlan, userId: string, summary: stri
 // ─── Campaign Planner ────────────────────────────────────────────────────────
 
 export async function generatePlan(orgId: string, input: CampaignPlanInput, userId: string): Promise<CampaignPlan> {
+  const productLines = normalizeProductScopes(input.product_lines ?? input.product_line);
+  const productLine = legacyProductLine(productLines);
   const context = await contextEngine.assemble({
     orgId,
     agentId: '',
@@ -137,6 +149,7 @@ export async function generatePlan(orgId: string, input: CampaignPlanInput, user
     objective_stage: input.objective_stage || 'conversion',
     target_audience: input.target_audience,
     budget_gbp: Number((input.budget_cents / 100).toFixed(2)),
+    product_scopes: productLines.length > 0 ? productLines : ['unclassified'],
     products_or_services: input.products,
     location: input.location,
     duration_weeks: input.duration_weeks || 4,
@@ -162,7 +175,7 @@ ${JSON.stringify(factualInputs, null, 2)}
 ${context.brandDna ? `BRAND CONTEXT:\n${context.brandDna.substring(0, 4000)}` : 'BRAND CONTEXT: Not configured. Use a neutral professional voice and flag this limitation.'}
 ${context.knowledge ? `APPROVED BUSINESS KNOWLEDGE:\n${context.knowledge.substring(0, 4000)}` : 'APPROVED BUSINESS KNOWLEDGE: Not configured.'}
 
-Adapt each asset to its platform rather than duplicating identical copy. Connect the campaign idea, audience needs, objections, offer, proof, call to action, schedule and measurement plan. This is an internal planning artifact: validate and revise it autonomously. Put only genuinely owner-dependent factual, legal, claim or pricing decisions in constraints.missing_information.
+Adapt each asset to its platform rather than duplicating identical copy. Connect the campaign idea, audience needs, objections, offer, proof, call to action, schedule and measurement plan. If more than one product/service scope is selected, create a coherent combined campaign without merging facts or offers that belong to different products. This is an internal planning artifact: validate and revise it autonomously. Put only genuinely owner-dependent factual, legal, claim or pricing decisions in constraints.missing_information.
 
 Return strict JSON only with this shape:
 {
@@ -188,7 +201,7 @@ Return strict JSON only with this shape:
       prompt,
       maxTokens: 6000,
       temperature: 0.7,
-      payload: { campaign_name: input.name, objective_stage: factualInputs.objective_stage },
+      payload: { campaign_name: input.name, objective_stage: factualInputs.objective_stage, product_lines: productLines },
     });
 
     const parsed = parseGeneratedPlan(result.content);
@@ -203,8 +216,8 @@ Return strict JSON only with this shape:
           creative_concept,messaging_plan,channels,kpis,content_calendar,
           asset_requirements,optimization_plan,constraints,generation_credit_limit,
           status,strategy_validation_status,owner_clarification,ai_generated,created_by,
-          planning_idempotency_key)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,'draft',$17,$18,TRUE,$19,$20)
+          planning_idempotency_key,product_line,product_lines)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,'draft',$17,$18,TRUE,$19,$20,$21,$22)
        ON CONFLICT (organization_id,planning_idempotency_key)
          WHERE planning_idempotency_key IS NOT NULL
        DO UPDATE SET updated_at=campaign_plans.updated_at
@@ -223,6 +236,8 @@ Return strict JSON only with this shape:
         JSON.stringify(missingInformation.map((question: unknown) => ({ type: 'missing_information', question: String(question) }))),
         userId,
         input.idempotency_key || null,
+        productLine,
+        JSON.stringify(productLines),
       ]
     );
 
@@ -297,6 +312,11 @@ export async function updatePlan(
   input: CampaignPlanUpdate,
   userId: string
 ): Promise<CampaignPlan> {
+  const normalizedScopes = input.product_lines !== undefined
+    ? normalizeProductScopes(input.product_lines)
+    : input.product_line !== undefined
+      ? normalizeProductScopes(input.product_line)
+      : undefined;
   const fields: Array<[keyof CampaignPlanUpdate, string, boolean]> = [
     ['name', 'name', false], ['goal', 'goal', false], ['brief', 'brief', true],
     ['strategy', 'strategy', true], ['creative_concept', 'creative_concept', true],
@@ -314,6 +334,12 @@ export async function updatePlan(
     }
     values.push(json ? JSON.stringify(input[key]) : input[key]);
     updates.push(`${column}=$${values.length}`);
+  }
+  if (normalizedScopes !== undefined) {
+    values.push(legacyProductLine(normalizedScopes));
+    updates.push(`product_line=$${values.length}`);
+    values.push(JSON.stringify(normalizedScopes));
+    updates.push(`product_lines=$${values.length}`);
   }
   if (updates.length === 0) return getPlanById(id, orgId);
   values.push(id, orgId);
@@ -351,6 +377,12 @@ export async function listPlanVersions(id: string, orgId: string): Promise<Recor
 // ─── Mapper ──────────────────────────────────────────────────────────────────
 
 function mapPlanRow(row: Record<string, unknown>): CampaignPlan {
+  const rawScopes = typeof row.product_lines === 'string'
+    ? JSON.parse(row.product_lines)
+    : row.product_lines;
+  const productLines = Array.isArray(rawScopes)
+    ? normalizeProductScopes(rawScopes)
+    : normalizeProductScopes(row.product_line);
   return {
     id: row.id as string,
     organization_id: row.organization_id as string,
@@ -358,6 +390,8 @@ function mapPlanRow(row: Record<string, unknown>): CampaignPlan {
     goal: row.goal as string | null,
     target_audience: typeof row.target_audience === 'string' ? JSON.parse(row.target_audience) : (row.target_audience as Record<string, unknown>) || {},
     budget_cents: parseInt(row.budget_cents as string) || 0,
+    product_line: legacyProductLine(productLines),
+    product_lines: productLines,
     strategy: typeof row.strategy === 'string' ? JSON.parse(row.strategy) : (row.strategy as Record<string, unknown>) || {},
     channels: typeof row.channels === 'string' ? JSON.parse(row.channels) : (row.channels as Record<string, unknown>) || {},
     kpis: typeof row.kpis === 'string' ? JSON.parse(row.kpis) : (row.kpis as Record<string, unknown>) || {},

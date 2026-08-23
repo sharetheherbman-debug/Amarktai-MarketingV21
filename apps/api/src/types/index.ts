@@ -1059,6 +1059,7 @@ export interface GenerateContentRequest {
   campaign_id?: string;
   campaign_plan_id?: string;
   brief_id?: string;
+  product_line?: 'management' | 'academy' | 'shop';
   max_words?: number;
   tone?: string;
   language?: string;

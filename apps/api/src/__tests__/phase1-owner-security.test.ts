@@ -18,13 +18,15 @@ describe('Phase 1 owner-only security boundary', () => {
     expect(middleware).toContain("new URL('/login'");
   });
 
-  test('full sessions require Marketing MFA even after connector SSO', () => {
+  test('full sessions require Marketing MFA and connector SSO serializes first-owner provisioning', () => {
     const auth = read('apps/api/src/middleware/auth.ts');
     const connector = read('apps/api/src/services/application-connector.service.ts');
     expect(auth).toContain('payload.mfa !== true');
     expect(connector).toContain('mfa_enrollment_required: !mfaComplete');
-    expect(connector).toContain("const membershipRole = 'owner'");
-    expect(connector).toContain('OWNER_ALREADY_PROVISIONED');
+    expect(connector).toContain('SELECT id FROM organizations WHERE id=$1 FOR UPDATE');
+    expect(connector).toContain("=== 0 ? 'owner' : 'admin'");
+    expect(connector).toContain("WHEN organization_members.role='owner' THEN 'owner'");
+    expect(connector).not.toContain('OWNER_ALREADY_PROVISIONED');
   });
 
   test('TOTP secrets, one-time recovery codes, replay counters and audit evidence are present', () => {

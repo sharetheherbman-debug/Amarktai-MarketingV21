@@ -6,6 +6,7 @@ import { useAuthStore } from '@/stores/auth.store';
 import { useUIStore } from '@/stores/ui.store';
 import { DashboardSidebar } from '@/components/dashboard/DashboardSidebar';
 import { DashboardHeader } from '@/components/dashboard/DashboardHeader';
+import { MARKETING_BRAND_NAME } from '@/lib/branding';
 import { cn } from '@/lib/utils';
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
@@ -58,7 +59,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         <main className="flex-1 overflow-y-auto p-6">
           {children}
           <footer className="mt-10 border-t border-white/[0.06] py-6 text-center text-xs text-zinc-600">
-            © 2026 EquiProfile Marketing
+            © 2026 {MARKETING_BRAND_NAME}
           </footer>
         </main>
       </div>

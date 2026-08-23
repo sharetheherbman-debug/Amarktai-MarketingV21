@@ -11,6 +11,7 @@ import {
   VideoStudio,
 } from '@amarktai/studio';
 import { useAuthStore } from '@/stores/auth.store';
+import { MARKETING_BRAND_NAME } from '@/lib/branding';
 
 const tabs = [
   { id: 'image', label: 'Image Studio', icon: Image },
@@ -36,12 +37,12 @@ export default function CreativeStudioPage() {
   const [activeTab, setActiveTab] = useState<TabId>('image');
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const { token } = useAuthStore();
-  const orgId = typeof window !== 'undefined' ? localStorage.getItem('org_id') || '' : '';
+  const currentOrganization = useAuthStore((state) => state.currentOrganization);
+  const orgId = currentOrganization?.id || '';
 
   const studioClient = useMemo(
-    () => new StudioClient({ organizationId: orgId, getToken: () => token }),
-    [orgId, token]
+    () => new StudioClient({ organizationId: orgId }),
+    [orgId]
   );
 
   const upsertHistory = useCallback((generation: any) => {
@@ -59,7 +60,10 @@ export default function CreativeStudioPage() {
   }, []);
 
   useEffect(() => {
-    if (!orgId || !token) return;
+    if (!orgId) {
+      setError('No organization is available for Creative Studio.');
+      return;
+    }
     let cancelled = false;
     studioClient
       .listHistory(100)
@@ -71,15 +75,12 @@ export default function CreativeStudioPage() {
         if (!cancelled) setError(cause.message);
       });
     return () => { cancelled = true; };
-  }, [orgId, token, studioClient, upsertHistory]);
+  }, [orgId, studioClient, upsertHistory]);
 
   const handleGenerationComplete = useCallback((result: any) => upsertHistory(result), [upsertHistory]);
 
   const handleDownload = useCallback(async (url: string, filename: string) => {
-    const response = await fetch(url, {
-      credentials: 'include',
-      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-    });
+    const response = await fetch(url, { credentials: 'include' });
     if (!response.ok) throw new Error(`Download failed: ${response.status}`);
     const blobUrl = URL.createObjectURL(await response.blob());
     const anchor = document.createElement('a');
@@ -87,7 +88,7 @@ export default function CreativeStudioPage() {
     anchor.download = filename;
     anchor.click();
     URL.revokeObjectURL(blobUrl);
-  }, [token]);
+  }, []);
 
   const renderPreview = (item: HistoryItem) => {
     if (!item.url) return <div className="h-32 p-3 text-xs text-zinc-500">{item.status}</div>;
@@ -103,7 +104,7 @@ export default function CreativeStudioPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold text-white">EquiProfile Creative Studio</h1>
+        <h1 className="text-2xl font-bold text-white">{MARKETING_BRAND_NAME} Creative Studio</h1>
         <p className="mt-1 text-sm text-zinc-400">Generate images, video, audio and long-form projects through GenX.</p>
       </div>
 
@@ -148,7 +149,7 @@ export default function CreativeStudioPage() {
                   <div className="mt-1 flex items-center justify-between">
                     <span className="text-[10px] text-zinc-500">{item.status} · {new Date(item.timestamp).toLocaleTimeString()}</span>
                     {item.url && (
-                      <button aria-label="Download generated asset" onClick={() => handleDownload(item.url!, `equiprofile-${item.id}`)} className="rounded p-1 text-zinc-400 opacity-0 transition-opacity hover:text-white focus:opacity-100 group-hover:opacity-100">
+                      <button aria-label="Download generated asset" onClick={() => handleDownload(item.url!, `generated-${item.id}`)} className="rounded p-1 text-zinc-400 opacity-0 transition-opacity hover:text-white focus:opacity-100 group-hover:opacity-100">
                         <Download className="h-3.5 w-3.5" />
                       </button>
                     )}

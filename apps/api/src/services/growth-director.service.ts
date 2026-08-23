@@ -7,6 +7,7 @@ import { logger } from '../utils/logger';
 import { AppError } from '../middleware/errorHandler';
 import { contextEngine } from './context-engine.service';
 import { generatePlan, type CampaignPlan } from './campaign-planner.service';
+import { legacyProductLine, normalizeProductScopes } from '../utils/product-scope';
 import * as contentEngine from './content-engine.service';
 import * as contentWorkflow from './content-workflow.service';
 
@@ -20,6 +21,15 @@ function objectValue(value: unknown): Record<string, unknown> {
 
 function stringArray(value: unknown): string[] {
   return Array.isArray(value) ? value.map(String).map((item) => item.trim()).filter(Boolean) : [];
+}
+
+function productScopes(primary: unknown, legacy?: unknown): string[] {
+  const direct = normalizeProductScopes(primary);
+  return direct.length > 0 ? direct : normalizeProductScopes(legacy);
+}
+
+function scopeLabel(scopes: string[]): string {
+  return scopes.length > 0 ? scopes.join('+') : 'unclassified';
 }
 
 async function scheduleApprovedSocialAssets(cycleId: string, organizationId: string, campaignPlanId: string): Promise<{
@@ -87,7 +97,7 @@ async function scheduleApprovedSocialAssets(cycleId: string, organizationId: str
 
 async function persistPerformanceLearning(organizationId: string, campaignPlanId: string): Promise<Record<string, unknown>> {
   const performance = await query(
-    `SELECT content.id,content.title,content.platform,
+    `SELECT content.id,content.title,content.platform,run.product_line,run.product_lines,
             COUNT(event.id)::int AS event_count,
             COALESCE(SUM(event.value_pence),0)::bigint AS value_pence
      FROM campaign_asset_runs run
@@ -96,10 +106,15 @@ async function persistPerformanceLearning(organizationId: string, campaignPlanId
      LEFT JOIN marketing_performance_events event
        ON event.organization_id=content.organization_id
       AND event.content_id=content.id
+      AND (
+        jsonb_array_length(COALESCE(run.product_lines,'[]'::jsonb))=0
+        OR run.product_lines ? event.product_line
+        OR (run.product_line IS NOT NULL AND event.product_line=run.product_line)
+      )
       AND event.occurred_at>=NOW()-INTERVAL '30 days'
      WHERE run.organization_id=$1 AND run.campaign_plan_id=$2
        AND run.status='completed' AND content.deleted_at IS NULL
-     GROUP BY content.id,content.title,content.platform
+     GROUP BY content.id,content.title,content.platform,run.product_line,run.product_lines
      ORDER BY value_pence DESC,event_count DESC,content.id
      LIMIT 100`,
     [organizationId, campaignPlanId]
@@ -120,6 +135,8 @@ async function persistPerformanceLearning(organizationId: string, campaignPlanId
   if (!winner) return { measured_assets: performance.rows.length, winner: null, reason: 'No attributable performance evidence yet' };
 
   const platform = String(winner.platform || 'unclassified');
+  const winnerScopes = productScopes(winner.product_lines, winner.product_line);
+  const winnerLegacy = legacyProductLine(winnerScopes);
   await query(
     `INSERT INTO owner_marketing_preferences
        (organization_id,preference_type,preference_key,weight,evidence_count,examples)
@@ -128,7 +145,8 @@ async function persistPerformanceLearning(organizationId: string, campaignPlanId
      DO UPDATE SET weight=LEAST(10,owner_marketing_preferences.weight+0.1),
                    evidence_count=owner_marketing_preferences.evidence_count+1,
                    examples=EXCLUDED.examples,updated_at=NOW()`,
-    [organizationId, platform, JSON.stringify([{ content_id: winner.id, title: winner.title,
+    [organizationId, `${scopeLabel(winnerScopes)}:${platform}`, JSON.stringify([{ content_id: winner.id, title: winner.title,
+      product_lines: winnerScopes, product_line: winnerLegacy,
       event_count: Number(winner.event_count || 0), value_pence: Number(winner.value_pence || 0) }])]
   );
   await query(
@@ -141,11 +159,13 @@ async function persistPerformanceLearning(organizationId: string, campaignPlanId
          AND event_type='performance_learning' AND status='pending'
      )`,
     [organizationId, winner.id,
-      `Attributable performance favours ${String(winner.title || winner.id)} on ${platform}`,
+      `Attributable ${scopeLabel(winnerScopes)} performance favours ${String(winner.title || winner.id)} on ${platform}`,
       JSON.stringify({ campaign_plan_id: campaignPlanId, content_id: winner.id, platform,
+        product_lines: winnerScopes, product_line: winnerLegacy,
         event_count: Number(winner.event_count || 0), value_pence: Number(winner.value_pence || 0) })]
   );
   return { measured_assets: performance.rows.length, winner: { content_id: winner.id, platform,
+    product_lines: winnerScopes, product_line: winnerLegacy,
     event_count: Number(winner.event_count || 0), value_pence: Number(winner.value_pence || 0) } };
 }
 
@@ -221,10 +241,18 @@ async function selectOrCreateCampaignPlan(
     );
     if (attached.rows.length > 0) return { plan: attached.rows[0], created: false, contextEvidence: { reused_attached_plan: true } };
   }
+  const opportunity = objectValue(cycle.opportunity);
+  const opportunityScopes = productScopes(opportunity.product_lines, opportunity.product_line);
+  const scopeFilter = opportunityScopes.length > 0 ? opportunityScopes : null;
   const current = await query(
     `SELECT plan.* FROM campaign_plans plan
      WHERE plan.organization_id=$1 AND plan.strategy_validation_status='valid'
        AND plan.status<>'archived' AND plan.updated_at>=NOW()-INTERVAL '30 days'
+       AND (
+         $3::text[] IS NULL
+         OR plan.product_lines ?| $3::text[]
+         OR plan.product_line = ANY($3::text[])
+       )
        AND NOT EXISTS (
          SELECT 1 FROM autonomous_growth_cycles active
          WHERE active.campaign_plan_id=plan.id AND active.id<>$2
@@ -232,11 +260,13 @@ async function selectOrCreateCampaignPlan(
        )
      ORDER BY CASE plan.status WHEN 'approved' THEN 1 WHEN 'review' THEN 2 ELSE 3 END,
               plan.updated_at DESC LIMIT 1`,
-    [organizationId, cycle.id]
+    [organizationId, cycle.id, scopeFilter]
   );
-  if (current.rows.length > 0) return { plan: current.rows[0], created: false, contextEvidence: { reused_current_plan: true } };
-
-  const opportunity = objectValue(cycle.opportunity);
+  if (current.rows.length > 0) return { plan: current.rows[0], created: false, contextEvidence: {
+    reused_current_plan: true,
+    product_lines: opportunityScopes,
+    product_line: legacyProductLine(opportunityScopes),
+  } };
   const opportunitySummary = String(opportunity.summary || opportunity.source || cycle.objective || 'scheduled baseline growth opportunity');
   const context = await contextEngine.assemble({
     orgId: organizationId,
@@ -247,12 +277,14 @@ async function selectOrCreateCampaignPlan(
   });
   const ownerId = await getWorkspaceOwner(organizationId);
   const date = new Date().toISOString().slice(0, 10);
+  const scopeText = opportunityScopes.length > 0 ? ` for product/service scopes ${opportunityScopes.join(', ')}` : '';
   const plan = await generatePlan(organizationId, {
     name: `Autonomous growth opportunity — ${date}`,
     goal: String(cycle.objective || 'Identify and advance the strongest evidence-backed organic growth opportunity'),
     target_audience: 'Use the primary audience and personas in Brand DNA and connected business knowledge.',
     budget_cents: 0,
-    products: `Select the most relevant current product, plan, feature or approved offer from the shared business brain. Cycle opportunity: ${opportunitySummary}`,
+    product_lines: opportunityScopes,
+    products: `Select the most relevant current product, plan, feature or approved offer from the shared business brain${scopeText}. Cycle opportunity: ${opportunitySummary}`,
     location: 'Use configured market and location knowledge only.',
     objective_stage: 'conversion',
     offer: 'Use only an approved current offer from structured connector or owner knowledge; otherwise avoid offer-dependent claims.',
@@ -267,6 +299,8 @@ async function selectOrCreateCampaignPlan(
       assembled_at: new Date().toISOString(),
       trigger_type: cycle.trigger_type,
       opportunity: opportunitySummary,
+      product_lines: opportunityScopes,
+      product_line: legacyProductLine(opportunityScopes),
       brand_dna_available: Boolean(context.brandDna),
       shared_business_brain_available: Boolean(context.knowledge),
     },
@@ -463,17 +497,24 @@ export async function observeOrganization(organizationId: string): Promise<strin
     );
     if (change.rows.length === 0) return null;
     const event = change.rows[0];
+    const eventPayload = objectValue(event.payload);
+    const eventScopes = productScopes(eventPayload.product_lines, eventPayload.product_line);
     const cycle = await client.query(
       `INSERT INTO autonomous_growth_cycles
          (organization_id,status,trigger_type,trigger_ref,objective,opportunity,next_run_at)
        VALUES ($1,'observing','knowledge_change',$2,$3,$4,NOW()) RETURNING id`,
-      [organizationId, event.id, `Respond to ${event.event_type}`, JSON.stringify({ summary: event.summary, materiality: event.materiality })]
+      [organizationId, event.id, `Respond to ${event.event_type}`, JSON.stringify({
+        summary: event.summary,
+        materiality: event.materiality,
+        product_lines: eventScopes,
+        product_line: legacyProductLine(eventScopes),
+      })]
     );
     await client.query("UPDATE marketing_change_events SET status='consumed',consumed_at=NOW() WHERE id=$1", [event.id]);
     await client.query(
       `INSERT INTO autonomous_growth_events (cycle_id,organization_id,phase,event_type,detail)
        VALUES ($1,$2,'observing','material_change_observed',$3)`,
-      [cycle.rows[0].id, organizationId, JSON.stringify({ change_event_id: event.id, summary: event.summary })]
+      [cycle.rows[0].id, organizationId, JSON.stringify({ change_event_id: event.id, summary: event.summary, product_lines: eventScopes })]
     );
     return String(cycle.rows[0].id);
   });
@@ -581,7 +622,7 @@ export async function advanceGrowthCycles(limit = 20): Promise<number> {
           if (Number(counts.total) > 0 && resolved >= Number(counts.total)) {
             const ownerId = await getWorkspaceOwner(orgId);
             await submitQualityPassedAssets(String(claimed.rows[0].campaign_plan_id), orgId, ownerId);
-          await query("UPDATE autonomous_growth_cycles SET status='awaiting_owner_approval',next_run_at=NOW()+INTERVAL '10 minutes',claim_token=NULL,claimed_at=NULL,updated_at=NOW() WHERE id=$1", [cycleId]);
+            await query("UPDATE autonomous_growth_cycles SET status='awaiting_owner_approval',next_run_at=NOW()+INTERVAL '10 minutes',claim_token=NULL,claimed_at=NULL,updated_at=NOW() WHERE id=$1", [cycleId]);
             await recordEvent(cycleId, orgId, 'awaiting_owner_approval', 'quality_gate_completed_and_owner_review_queued', { assets: Number(counts.total) });
           } else {
             await query("UPDATE autonomous_growth_cycles SET next_run_at=NOW()+INTERVAL '5 minutes',claim_token=NULL,claimed_at=NULL,updated_at=NOW() WHERE id=$1", [cycleId]);

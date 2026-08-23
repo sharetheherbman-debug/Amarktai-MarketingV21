@@ -6,8 +6,15 @@ import { AppError, UnauthorizedError } from '../middleware/errorHandler';
 import { hashPassword } from '../utils/encryption';
 import { generateAccessToken, generateRefreshToken } from '../utils/jwt';
 import { logger } from '../utils/logger';
+import { normalizeProductScopes } from '../utils/product-scope';
 
-export type HostProductLine = 'management' | 'academy' | 'shop';
+/**
+ * Generic product/service scope key supplied by a connected application.
+ * Examples: management, academy, shop, crm-pro, payroll, consulting.
+ */
+export type ProductScopeKey = string;
+/** LEGACY_COMPAT_ONLY: historical name retained for existing imports. */
+export type HostProductLine = ProductScopeKey;
 
 export interface TrustedApplication {
   applicationId: string;
@@ -45,7 +52,7 @@ export interface BusinessSnapshotPayload {
     domain: string;
     description?: string;
     status?: string;
-    product_lines?: HostProductLine[];
+    product_lines?: ProductScopeKey[];
   };
   products?: Array<Record<string, unknown>>;
   plans?: Array<Record<string, unknown>>;
@@ -57,21 +64,58 @@ export interface BusinessSnapshotPayload {
   authoritative_fields?: string[];
 }
 
-function requiredConnectorValue(key: string, developmentDefault = ''): string {
-  const value = process.env[key] || developmentDefault;
-  if (env.NODE_ENV === 'production' && (!value || value.startsWith('replace-with') || value.length < 32)) {
-    throw new Error(`Missing or insecure production connector environment variable: ${key}`);
+function firstConfigured(keys: string[]): string {
+  for (const key of keys) {
+    const value = String(process.env[key] || '').trim();
+    if (value) return value;
+  }
+  return '';
+}
+
+function requiredConnectorSecret(keys: string[], developmentDefault: string): string {
+  const configured = firstConfigured(keys);
+  const value = configured || (env.NODE_ENV === 'production' ? '' : developmentDefault);
+  if (env.NODE_ENV === 'production' && (!value || value.startsWith('change-me') || value.startsWith('replace-with') || value.length < 32)) {
+    throw new Error(`Missing or insecure production connector secret: ${keys.join(' or ')}`);
+  }
+  return value;
+}
+
+function requiredHostValue(keys: string[], developmentDefault: string): string {
+  const configured = firstConfigured(keys);
+  const value = configured || (env.NODE_ENV === 'production' ? '' : developmentDefault);
+  if (env.NODE_ENV === 'production' && !value) {
+    throw new Error(`Missing production host-application setting: ${keys.join(' or ')}`);
   }
   return value;
 }
 
 function connectorConfig() {
+  const applicationId = requiredHostValue(['HOST_APP_ID', 'EQUIPROFILE_APP_ID'], 'equiprofile');
+  const applicationName = requiredHostValue(['HOST_APP_NAME', 'EQUIPROFILE_APP_NAME'], 'EquiProfile');
+  const applicationUrl = requiredHostValue(['HOST_APP_URL', 'EQUIPROFILE_APP_URL'], 'http://localhost:5000');
+  const connectorKey = requiredConnectorSecret(['HOST_APP_CONNECTOR_KEY', 'EQUIPROFILE_CONNECTOR_KEY'], 'development-equiprofile-connector-key');
+  const signingPepper = requiredConnectorSecret(['APPLICATION_CONNECTOR_SIGNING_SECRET'], 'development-connector-signing-pepper');
+
+  if (!/^[a-z0-9][a-z0-9_-]{0,99}$/.test(applicationId)) {
+    throw new Error('Host application ID must be a stable lowercase slug');
+  }
+  let parsedApplicationUrl: URL;
+  try {
+    parsedApplicationUrl = new URL(applicationUrl);
+  } catch {
+    throw new Error('Host application URL is invalid');
+  }
+  if (env.NODE_ENV === 'production' && parsedApplicationUrl.protocol !== 'https:') {
+    throw new Error('Host application URL must use HTTPS in production');
+  }
+
   return {
-    signingPepper: requiredConnectorValue('APPLICATION_CONNECTOR_SIGNING_SECRET', 'development-connector-signing-pepper'),
-    applicationId: process.env.HOST_APP_ID || process.env.EQUIPROFILE_APP_ID || 'equiprofile',
-    applicationName: process.env.HOST_APP_NAME || process.env.EQUIPROFILE_APP_NAME || 'EquiProfile',
-    applicationUrl: process.env.HOST_APP_URL || process.env.EQUIPROFILE_APP_URL || 'http://localhost:5000',
-    connectorKey: process.env.HOST_APP_CONNECTOR_KEY || requiredConnectorValue('EQUIPROFILE_CONNECTOR_KEY', 'development-equiprofile-connector-key'),
+    signingPepper,
+    applicationId,
+    applicationName,
+    applicationUrl: applicationUrl.replace(/\/$/, ''),
+    connectorKey,
     maxClockSkewSeconds: Number(process.env.APPLICATION_CONNECTOR_MAX_CLOCK_SKEW_SECONDS || 300),
     ssoCodeTtlSeconds: Number(process.env.APPLICATION_SSO_CODE_TTL_SECONDS || 120),
   };
@@ -97,18 +141,8 @@ function canonicalize(value: unknown): string {
   return `{${Object.keys(object).sort().map((key) => `${JSON.stringify(key)}:${canonicalize(object[key])}`).join(',')}}`;
 }
 
-function normalizeProductLine(value: unknown): HostProductLine | null {
-  const normalized = String(value || '').trim().toLowerCase();
-  return ['management', 'academy', 'shop'].includes(normalized) ? (normalized as HostProductLine) : null;
-}
-
 function validateSnapshotProductLines(payload: BusinessSnapshotPayload): void {
-  const declared = payload.app.product_lines || [];
-  for (const productLine of declared) {
-    if (!normalizeProductLine(productLine)) {
-      throw new AppError(400, 'Business snapshot contains an unsupported product line', 'BUSINESS_SNAPSHOT_PRODUCT_LINE_INVALID');
-    }
-  }
+  normalizeProductScopes(payload.app.product_lines || []);
   for (const collection of [
     payload.products,
     payload.plans,
@@ -119,9 +153,8 @@ function validateSnapshotProductLines(payload: BusinessSnapshotPayload): void {
     payload.status_changes,
   ]) {
     for (const record of collection || []) {
-      if (record.product_line !== undefined && !normalizeProductLine(record.product_line)) {
-        throw new AppError(400, 'Business snapshot record contains an unsupported product line', 'BUSINESS_SNAPSHOT_PRODUCT_LINE_INVALID');
-      }
+      if (record.product_line !== undefined) normalizeProductScopes(record.product_line);
+      if (record.product_lines !== undefined) normalizeProductScopes(record.product_lines);
     }
   }
 }
@@ -136,10 +169,6 @@ export function signApplicationPayload(key: string, timestamp: string, nonce: st
 
 export async function ensureConfiguredApplicationConnector(): Promise<void> {
   const config = connectorConfig();
-  if (!config.connectorKey && env.NODE_ENV !== 'production') {
-    logger.warn('Host application connector is not configured');
-    return;
-  }
   await query(
     `INSERT INTO application_connectors (application_id,name,base_url,key_hash,active,metadata)
      VALUES ($1,$2,$3,$4,TRUE,$5)
@@ -350,20 +379,23 @@ export async function redeemSsoCode(code: string): Promise<{
     if (organizationResult.rows.length === 0) throw new AppError(500, 'Connected Marketing workspace is unavailable', 'CONNECTOR_ORGANIZATION_MISSING');
     const organization = organizationResult.rows[0];
 
+    // Serialize owner provisioning so concurrent first-time SSO redemptions cannot
+    // create multiple owners for the same Marketing workspace.
+    await client.query('SELECT id FROM organizations WHERE id=$1 FOR UPDATE', [organization.id]);
     const ownerCount = await client.query(
       "SELECT COUNT(*)::int AS count FROM organization_members WHERE organization_id=$1 AND role='owner'",
       [organization.id]
     );
-    if (Number(ownerCount.rows[0]?.count || 0) > 0) {
-      const existingOwner = await client.query("SELECT user_id FROM organization_members WHERE organization_id=$1 AND role='owner'", [organization.id]);
-      if (String(existingOwner.rows[0]?.user_id) !== String(user.id)) throw new AppError(409, 'This application already has a Marketing owner', 'OWNER_ALREADY_PROVISIONED');
-    }
-    const membershipRole = 'owner';
+    const membershipRole = Number(ownerCount.rows[0]?.count || 0) === 0 ? 'owner' : 'admin';
     await client.query(
       `INSERT INTO organization_members (organization_id,user_id,role,invited_by)
        VALUES ($1,$2,$3,$2)
        ON CONFLICT (organization_id,user_id) DO UPDATE SET
-         role=CASE WHEN organization_members.role='owner' THEN 'owner' ELSE EXCLUDED.role END`,
+         role=CASE
+           WHEN organization_members.role='owner' THEN 'owner'
+           WHEN EXCLUDED.role='owner' THEN 'owner'
+           ELSE EXCLUDED.role
+         END`,
       [organization.id, user.id, membershipRole]
     );
 
@@ -400,16 +432,16 @@ export async function recordConversionEvent(application: TrustedApplication, pay
   }
 
   const properties = payload.properties || {};
-  const productLine = normalizeProductLine(properties.product_line);
-  if (properties.product_line !== undefined && !productLine) {
-    throw new AppError(400, 'Conversion event contains an unsupported product_line', 'CONVERSION_PRODUCT_LINE_INVALID');
-  }
+  const productLines = normalizeProductScopes(
+    properties.product_lines !== undefined ? properties.product_lines : properties.product_line,
+  );
+  const productLine = productLines.length === 1 ? productLines[0] : null;
 
   const result = await query(
     `INSERT INTO application_conversion_events
        (application_id,event_id,event_type,occurred_at,external_user_id,
-        external_organization_id,value_pence,currency,consent_basis,properties)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,'GBP',$8,$9)
+        external_organization_id,value_pence,currency,consent_basis,product_line,product_lines,properties)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,'GBP',$8,$9,$10,$11)
      ON CONFLICT (application_id,event_id) DO NOTHING
      RETURNING id`,
     [
@@ -421,7 +453,9 @@ export async function recordConversionEvent(application: TrustedApplication, pay
       payload.external_organization_id || null,
       payload.value_pence ?? null,
       payload.consent_basis,
-      JSON.stringify(properties),
+      productLine,
+      JSON.stringify(productLines),
+      JSON.stringify({ ...properties, product_lines: productLines, ...(productLine ? { product_line: productLine } : {}) }),
     ]
   );
   const connector = await query('SELECT default_organization_id FROM application_connectors WHERE id=$1', [application.connectorId]);
@@ -431,8 +465,8 @@ export async function recordConversionEvent(application: TrustedApplication, pay
     await query(
       `INSERT INTO marketing_performance_events
          (organization_id,event_id,event_type,occurred_at,campaign_id,campaign_plan_id,
-          content_id,platform,source,medium,variation_id,pseudonymous_subject,value_pence,metrics)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+          content_id,platform,source,medium,variation_id,pseudonymous_subject,value_pence,product_line,product_lines,metrics)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
        ON CONFLICT (organization_id,event_id) DO NOTHING`,
       [
         organizationId, crypto.createHash('sha256').update(`${application.applicationId}:${payload.event_id}`).digest('hex'), payload.event_type, occurredAt,
@@ -443,11 +477,31 @@ export async function recordConversionEvent(application: TrustedApplication, pay
         properties.variation_id ? String(properties.variation_id) : null,
         payload.external_user_id ? hashOpaqueValue(`${application.applicationId}:${payload.external_user_id}`) : null,
         payload.value_pence || 0,
+        productLine,
+        JSON.stringify(productLines),
         JSON.stringify({
           event_type: payload.event_type,
           consent_basis: payload.consent_basis,
+          product_lines: productLines,
           ...(productLine ? { product_line: productLine } : {}),
           ...(properties.entity_type ? { entity_type: String(properties.entity_type) } : {}),
+        }),
+      ]
+    );
+    await query(
+      `INSERT INTO marketing_change_events
+         (organization_id,source_type,event_type,materiality,summary,payload)
+       VALUES ($1,'conversion','conversion_signal','minor',$2,$3)`,
+      [
+        organizationId,
+        `${productLines.join('+') || 'unclassified'} conversion signal received`,
+        JSON.stringify({
+          application_id: application.applicationId,
+          event_id: payload.event_id,
+          event_type: payload.event_type,
+          product_line: productLine,
+          product_lines: productLines,
+          occurred_at: occurredAt.toISOString(),
         }),
       ]
     );
@@ -503,7 +557,7 @@ export async function recordBusinessSnapshot(
       `INSERT INTO marketing_change_events
          (organization_id,source_type,event_type,materiality,summary,payload)
        VALUES ($1,'connector','structured_business_change','material',$2,$3)`,
-      [organizationId, `${application.name} business knowledge advanced to version ${version}`, JSON.stringify({ application_id: application.applicationId, version, snapshot_id: payload.snapshot_id, occurred_at: occurredAt.toISOString(), product_lines: payload.app.product_lines || [] })]
+      [organizationId, `${application.name} business knowledge advanced to version ${version}`, JSON.stringify({ application_id: application.applicationId, version, snapshot_id: payload.snapshot_id, occurred_at: occurredAt.toISOString(), product_lines: normalizeProductScopes(payload.app.product_lines || []) })]
     );
     return { accepted: true, duplicate: false, version, material_change: true };
   });

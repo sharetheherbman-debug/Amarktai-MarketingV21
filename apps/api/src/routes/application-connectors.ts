@@ -1,5 +1,6 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { ApiResponse } from '../types';
+import { assertConnectorPayloadSafe } from '../utils/connector-data-boundary';
 import {
   authenticateApplicationRequest,
   issueSsoCode,
@@ -19,6 +20,23 @@ const cookieOptions = {
   sameSite: 'lax' as const,
   path: '/',
 };
+
+router.post('/health', async (req: Request, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
+  try {
+    const application = await authenticateApplicationRequest(req, req.body || {});
+    res.json({
+      success: true,
+      data: {
+        connected: true,
+        application_id: application.applicationId,
+        application_name: application.name,
+        connector_version: 2,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
 
 router.post('/sso/issue', async (req: Request, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
   try {
@@ -49,8 +67,6 @@ router.post('/sso/redeem', async (req: Request, res: Response<ApiResponse>, next
       data: {
         user: session.user,
         organization: session.organization,
-        accessToken: session.accessToken,
-        refreshToken: session.refreshToken,
         target_path: session.target_path,
         mfa_enrollment_required: session.mfa_enrollment_required,
       },
@@ -63,6 +79,7 @@ router.post('/sso/redeem', async (req: Request, res: Response<ApiResponse>, next
 router.post('/events/conversion', async (req: Request, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
   try {
     const application = await authenticateApplicationRequest(req, req.body);
+    assertConnectorPayloadSafe(req.body?.properties || {}, 'conversion.properties');
     const result = await recordConversionEvent(application, req.body as ConversionEventPayload);
     res.status(result.duplicate ? 200 : 201).json({ success: true, data: result });
   } catch (error) {
@@ -73,6 +90,7 @@ router.post('/events/conversion', async (req: Request, res: Response<ApiResponse
 router.post('/business-snapshot', async (req: Request, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
   try {
     const application = await authenticateApplicationRequest(req, req.body);
+    assertConnectorPayloadSafe(req.body, 'business_snapshot');
     const result = await recordBusinessSnapshot(application, req.body as BusinessSnapshotPayload);
     res.status(result.duplicate ? 200 : 201).json({ success: true, data: result });
   } catch (error) { next(error); }

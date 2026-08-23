@@ -7,15 +7,18 @@ import { useAuthStore } from '@/stores/auth.store';
 const API_URL = String(process.env.NEXT_PUBLIC_API_URL || '/api/v1').replace(/\/+$/, '');
 
 export default function GenerationCreditsPage() {
-  const { token, currentOrganization } = useAuthStore();
+  const { currentOrganization } = useAuthStore();
   const [wallet, setWallet] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
-    if (!token || !currentOrganization) return;
-    fetch(`${API_URL}/generation-credits/wallet`, { credentials: 'include', headers: { Authorization: `Bearer ${token}`, 'x-organization-id': currentOrganization.id } })
+    if (!currentOrganization) return;
+    fetch(`${API_URL}/generation-credits/wallet`, {
+      credentials: 'include',
+      headers: { 'x-organization-id': currentOrganization.id },
+    })
       .then(async (r) => { const p = await r.json(); if (!r.ok) throw new Error(p.error?.message || 'Wallet unavailable'); return p.data; })
       .then(setWallet).catch((e) => setError(e.message));
-  }, [token, currentOrganization]);
+  }, [currentOrganization]);
   if (!wallet && !error) return <div className="flex h-64 items-center justify-center"><Loader2 className="h-8 w-8 animate-spin text-brand-400" /></div>;
   const values = [
     ['Available', wallet?.available_credits], ['Reserved', wallet?.reserved_credits],

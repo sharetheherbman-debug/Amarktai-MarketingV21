@@ -4,7 +4,7 @@ import { requireAuth, requireMfaEnrollment, AuthRequest } from '../middleware/au
 import * as mfaService from '../services/mfa.service';
 import { validateBody } from '../middleware/validator';
 import { authLimiter } from '../middleware/rateLimit';
-import { registerSchema, loginSchema, forgotPasswordSchema, resetPasswordSchema } from '../utils/validation';
+import { loginSchema, forgotPasswordSchema, resetPasswordSchema } from '../utils/validation';
 import { env } from '../config/env';
 import { ApiResponse } from '../types';
 
@@ -17,6 +17,20 @@ const cookieOptions = {
   path: '/',
 };
 
+function setAccessCookie(res: Response, accessToken: string): void {
+  res.cookie('accessToken', accessToken, {
+    ...cookieOptions,
+    maxAge: 15 * 60 * 1000,
+  });
+}
+
+function setRefreshCookie(res: Response, refreshToken: string): void {
+  res.cookie('refreshToken', refreshToken, {
+    ...cookieOptions,
+    maxAge: 7 * 24 * 60 * 60 * 1000,
+  });
+}
+
 router.post('/register', authLimiter, (_req: Request, res: Response<ApiResponse>) => {
   res.status(404).json({ success: false, error: { message: 'Public registration is not available', code: 'REGISTRATION_DISABLED' } });
 });
@@ -26,24 +40,19 @@ router.post('/login', authLimiter, validateBody(loginSchema), async (req: Reques
     const { email, password, mfa_code } = req.body;
     const { user, tokens, mfaEnrollmentRequired } = await authService.login(email, password, mfa_code);
 
+    // Even an MFA-enrollment session is kept in an HttpOnly cookie. The token has
+    // mfa=false and can only reach the narrowly scoped enrollment endpoints.
+    setAccessCookie(res, tokens.accessToken);
+
     if (mfaEnrollmentRequired) {
-      res.json({ success: true, data: { user, accessToken: tokens.accessToken, mfa_enrollment_required: true } });
+      res.json({ success: true, data: { user, mfa_enrollment_required: true } });
       return;
     }
 
-    res.cookie('accessToken', tokens.accessToken, {
-      ...cookieOptions,
-      maxAge: 15 * 60 * 1000,
-    });
-
-    res.cookie('refreshToken', tokens.refreshToken, {
-      ...cookieOptions,
-      maxAge: 7 * 24 * 60 * 60 * 1000,
-    });
-
+    setRefreshCookie(res, tokens.refreshToken);
     res.json({
       success: true,
-      data: { user, accessToken: tokens.accessToken },
+      data: { user, mfa_enrollment_required: false },
     });
   } catch (error) {
     next(error);
@@ -59,9 +68,9 @@ router.post('/mfa/confirm', authLimiter, requireMfaEnrollment, async (req: AuthR
     const code = String(req.body.code || '');
     const enrollment = await mfaService.completeEnrollment(req.user!.userId, code);
     const { user, tokens } = await authService.issueSessionAfterMfaEnrollment(req.user!.userId);
-    res.cookie('accessToken', tokens.accessToken, { ...cookieOptions, maxAge: 15 * 60 * 1000 });
-    res.cookie('refreshToken', tokens.refreshToken, { ...cookieOptions, maxAge: 7 * 24 * 60 * 60 * 1000 });
-    res.json({ success: true, data: { ...enrollment, user, accessToken: tokens.accessToken } });
+    setAccessCookie(res, tokens.accessToken);
+    setRefreshCookie(res, tokens.refreshToken);
+    res.json({ success: true, data: { ...enrollment, user } });
   } catch (error) { next(error); }
 });
 
@@ -81,6 +90,8 @@ router.post('/logout', (_req: Request, res: Response<ApiResponse>) => {
 
 router.post('/refresh', async (req: Request, res: Response<ApiResponse>, next: NextFunction) => {
   try {
+    // Body support is retained for non-browser compatibility, but the Marketing
+    // browser client uses the HttpOnly refresh cookie exclusively.
     const token = req.cookies?.refreshToken || req.body.refreshToken;
 
     if (!token) {
@@ -92,20 +103,12 @@ router.post('/refresh', async (req: Request, res: Response<ApiResponse>, next: N
     }
 
     const tokens = await authService.refreshToken(token);
-
-    res.cookie('accessToken', tokens.accessToken, {
-      ...cookieOptions,
-      maxAge: 15 * 60 * 1000,
-    });
-
-    res.cookie('refreshToken', tokens.refreshToken, {
-      ...cookieOptions,
-      maxAge: 7 * 24 * 60 * 60 * 1000,
-    });
+    setAccessCookie(res, tokens.accessToken);
+    setRefreshCookie(res, tokens.refreshToken);
 
     res.json({
       success: true,
-      data: { accessToken: tokens.accessToken },
+      data: { refreshed: true },
     });
   } catch (error) {
     next(error);

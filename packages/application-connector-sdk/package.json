@@ -1,0 +1,23 @@
+{
+  "name": "@amarktai/application-connector-sdk",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Reusable signed client for the AmarktAI Application Connector protocol",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": ["dist", "README.md"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "node --test dist/index.test.js"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

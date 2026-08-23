@@ -14,7 +14,7 @@ load_production_env
 
 backup_file="${1:-}"
 confirmation="${2:-}"
-[[ -n "${backup_file}" && -f "${backup_file}" ]] || fail "Usage: bash scripts/vps-restore.sh /path/to/equiprofile-marketing-backup.tar.gz.enc --yes"
+[[ -n "${backup_file}" && -f "${backup_file}" ]] || fail "Usage: bash scripts/vps-restore.sh /path/to/marketing-backup.tar.gz.enc --yes"
 [[ "${confirmation}" == "--yes" ]] || fail "Restore replaces the Marketing database, Redis state and Studio uploads. Re-run with --yes."
 [[ "${#BACKUP_ENCRYPTION_PASSPHRASE:-}" -ge 24 ]] || fail "BACKUP_ENCRYPTION_PASSPHRASE is missing or too short"
 
@@ -51,7 +51,7 @@ compose up -d postgres
 log "Waiting for PostgreSQL"
 postgres_ready=0
 for _attempt in $(seq 1 30); do
-  if compose exec -T postgres pg_isready -U "${POSTGRES_USER:-amarktai}" -d postgres >/dev/null 2>&1; then
+  if compose exec -T postgres pg_isready -U "${POSTGRES_USER:-marketing}" -d postgres >/dev/null 2>&1; then
     postgres_ready=1
     break
   fi
@@ -61,15 +61,15 @@ done
 
 log "Replacing Marketing PostgreSQL database"
 compose exec -T postgres dropdb \
-  --username "${POSTGRES_USER:-amarktai}" \
-  --if-exists --force "${POSTGRES_DB:-amarktai_marketing}"
+  --username "${POSTGRES_USER:-marketing}" \
+  --if-exists --force "${POSTGRES_DB:-marketing}"
 compose exec -T postgres createdb \
-  --username "${POSTGRES_USER:-amarktai}" \
-  --owner "${POSTGRES_USER:-amarktai}" \
-  "${POSTGRES_DB:-amarktai_marketing}"
+  --username "${POSTGRES_USER:-marketing}" \
+  --owner "${POSTGRES_USER:-marketing}" \
+  "${POSTGRES_DB:-marketing}"
 compose exec -T postgres pg_restore \
-  --username "${POSTGRES_USER:-amarktai}" \
-  --dbname "${POSTGRES_DB:-amarktai_marketing}" \
+  --username "${POSTGRES_USER:-marketing}" \
+  --dbname "${POSTGRES_DB:-marketing}" \
   --no-owner --no-acl < "${work_dir}/database.dump"
 
 log "Replacing Studio uploads"

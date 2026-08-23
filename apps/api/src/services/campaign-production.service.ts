@@ -3,6 +3,7 @@ import { AppError, NotFoundError } from '../middleware/errorHandler';
 import type { ContentPlatform, ContentType, GenerateContentRequest } from '../types';
 import { generationQueue } from './studio.service';
 import * as studioService from './studio.service';
+import { legacyProductLine, normalizeProductScopes } from '../utils/product-scope';
 
 function asObject(value: unknown): Record<string, any> {
   if (value && typeof value === 'object') return value as Record<string, any>;
@@ -27,12 +28,20 @@ function contentType(format: string, platform: string): ContentType {
   return 'blog';
 }
 
+function planScopes(plan: Record<string, any>): string[] {
+  const raw = typeof plan.product_lines === 'string'
+    ? (() => { try { return JSON.parse(plan.product_lines); } catch { return []; } })()
+    : plan.product_lines;
+  return normalizeProductScopes(Array.isArray(raw) && raw.length > 0 ? raw : plan.product_line);
+}
+
 function assetPrompt(plan: Record<string, any>, brief: Record<string, any>, variant: number): string {
+  const scopes = planScopes(plan);
   return `Create variation ${variant} of this internally validated campaign asset brief.
-Use the validated strategy and business facts as the only source of claims. Preserve the offer, central concept and CTA while adapting structure and length to the specified channel. Never invent facts, statistics, testimonials, guarantees, certifications or prices.
+Use the validated strategy and business facts as the only source of claims. Preserve the offer, central concept and CTA while adapting structure and length to the specified channel. Never invent facts, statistics, testimonials, guarantees, certifications or prices. Keep facts from different products/services correctly attributed when multiple scopes are selected.
 
 VALIDATED CAMPAIGN:
-${JSON.stringify({ brief: asObject(plan.brief), creative_concept: asObject(plan.creative_concept), messaging_plan: asObject(plan.messaging_plan), constraints: asObject(plan.constraints) }, null, 2)}
+${JSON.stringify({ product_lines: scopes.length > 0 ? scopes : ['unclassified'], brief: asObject(plan.brief), creative_concept: asObject(plan.creative_concept), messaging_plan: asObject(plan.messaging_plan), constraints: asObject(plan.constraints) }, null, 2)}
 
 ASSET BRIEF:
 ${JSON.stringify(brief, null, 2)}`;
@@ -42,6 +51,8 @@ export async function queueCampaignProduction(planId: string, orgId: string, use
   const result = await query('SELECT * FROM campaign_plans WHERE id=$1 AND organization_id=$2', [planId, orgId]);
   if (result.rows.length === 0) throw new NotFoundError('Campaign plan');
   const plan = result.rows[0] as Record<string, any>;
+  const productLines = planScopes(plan);
+  const productLine = legacyProductLine(productLines);
   if (String(plan.strategy_validation_status || 'pending') !== 'valid') {
     throw new AppError(409, 'Resolve campaign strategy validation exceptions before generating assets', 'CAMPAIGN_PLAN_VALIDATION_REQUIRED');
   }
@@ -57,18 +68,16 @@ export async function queueCampaignProduction(planId: string, orgId: string, use
       const operation = mediaOperation(String(brief.format || brief.content_type || ''));
       const inserted = await query(
         `INSERT INTO campaign_asset_runs
-           (organization_id,campaign_plan_id,brief_id,variant_number,generation_kind,status,created_by)
-         VALUES ($1,$2,$3,$4,$5,'planned',$6)
+           (organization_id,campaign_plan_id,brief_id,variant_number,product_line,product_lines,generation_kind,status,created_by)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,'planned',$8)
          ON CONFLICT (campaign_plan_id,brief_id,variant_number)
-         DO UPDATE SET updated_at=NOW()
+         DO UPDATE SET product_line=EXCLUDED.product_line,product_lines=EXCLUDED.product_lines,updated_at=NOW()
          RETURNING *`,
-        [orgId, planId, briefId, variant, operation ? 'media' : 'text', userId]
+        [orgId, planId, briefId, variant, productLine, JSON.stringify(productLines), operation ? 'media' : 'text', userId]
       );
       const existingRun = inserted.rows[0];
       if (['queueing','queued','processing','pending_control','completed'].includes(String(existingRun.status))) continue;
 
-      // Claim this variation atomically. Concurrent requests cannot enqueue the
-      // same asset, while a deliberate retry gets a distinct durable attempt.
       const claimed = await query(
         `UPDATE campaign_asset_runs
          SET status='queueing',resolution_status='pending_generation',
@@ -93,6 +102,8 @@ export async function queueCampaignProduction(planId: string, orgId: string, use
                 campaign_plan_id: planId,
                 brief_id: briefId,
                 variant_number: variant,
+                product_line: productLine,
+                product_lines: productLines,
                 idempotency_key: `campaign-asset:${run.id}`,
                 quantity: Number(brief.duration_seconds || 1),
                 accessibility_text: brief.accessibility_requirements || [],
@@ -103,20 +114,22 @@ export async function queueCampaignProduction(planId: string, orgId: string, use
             [generation.id, run.id]
           );
         } else {
-          const request: GenerateContentRequest = {
+          const request = {
             type: contentType(String(brief.format || ''), String(brief.platform || '')),
             platform: (brief.platform || undefined) as ContentPlatform | undefined,
             title: `${String(plan.name)} - ${String(brief.purpose || brief.format || briefId)} - variation ${variant}`,
             prompt,
             campaign_plan_id: planId,
             brief_id: briefId,
+            product_line: (productLine || undefined) as GenerateContentRequest['product_line'],
+            product_lines: productLines,
             audience: JSON.stringify(asObject(plan.brief).audience_segments || []),
             objective: String(asObject(plan.brief).objective || plan.goal || ''),
             offer: String(asObject(plan.brief).offer || ''),
             calls_to_action: asObject(plan.brief).calls_to_action || [],
             prohibited_claims: asObject(plan.constraints).prohibited_claims || [],
             idempotency_key: `campaign-asset:${run.id}`,
-          };
+          } as GenerateContentRequest & { product_lines: string[] };
           const job = await generationQueue.add('campaign-text', {
             kind: 'campaign-text', runId: run.id, organizationId: orgId, userId, request,
           }, {

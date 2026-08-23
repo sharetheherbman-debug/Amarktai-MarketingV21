@@ -4,6 +4,7 @@ import { ApiResponse } from '../types';
 import * as plannerService from '../services/campaign-planner.service';
 import * as optimizationService from '../services/campaign-optimization.service';
 import * as productionService from '../services/campaign-production.service';
+import { normalizeProductScopes } from '../utils/product-scope';
 
 const router = Router();
 router.use(requireAuth);
@@ -31,6 +32,7 @@ router.post('/plans/generate', async (req: AuthRequest, res: Response<ApiRespons
   try {
     const { organization_id, name, goal, target_audience } = req.body;
     if (!organization_id || !name || !goal) { res.status(400).json({ success: false, error: { message: 'organization_id, name, and goal required', code: 'BAD_REQUEST' } }); return; }
+    const productLines = normalizeProductScopes(req.body.product_lines ?? req.body.product_line);
     const plan = await plannerService.generatePlan(organization_id, {
       ...req.body,
       name,
@@ -39,6 +41,8 @@ router.post('/plans/generate', async (req: AuthRequest, res: Response<ApiRespons
       budget_cents: Number(req.body.budget_cents || 0),
       products: String(req.body.products || ''),
       location: String(req.body.location || ''),
+      product_lines: productLines,
+      product_line: undefined,
     }, req.user!.userId);
     res.status(201).json({ success: true, data: plan });
   } catch (error) { next(error); }
@@ -48,7 +52,12 @@ router.put('/plans/:id', async (req: AuthRequest, res: Response<ApiResponse>, ne
   try {
     const organizationId = String(req.body.organization_id || '');
     if (!organizationId) { res.status(400).json({ success: false, error: { message: 'organization_id required', code: 'BAD_REQUEST' } }); return; }
-    const plan = await plannerService.updatePlan(req.params.id, organizationId, req.body, req.user!.userId);
+    const body = { ...req.body };
+    if (body.product_lines !== undefined || body.product_line !== undefined) {
+      body.product_lines = normalizeProductScopes(body.product_lines ?? body.product_line);
+      delete body.product_line;
+    }
+    const plan = await plannerService.updatePlan(req.params.id, organizationId, body, req.user!.userId);
     res.json({ success: true, data: plan });
   } catch (error) { next(error); }
 });
