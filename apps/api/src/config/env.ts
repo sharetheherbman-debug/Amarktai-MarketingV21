@@ -63,10 +63,20 @@ function getBasisPoints(key: string, defaultValue: number, maximum = 9999): numb
   return value;
 }
 
-const appUrl = getEnv('APP_URL', 'http://localhost:3000');
+const appUrl = isProduction
+  ? getRequiredProductionValue('APP_URL', 'http://localhost:3000')
+  : getEnv('APP_URL', 'http://localhost:3000');
+if (isProduction && !/^https:\/\//i.test(appUrl)) {
+  throw new Error('APP_URL must use HTTPS in production');
+}
+
+const apiUrl = isProduction
+  ? getRequiredProductionValue('API_URL', 'http://localhost:4000')
+  : getEnv('API_URL', 'http://localhost:4000');
+
 const billingCurrency = getEnv('BILLING_CURRENCY', 'GBP').toUpperCase();
 if (billingCurrency !== 'GBP') {
-  throw new Error('BILLING_CURRENCY must be GBP for the EquiProfile launch deployment');
+  throw new Error('BILLING_CURRENCY must be GBP for this deployment');
 }
 
 const genxPricingCurrency = getEnv('GENX_PRICING_SOURCE_CURRENCY', 'USD').toUpperCase();
@@ -78,7 +88,7 @@ export const env = {
   NODE_ENV: getEnv('NODE_ENV', 'development'),
   PORT: getEnvNumber('PORT', 4000),
   APP_URL: appUrl,
-  API_URL: getEnv('API_URL', 'http://localhost:4000'),
+  API_URL: apiUrl,
   CORS_ORIGIN: getEnv('CORS_ORIGIN', appUrl),
   TRUST_PROXY_HOPS: getEnvNumber('TRUST_PROXY_HOPS', 1),
 
@@ -134,7 +144,7 @@ export const env = {
   SMTP_PORT: getEnvNumber('SMTP_PORT', 587),
   SMTP_USER: getEnv('SMTP_USER'),
   SMTP_PASS: getEnv('SMTP_PASS'),
-  SMTP_FROM: getEnv('SMTP_FROM', 'noreply@equiprofile.online'),
+  SMTP_FROM: isProduction ? getEnv('SMTP_FROM') : getEnv('SMTP_FROM', 'noreply@localhost'),
 
   RATE_LIMIT_WINDOW_MS: getEnvNumber('RATE_LIMIT_WINDOW_MS', 900000),
   RATE_LIMIT_MAX_REQUESTS: getEnvNumber('RATE_LIMIT_MAX_REQUESTS', 100),
