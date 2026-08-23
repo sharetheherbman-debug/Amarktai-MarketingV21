@@ -87,11 +87,13 @@ describe('EquiProfile connector wire contract', () => {
 
   test('business snapshots accept host-defined product scopes and reject invalid slug syntax', () => {
     const service = read('apps/api/src/services/application-connector.service.ts');
+    const productScope = read('apps/api/src/utils/product-scope.ts');
 
     expect(service).toContain('product_lines?: ProductScopeKey[]');
     expect(service).toContain('validateSnapshotProductLines(payload)');
     expect(service).toContain('normalizeProductScopes(payload.app.product_lines || [])');
-    expect(service).toContain('PRODUCT_SCOPE_INVALID');
+    expect(productScope).toContain("'PRODUCT_SCOPE_INVALID'");
+    expect(productScope).toContain("/^[a-z0-9][a-z0-9_-]{0,63}$/");
     expect(service).not.toContain("['management', 'academy', 'shop'].includes");
   });
 
