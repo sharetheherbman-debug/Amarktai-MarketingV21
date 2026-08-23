@@ -44,7 +44,6 @@ interface ApiEnvelope<T> {
 
 interface SessionData {
   user: User;
-  accessToken: string;
   organization?: Organization;
   organizations?: Organization[];
   target_path?: string;
@@ -52,7 +51,6 @@ interface SessionData {
 
 interface AuthState {
   user: User | null;
-  token: string | null;
   isAuthenticated: boolean;
   isLoading: boolean;
   error: string | null;
@@ -85,23 +83,34 @@ async function parseEnvelope<T>(response: Response): Promise<T> {
   return payload.data;
 }
 
-async function fetchOrganizations(accessToken: string): Promise<Organization[]> {
-  const response = await fetch(`${API_URL}/organizations`, {
-    credentials: 'include',
-    headers: { Authorization: `Bearer ${accessToken}` },
-  });
+async function fetchOrganizations(): Promise<Organization[]> {
+  const response = await fetch(`${API_URL}/organizations`, { credentials: 'include' });
   return parseEnvelope<Organization[]>(response);
+}
+
+async function fetchCurrentUser(): Promise<User> {
+  const response = await fetch(`${API_URL}/auth/me`, { credentials: 'include' });
+  return parseEnvelope<User>(response);
+}
+
+function selectCurrentOrganization(organizations: Organization[]): Organization | null {
+  const selectedId = typeof window !== 'undefined' ? localStorage.getItem('org_id') : null;
+  return organizations.find((org) => org.id === selectedId) || organizations[0] || null;
 }
 
 function persistSession(set: (state: Partial<AuthState>) => void, session: SessionData): void {
   const organizations = session.organizations || (session.organization ? [session.organization] : []);
-  const currentOrganization = session.organization || organizations[0] || null;
-  localStorage.setItem('auth_token', session.accessToken);
-  if (currentOrganization) localStorage.setItem('org_id', currentOrganization.id);
-  else localStorage.removeItem('org_id');
+  const currentOrganization = session.organization || selectCurrentOrganization(organizations);
+  if (typeof window !== 'undefined') {
+    // Remove credentials left by pre-cookie releases. Authentication truth now
+    // comes exclusively from the server-validated HttpOnly cookie session.
+    localStorage.removeItem('auth_token');
+    localStorage.removeItem('refresh_token');
+    if (currentOrganization) localStorage.setItem('org_id', currentOrganization.id);
+    else localStorage.removeItem('org_id');
+  }
   set({
     user: session.user,
-    token: session.accessToken,
     isAuthenticated: true,
     isLoading: false,
     error: null,
@@ -110,11 +119,26 @@ function persistSession(set: (state: Partial<AuthState>) => void, session: Sessi
   });
 }
 
+function clearLocalSession(set: (state: Partial<AuthState>) => void): void {
+  if (typeof window !== 'undefined') {
+    localStorage.removeItem('auth_token');
+    localStorage.removeItem('refresh_token');
+    localStorage.removeItem('org_id');
+  }
+  set({
+    user: null,
+    isAuthenticated: false,
+    isLoading: false,
+    error: null,
+    organizations: [],
+    currentOrganization: null,
+  });
+}
+
 export const useAuthStore = create<AuthState>()(
   persist(
-    (set, get) => ({
+    (set) => ({
       user: null,
-      token: null,
       isAuthenticated: false,
       isLoading: false,
       error: null,
@@ -130,13 +154,17 @@ export const useAuthStore = create<AuthState>()(
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(credentials),
           });
-          const data = await parseEnvelope<{ user: User; accessToken: string; mfa_enrollment_required?: boolean }>(response);
+          const data = await parseEnvelope<{ user: User; mfa_enrollment_required?: boolean }>(response);
           if (data.mfa_enrollment_required) {
-            persistSession(set, { ...data, organizations: [] });
+            if (typeof window !== 'undefined') {
+              localStorage.removeItem('auth_token');
+              localStorage.removeItem('refresh_token');
+            }
+            set({ user: data.user, isAuthenticated: false, isLoading: false, error: null });
             return true;
           }
-          const organizations = await fetchOrganizations(data.accessToken);
-          persistSession(set, { ...data, organizations });
+          const organizations = await fetchOrganizations();
+          persistSession(set, { user: data.user, organizations });
           return false;
         } catch (error) {
           set({ error: error instanceof Error ? error.message : 'Login failed', isLoading: false });
@@ -153,8 +181,8 @@ export const useAuthStore = create<AuthState>()(
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(data),
           });
-          const session = await parseEnvelope<{ user: User; accessToken: string }>(response);
-          persistSession(set, { ...session, organizations: [] });
+          await parseEnvelope<Record<string, unknown>>(response);
+          set({ isLoading: false });
         } catch (error) {
           set({ error: error instanceof Error ? error.message : 'Registration failed', isLoading: false });
           throw error;
@@ -167,18 +195,7 @@ export const useAuthStore = create<AuthState>()(
         } catch {
           // Local logout must still complete when the API is unavailable.
         }
-        localStorage.removeItem('auth_token');
-        localStorage.removeItem('refresh_token');
-        localStorage.removeItem('org_id');
-        set({
-          user: null,
-          token: null,
-          isAuthenticated: false,
-          isLoading: false,
-          error: null,
-          organizations: [],
-          currentOrganization: null,
-        });
+        clearLocalSession(set);
       },
 
       refreshToken: async () => {
@@ -189,41 +206,36 @@ export const useAuthStore = create<AuthState>()(
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({}),
           });
-          const data = await parseEnvelope<{ accessToken: string }>(response);
-          localStorage.setItem('auth_token', data.accessToken);
-          set({ token: data.accessToken, isAuthenticated: true });
+          await parseEnvelope<{ refreshed: boolean }>(response);
+          const [user, organizations] = await Promise.all([fetchCurrentUser(), fetchOrganizations()]);
+          persistSession(set, { user, organizations });
         } catch {
-          await get().logout();
+          clearLocalSession(set);
         }
       },
 
       checkAuth: async () => {
-        let token = localStorage.getItem('auth_token');
-        if (!token) {
-          set({ isLoading: true });
-          await get().refreshToken();
-          token = localStorage.getItem('auth_token');
-          if (!token) {
-            set({ isAuthenticated: false, isLoading: false });
-            return;
-          }
-        }
-
         set({ isLoading: true });
         try {
-          const response = await fetch(`${API_URL}/auth/me`, {
-            credentials: 'include',
-            headers: { Authorization: `Bearer ${token}` },
-          });
-          const user = await parseEnvelope<User>(response);
-          const organizations = await fetchOrganizations(token);
-          const selectedId = localStorage.getItem('org_id');
-          const currentOrganization = organizations.find((org) => org.id === selectedId) || organizations[0] || null;
-          if (currentOrganization) localStorage.setItem('org_id', currentOrganization.id);
-          set({ user, token, isAuthenticated: true, isLoading: false, organizations, currentOrganization });
+          const [user, organizations] = await Promise.all([fetchCurrentUser(), fetchOrganizations()]);
+          persistSession(set, { user, organizations });
+          return;
         } catch {
-          await get().refreshToken();
-          set({ isLoading: false });
+          // A valid refresh cookie may outlive the 15-minute access cookie.
+        }
+
+        try {
+          const refreshResponse = await fetch(`${API_URL}/auth/refresh`, {
+            method: 'POST',
+            credentials: 'include',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({}),
+          });
+          await parseEnvelope<{ refreshed: boolean }>(refreshResponse);
+          const [user, organizations] = await Promise.all([fetchCurrentUser(), fetchOrganizations()]);
+          persistSession(set, { user, organizations });
+        } catch {
+          clearLocalSession(set);
         }
       },
 
@@ -241,10 +253,10 @@ export const useAuthStore = create<AuthState>()(
     {
       name: 'auth-storage',
       storage: createJSONStorage(() => localStorage),
+      // UI convenience may be persisted, but credentials and authentication truth
+      // are never persisted. DashboardLayout always revalidates with /auth/me.
       partialize: (state) => ({
         user: state.user,
-        token: state.token,
-        isAuthenticated: state.isAuthenticated,
         organizations: state.organizations,
         currentOrganization: state.currentOrganization,
       }),
