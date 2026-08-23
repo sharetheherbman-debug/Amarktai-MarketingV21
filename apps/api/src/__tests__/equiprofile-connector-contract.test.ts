@@ -55,8 +55,9 @@ describe('EquiProfile connector wire contract', () => {
     const service = read('apps/api/src/services/application-connector.service.ts');
     const migration = read('apps/api/src/db/migrations/026_application_connectors.sql');
 
-    expect(service).toContain("requiredConnectorValue('EQUIPROFILE_CONNECTOR_KEY'");
-    expect(service).toContain("requiredConnectorValue('APPLICATION_CONNECTOR_SIGNING_SECRET'");
+    expect(service).toContain("requiredConnectorSecret(['HOST_APP_CONNECTOR_KEY', 'EQUIPROFILE_CONNECTOR_KEY']");
+    expect(service).toContain("requiredConnectorSecret(['APPLICATION_CONNECTOR_SIGNING_SECRET']");
+    expect(service).not.toContain("requiredConnectorValue('EQUIPROFILE_CONNECTOR_KEY'");
     expect(service).toContain('connectorKeyHash(config.connectorKey)');
     expect(service).toContain('ensureConfiguredApplicationConnector');
     expect(service).toContain('ensureConfiguredEquiProfileConnector = ensureConfiguredApplicationConnector');
@@ -77,7 +78,7 @@ describe('EquiProfile connector wire contract', () => {
     expect(service).toContain('product_lines: productLines');
     expect(service).toContain('application_conversion_events');
     expect(service).toContain('marketing_performance_events');
-    expect(service).toContain("Conversion value currency must be GBP");
+    expect(service).toContain('Conversion value currency must be GBP');
     expect(service).toContain('value_pence must be a non-negative integer');
     expect(service).toContain('duplicate');
     expect(migration).toContain('application_conversion_events');
