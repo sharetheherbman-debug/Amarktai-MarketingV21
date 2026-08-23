@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { AlertTriangle, Coins, Loader2, Megaphone, Plug, ShieldCheck, Sparkles } from 'lucide-react';
 import { useAuthStore } from '@/stores/auth.store';
+import { MARKETING_BRAND_NAME } from '@/lib/branding';
 
 const API_URL = String(process.env.NEXT_PUBLIC_API_URL || '/api/v1').replace(/\/+$/, '');
 
@@ -24,14 +25,19 @@ function rows(payload: any): unknown[] {
 }
 
 export default function DashboardPage() {
-  const { user, token, currentOrganization } = useAuthStore();
+  const { user, currentOrganization } = useAuthStore();
   const [summary, setSummary] = useState<Summary>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!token || !currentOrganization) return;
-    const headers = { Authorization: `Bearer ${token}`, 'x-organization-id': currentOrganization.id };
+    if (!currentOrganization) {
+      setError('No organization is available for this Marketing workspace.');
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    const headers = { 'x-organization-id': currentOrganization.id };
     const get = async (path: string) => {
       const response = await fetch(`${API_URL}${path}`, { credentials: 'include', headers });
       if (!response.ok) throw new Error(`${path} returned ${response.status}`);
@@ -53,7 +59,7 @@ export default function DashboardPage() {
       setError(failures.length ? `${failures.length} live status source${failures.length === 1 ? '' : 's'} unavailable` : null);
       setLoading(false);
     });
-  }, [token, currentOrganization]);
+  }, [currentOrganization]);
 
   if (loading) return <div className="flex h-64 items-center justify-center"><Loader2 className="h-8 w-8 animate-spin text-brand-400" /></div>;
 
@@ -78,7 +84,7 @@ export default function DashboardPage() {
   return (
     <div className="space-y-8">
       <div>
-        <h1 className="text-2xl font-bold text-white">EquiProfile Marketing</h1>
+        <h1 className="text-2xl font-bold text-white">{MARKETING_BRAND_NAME}</h1>
         <p className="mt-1 text-sm text-zinc-400">Owner operations for {user?.name || 'the connected application'}.</p>
       </div>
       {error && <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-300">{error}. Values are shown as unavailable rather than estimated.</div>}
