@@ -1,4 +1,4 @@
-name: amarktai-marketing
+name: ${COMPOSE_PROJECT_NAME:-amarktai-marketing}
 
 x-logging: &default-logging
   driver: json-file
@@ -17,10 +17,10 @@ x-service-defaults: &service-defaults
 
 x-api-environment: &api-environment
   NODE_ENV: production
-  DATABASE_URL: postgresql://${POSTGRES_USER:-amarktai}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}@postgres:5432/${POSTGRES_DB:-amarktai_marketing}
-  POSTGRES_USER: ${POSTGRES_USER:-amarktai}
+  DATABASE_URL: postgresql://${POSTGRES_USER:-marketing}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}@postgres:5432/${POSTGRES_DB:-marketing}
+  POSTGRES_USER: ${POSTGRES_USER:-marketing}
   POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}
-  POSTGRES_DB: ${POSTGRES_DB:-amarktai_marketing}
+  POSTGRES_DB: ${POSTGRES_DB:-marketing}
   REDIS_URL: redis://:${REDIS_PASSWORD:?REDIS_PASSWORD required}@redis:6379
   REDIS_HOST: redis
   REDIS_PORT: "6379"
@@ -32,8 +32,8 @@ x-api-environment: &api-environment
   ENCRYPTION_KEY: ${ENCRYPTION_KEY:?ENCRYPTION_KEY required}
   GENX_API_KEY: ${GENX_API_KEY:?GENX_API_KEY required}
   GENX_BASE_URL: ${GENX_BASE_URL:-https://query.genx.sh}
-  GENX_WEBHOOK_SECRET: ${GENX_WEBHOOK_SECRET:-}
-  GENX_WEBHOOK_URL: ${GENX_WEBHOOK_URL:-}
+  GENX_WEBHOOK_SECRET: ${GENX_WEBHOOK_SECRET:?GENX_WEBHOOK_SECRET required}
+  GENX_WEBHOOK_URL: ${GENX_WEBHOOK_URL:?GENX_WEBHOOK_URL required}
   DEFAULT_TEXT_MODEL: ${DEFAULT_TEXT_MODEL:-gpt-5.6-luna}
   GENX_AGENT_TIER_ENABLED: ${GENX_AGENT_TIER_ENABLED:-true}
   GENX_TARGET_MARGIN_BPS: ${GENX_TARGET_MARGIN_BPS:-4000}
@@ -50,44 +50,43 @@ x-api-environment: &api-environment
   EMBEDDING_DIMENSIONS: ${EMBEDDING_DIMENSIONS:-1536}
   STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
   STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
-  SMTP_HOST: ${SMTP_HOST:-smtp.gmail.com}
+  SMTP_HOST: ${SMTP_HOST:-smtp.example.com}
   SMTP_PORT: ${SMTP_PORT:-587}
   SMTP_USER: ${SMTP_USER:-}
   SMTP_PASS: ${SMTP_PASS:-}
-  SMTP_FROM: ${SMTP_FROM:-noreply@equiprofile.online}
+  SMTP_FROM: ${SMTP_FROM:?SMTP_FROM required}
   APPLICATION_CONNECTOR_SIGNING_SECRET: ${APPLICATION_CONNECTOR_SIGNING_SECRET:?APPLICATION_CONNECTOR_SIGNING_SECRET required}
   HOST_APP_CONNECTOR_KEY: ${HOST_APP_CONNECTOR_KEY:-}
-  HOST_APP_ID: ${HOST_APP_ID:-equiprofile}
-  HOST_APP_NAME: ${HOST_APP_NAME:-EquiProfile}
-  HOST_APP_URL: ${HOST_APP_URL:-https://equiprofile.online}
-  EQUIPROFILE_CONNECTOR_KEY: ${EQUIPROFILE_CONNECTOR_KEY:?EQUIPROFILE_CONNECTOR_KEY required}
-  EQUIPROFILE_APP_ID: ${EQUIPROFILE_APP_ID:-equiprofile}
-  EQUIPROFILE_APP_NAME: ${EQUIPROFILE_APP_NAME:-EquiProfile}
-  EQUIPROFILE_APP_URL: ${EQUIPROFILE_APP_URL:-https://equiprofile.online}
+  HOST_APP_ID: ${HOST_APP_ID:-}
+  HOST_APP_NAME: ${HOST_APP_NAME:-}
+  HOST_APP_URL: ${HOST_APP_URL:-}
+  EQUIPROFILE_CONNECTOR_KEY: ${EQUIPROFILE_CONNECTOR_KEY:-}
+  EQUIPROFILE_APP_ID: ${EQUIPROFILE_APP_ID:-}
+  EQUIPROFILE_APP_NAME: ${EQUIPROFILE_APP_NAME:-}
+  EQUIPROFILE_APP_URL: ${EQUIPROFILE_APP_URL:-}
   APPLICATION_CONNECTOR_MAX_CLOCK_SKEW_SECONDS: ${APPLICATION_CONNECTOR_MAX_CLOCK_SKEW_SECONDS:-300}
   APPLICATION_SSO_CODE_TTL_SECONDS: ${APPLICATION_SSO_CODE_TTL_SECONDS:-120}
-  APP_URL: ${APP_URL:-https://marketing.equiprofile.online}
-  API_URL: ${API_URL:-https://marketing.equiprofile.online/api}
-  CORS_ORIGIN: ${CORS_ORIGIN:-https://marketing.equiprofile.online}
+  APP_URL: ${APP_URL:?APP_URL required}
+  API_URL: ${API_URL:?API_URL required}
+  CORS_ORIGIN: ${CORS_ORIGIN:?CORS_ORIGIN required}
   TRUST_PROXY_HOPS: ${TRUST_PROXY_HOPS:-2}
   HEALTHCHECK_TIMEOUT_MS: ${HEALTHCHECK_TIMEOUT_MS:-3000}
   RATE_LIMIT_WINDOW_MS: ${RATE_LIMIT_WINDOW_MS:-900000}
   RATE_LIMIT_MAX_REQUESTS: ${RATE_LIMIT_MAX_REQUESTS:-100}
-  FIRST_RUN: ${FIRST_RUN:-true}
+  FIRST_RUN: ${FIRST_RUN:-false}
 
 services:
   postgres:
     <<: *service-defaults
     image: pgvector/pgvector:pg16
-    container_name: amarktai-postgres
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-amarktai}
+      POSTGRES_USER: ${POSTGRES_USER:-marketing}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}
-      POSTGRES_DB: ${POSTGRES_DB:-amarktai_marketing}
+      POSTGRES_DB: ${POSTGRES_DB:-marketing}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-amarktai} -d ${POSTGRES_DB:-amarktai_marketing}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-marketing} -d ${POSTGRES_DB:-marketing}"]
       interval: 5s
       timeout: 5s
       retries: 20
@@ -97,7 +96,6 @@ services:
   redis:
     <<: *service-defaults
     image: redis:7-alpine
-    container_name: amarktai-redis
     command: ["sh", "-c", "exec redis-server --appendonly yes --appendfsync everysec --requirepass \"$$REDIS_PASSWORD\""]
     environment:
       REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD required}
@@ -128,7 +126,6 @@ services:
     build:
       context: ..
       dockerfile: apps/api/Dockerfile
-    container_name: amarktai-api
     environment:
       <<: *api-environment
       PORT: "4000"
@@ -152,7 +149,6 @@ services:
     build:
       context: ..
       dockerfile: apps/api/Dockerfile
-    container_name: amarktai-generation-worker
     command: ["node", "dist/workers/generation-worker.js"]
     environment:
       <<: *api-environment
@@ -183,7 +179,6 @@ services:
     build:
       context: ..
       dockerfile: apps/api/Dockerfile
-    container_name: amarktai-longform-still-worker
     command: ["node", "dist/workers/longform-still-worker.js"]
     environment:
       <<: *api-environment
@@ -214,7 +209,6 @@ services:
     build:
       context: ..
       dockerfile: apps/api/Dockerfile.render
-    container_name: amarktai-render-worker
     environment:
       <<: *api-environment
       RENDER_WORKER_CONCURRENCY: ${RENDER_WORKER_CONCURRENCY:-1}
@@ -245,11 +239,16 @@ services:
       dockerfile: apps/web/Dockerfile
       args:
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-/api}
-    container_name: amarktai-web
+        NEXT_PUBLIC_MARKETING_BRAND_NAME: ${NEXT_PUBLIC_MARKETING_BRAND_NAME:-Marketing Workspace}
+        NEXT_PUBLIC_MARKETING_BRAND_DESCRIPTION: ${NEXT_PUBLIC_MARKETING_BRAND_DESCRIPTION:-AI-powered marketing automation, analytics, campaign management and growth operations.}
+        NEXT_PUBLIC_MARKETING_SUPPORT_EMAIL: ${NEXT_PUBLIC_MARKETING_SUPPORT_EMAIL:-}
     environment:
       NODE_ENV: production
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-/api}
-      NEXT_PUBLIC_APP_NAME: ${NEXT_PUBLIC_APP_NAME:-EquiProfile Marketing}
+      NEXT_PUBLIC_MARKETING_BRAND_NAME: ${NEXT_PUBLIC_MARKETING_BRAND_NAME:-Marketing Workspace}
+      NEXT_PUBLIC_MARKETING_BRAND_DESCRIPTION: ${NEXT_PUBLIC_MARKETING_BRAND_DESCRIPTION:-AI-powered marketing automation, analytics, campaign management and growth operations.}
+      NEXT_PUBLIC_MARKETING_SUPPORT_EMAIL: ${NEXT_PUBLIC_MARKETING_SUPPORT_EMAIL:-}
+      NEXT_PUBLIC_APP_NAME: ${NEXT_PUBLIC_MARKETING_BRAND_NAME:-Marketing Workspace}
     depends_on:
       api:
         condition: service_healthy
@@ -264,7 +263,6 @@ services:
   nginx:
     <<: *service-defaults
     image: nginx:1.27-alpine
-    container_name: amarktai-nginx
     depends_on:
       web:
         condition: service_healthy
