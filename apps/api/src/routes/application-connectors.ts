@@ -62,14 +62,11 @@ router.post('/sso/redeem', async (req: Request, res: Response<ApiResponse>, next
       maxAge: 7 * 24 * 60 * 60 * 1000,
     });
 
-    // The short-lived access token is retained for the existing Marketing SPA.
-    // The long-lived refresh credential is deliberately HttpOnly-cookie-only.
     res.json({
       success: true,
       data: {
         user: session.user,
         organization: session.organization,
-        accessToken: session.accessToken,
         target_path: session.target_path,
         mfa_enrollment_required: session.mfa_enrollment_required,
       },
