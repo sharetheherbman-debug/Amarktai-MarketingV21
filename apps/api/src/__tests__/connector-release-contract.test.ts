@@ -34,7 +34,7 @@ describe('reusable Application Connector release boundaries', () => {
     expect(server).not.toContain("name: 'EquiProfile Marketing API'");
   });
 
-  test('production template and release gate are reusable rather than EquiProfile-only', () => {
+  test('production template and release gate are reusable, fail-closed and reject copy-template runtime values', () => {
     const template = read('.env.production.example');
     const releaseGate = read('scripts/vps-release-gate.sh');
 
@@ -49,6 +49,22 @@ describe('reusable Application Connector release boundaries', () => {
     expect(template).not.toContain('BACKUP_DIR=/opt/equiprofile-marketing');
     expect(template).not.toContain('phase-1/equiprofile-relaunch-genx-credits');
 
+    expect(releaseGate).toContain('is_placeholder_value()');
+    expect(releaseGate).toContain('*example.com*');
+    expect(releaseGate).toContain('require_https_url "APP_URL"');
+    expect(releaseGate).toContain('require_https_url "API_URL"');
+    expect(releaseGate).toContain('require_https_url "CORS_ORIGIN"');
+    expect(releaseGate).toContain('require_secret_length "POSTGRES_PASSWORD" "${POSTGRES_PASSWORD:-}" 24');
+    expect(releaseGate).toContain('require_secret_length "REDIS_PASSWORD" "${REDIS_PASSWORD:-}" 24');
+    expect(releaseGate).toContain('require_secret_length "JWT_SECRET" "${JWT_SECRET:-}" 32');
+    expect(releaseGate).toContain('require_secret_length "JWT_REFRESH_SECRET" "${JWT_REFRESH_SECRET:-}" 32');
+    expect(releaseGate).toContain('ENCRYPTION_KEY must be exactly 64 hexadecimal characters');
+    expect(releaseGate).toContain('require_value "GENX_API_KEY"');
+    expect(releaseGate).toContain('require_https_url "GENX_BASE_URL"');
+    expect(releaseGate).toContain('require_secret_length "GENX_WEBHOOK_SECRET" "${GENX_WEBHOOK_SECRET:-}" 32');
+    expect(releaseGate).toContain('require_https_url "GENX_WEBHOOK_URL"');
+    expect(releaseGate).toContain('require_value "SMTP_HOST"');
+    expect(releaseGate).toContain('require_value "SMTP_FROM"');
     expect(releaseGate).toContain('HOST_APP_CONNECTOR_KEY');
     expect(releaseGate).toContain('HOST_APP_ID HOST_APP_NAME HOST_APP_URL');
     expect(releaseGate).toContain('HOST_APP_URL must use HTTPS in production');
@@ -56,6 +72,7 @@ describe('reusable Application Connector release boundaries', () => {
     expect(releaseGate).toContain('require_secret_length "APPLICATION_CONNECTOR_SIGNING_SECRET" "${APPLICATION_CONNECTOR_SIGNING_SECRET:-}" 32');
     expect(releaseGate).toContain('require_secret_length "HOST_APP_CONNECTOR_KEY" "${host_connector_key}" 32');
     expect(releaseGate).toContain('require_secret_length "BACKUP_ENCRYPTION_PASSPHRASE" "${BACKUP_ENCRYPTION_PASSPHRASE:-}" 24');
+    expect(releaseGate).toContain('HOST_APP_ID still contains the generic template identity');
     expect(releaseGate).not.toContain('use the same EquiProfile connector secret');
   });
 
