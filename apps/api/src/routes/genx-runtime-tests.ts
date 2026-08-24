@@ -63,7 +63,7 @@ router.post('/models/:id/runtime-test', async (
         model: model.id,
         params,
         metadata: {
-          runtime_test: true,
+          runtime_test: 'true',
           tested_by: req.user!.userId,
           operation,
         },
