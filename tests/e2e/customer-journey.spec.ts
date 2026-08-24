@@ -129,7 +129,8 @@ test('real customer journey, auth refresh, controls, desktop and mobile navigati
     ['/settings', /Workspace, identity and security/],
   ] as const;
   for (const [route, heading] of destinations) {
-    await page.goto(route);
+    await page.locator(`nav[aria-label="Marketing workspace"] a[href="${route}"]`).click();
+    await expect(page).toHaveURL(new RegExp(`${route.replaceAll('/', '\\/')}$`));
     await expect(page.getByRole('heading', { level: 1 })).toContainText(heading);
   }
 
