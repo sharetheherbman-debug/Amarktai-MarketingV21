@@ -42,9 +42,17 @@ async function run(): Promise<void> {
   const migrationsDir = await fs.access(compiledMigrationsDir)
     .then(() => compiledMigrationsDir)
     .catch(() => sourceMigrationsDir);
-  const files = (await fs.readdir(migrationsDir))
+  let files = (await fs.readdir(migrationsDir))
     .filter((name) => /^\d{3}_.+\.sql$/.test(name))
     .sort();
+
+  const testMaximum = process.env.MIGRATION_TEST_MAX_FILENAME;
+  if (testMaximum) {
+    if (process.env.NODE_ENV !== 'test' || !files.includes(testMaximum)) {
+      throw new Error('MIGRATION_TEST_MAX_FILENAME is restricted to test runs and must name a migration');
+    }
+    files = files.filter((name) => name.localeCompare(testMaximum) <= 0);
+  }
 
   if (files.length === 0) {
     throw new Error(`No migration files found in ${migrationsDir}`);

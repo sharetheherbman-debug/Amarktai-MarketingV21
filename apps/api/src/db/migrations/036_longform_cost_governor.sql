@@ -5,7 +5,11 @@ ALTER TABLE video_projects
   ADD COLUMN IF NOT EXISTS production_strategy VARCHAR(20) NOT NULL DEFAULT 'smart',
   ADD COLUMN IF NOT EXISTS max_project_credits BIGINT,
   ADD COLUMN IF NOT EXISTS cost_quote JSONB,
-  ADD COLUMN IF NOT EXISTS cost_quote_created_at TIMESTAMP WITH TIME ZONE;
+  ADD COLUMN IF NOT EXISTS cost_quote_created_at TIMESTAMP WITH TIME ZONE,
+  ADD COLUMN IF NOT EXISTS generation_idempotency_key VARCHAR(255);
+
+ALTER TABLE video_renders
+  ADD COLUMN IF NOT EXISTS idempotency_key VARCHAR(255);
 
 DO $$ BEGIN
   ALTER TABLE video_projects ADD CONSTRAINT video_projects_production_strategy_check
@@ -24,6 +28,18 @@ ALTER TABLE video_scenes
   ADD COLUMN IF NOT EXISTS planned_operation VARCHAR(50),
   ADD COLUMN IF NOT EXISTS estimated_credits BIGINT,
   ADD COLUMN IF NOT EXISTS production_plan_locked_at TIMESTAMP WITH TIME ZONE;
+
+CREATE INDEX IF NOT EXISTS idx_video_projects_cost_quote
+  ON video_projects(organization_id,cost_quote_created_at DESC)
+  WHERE cost_quote IS NOT NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_video_projects_generation_idempotency
+  ON video_projects(organization_id,generation_idempotency_key)
+  WHERE generation_idempotency_key IS NOT NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_video_renders_idempotency
+  ON video_renders(organization_id,project_id,idempotency_key)
+  WHERE idempotency_key IS NOT NULL;
 
 DO $$ BEGIN
   ALTER TABLE video_scenes ADD CONSTRAINT video_scenes_production_mode_check
@@ -57,3 +73,23 @@ CREATE TRIGGER video_scenes_invalidate_project_quote
 AFTER INSERT OR DELETE OR UPDATE OF visual_prompt,model_id,duration_seconds,source_image_url,
   source_video_url,start_frame_url,continuation_source_id,production_mode
 ON video_scenes FOR EACH ROW EXECUTE FUNCTION invalidate_longform_project_quote();
+
+-- Owner-initiated bounded Growth Director runs share the existing durable cycle
+-- architecture. These additive columns make origin, scope, ceiling and replay
+-- protection explicit without introducing a second orchestration system.
+ALTER TABLE autonomous_growth_cycles
+  ADD COLUMN IF NOT EXISTS originating_instruction TEXT,
+  ADD COLUMN IF NOT EXISTS product_lines JSONB NOT NULL DEFAULT '[]'::jsonb,
+  ADD COLUMN IF NOT EXISTS generation_credit_ceiling BIGINT,
+  ADD COLUMN IF NOT EXISTS idempotency_key VARCHAR(255),
+  ADD COLUMN IF NOT EXISTS initiated_by_user_id UUID REFERENCES users(id) ON DELETE SET NULL;
+
+DO $$ BEGIN
+  ALTER TABLE autonomous_growth_cycles ADD CONSTRAINT autonomous_growth_cycles_credit_ceiling_check
+    CHECK (generation_credit_ceiling IS NULL OR generation_credit_ceiling > 0);
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_autonomous_growth_cycles_manual_idempotency
+  ON autonomous_growth_cycles(organization_id,idempotency_key)
+  WHERE idempotency_key IS NOT NULL;

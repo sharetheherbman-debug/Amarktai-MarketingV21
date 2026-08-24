@@ -270,6 +270,41 @@ async function createContinuityAsset(
   return { id, url };
 }
 
+async function createLongformClipAsset(
+  organizationId: string,
+  userId: string,
+  sceneId: string,
+  projectId: string,
+  sourceUrl: string
+): Promise<{ id: string; url: string }> {
+  const directory = path.join(process.cwd(), 'uploads', 'studio', 'longform', organizationId, projectId);
+  await fs.mkdir(directory, { recursive: true });
+  const storagePath = path.join(directory, `scene-${sceneId}.mp4`);
+  await materializeVideo(sourceUrl, organizationId, storagePath);
+  const stat = await fs.stat(storagePath);
+  if (stat.size <= 0) throw new Error('Long-form provider clip was empty');
+  const filename = `scene-${sceneId}.mp4`;
+  const result = await query(
+    `INSERT INTO studio_assets (
+       organization_id,user_id,filename,original_name,mime_type,
+       size_bytes,storage_path,url,metadata
+     ) VALUES ($1,$2,$3,$3,'video/mp4',$4,$5,NULL,$6)
+     RETURNING id`,
+    [
+      organizationId,
+      userId,
+      filename,
+      stat.size,
+      storagePath,
+      JSON.stringify({ scene_id: sceneId, project_id: projectId, asset_role: 'longform_ai_video_clip', provider_url: sourceUrl }),
+    ]
+  );
+  const id = String(result.rows[0].id);
+  const url = `/api/v1/studio/assets/${id}`;
+  await query('UPDATE studio_assets SET url=$1 WHERE id=$2', [url, id]);
+  return { id, url };
+}
+
 function assetIdFromUrl(url: string): string | null {
   const match = url.match(/\/studio\/assets\/([0-9a-f-]{36})(?:$|[?#/])/i);
   return match?.[1] || null;
@@ -291,7 +326,7 @@ async function materializeVideo(
     await fs.copyFile(String(asset.rows[0].storage_path), destination);
     return destination;
   }
-  const response = await safeFetch(sourceUrl, { timeoutMs: 120000, maxResponseBytes: 25 * 1024 * 1024 });
+  const response = await safeFetch(sourceUrl, { timeoutMs: 120000, maxResponseBytes: 100 * 1024 * 1024 });
   if (!response.ok) throw new Error(`Continuity source download failed: ${response.status}`);
   await fs.writeFile(destination, Buffer.from(await response.bytes()));
   return destination;
@@ -538,18 +573,31 @@ async function processLongformScene(job: Job): Promise<void> {
   }
   if (!outputUrl) throw new Error('GenX scene completed without a result URL');
 
+  const providerOutputUrl = outputUrl;
+  const durableClip = await createLongformClipAsset(
+    data.organizationId,
+    String(scene.owner_id),
+    String(scene.id),
+    String(data.projectId),
+    providerOutputUrl
+  );
+  outputUrl = durableClip.url;
+
   await query(
     `UPDATE video_scenes
-     SET status = 'completed', generated_clip_url = $1, provider_result_url = $1,
-         provider_continuation_token = $2, completed_at = NOW(),
-         metadata = COALESCE(metadata, '{}'::jsonb) || $3::jsonb,
+     SET status = 'completed', generated_clip_url = $1, provider_result_url = $2,
+         provider_continuation_token = $3, completed_at = NOW(),
+         metadata = COALESCE(metadata, '{}'::jsonb) || $4::jsonb,
          error_message = NULL, updated_at = NOW()
-     WHERE id = $4`,
+     WHERE id = $5`,
     [
       outputUrl,
+      providerOutputUrl,
       (resultData.continuation_token || resultData.continuation_id || null) as string | null,
       JSON.stringify({
         continuity_method: continuityMethod,
+        generated_clip_asset_id: durableClip.id,
+        provider_result_url: providerOutputUrl,
         provider_result: resultData,
         usage: finalState.usage || null,
         runtime_confirmed_at: new Date().toISOString(),

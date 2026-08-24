@@ -199,7 +199,8 @@ export const rollbackPromptSchema = z.object({
 });
 
 export const createBrandDnaSchema = z.object({
-  company_name: z.string().min(1, 'Company name is required').max(255),
+  company_name: z.string().min(1, 'Company name is required').max(255).optional(),
+  companyName: z.string().min(1, 'Company name is required').max(255).optional(),
   industry: z.string().max(255).optional(),
   brand_voice: z.string().max(500).optional(),
   target_audience: z.record(z.unknown()).optional(),
@@ -212,6 +213,8 @@ export const createBrandDnaSchema = z.object({
   fonts: z.record(z.unknown()).optional(),
   metadata: z.record(z.unknown()).optional(),
   organization_id: z.string().uuid().optional(),
+}).passthrough().refine((value) => Boolean(value.company_name || value.companyName), {
+  message: 'Company name is required', path: ['company_name'],
 });
 
 export const updateBrandDnaSchema = z.object({
@@ -228,7 +231,7 @@ export const updateBrandDnaSchema = z.object({
   fonts: z.record(z.unknown()).optional(),
   metadata: z.record(z.unknown()).optional(),
   organization_id: z.string().uuid().optional(),
-});
+}).passthrough();
 
 export const createKnowledgeSourceSchema = z.object({
   name: z.string().min(1, 'Name is required').max(255),

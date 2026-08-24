@@ -10,12 +10,25 @@ const connection = {
 
 const renderQueue = new Queue('video-renders', { connection });
 
-export async function createRender(projectId: string, orgId: string) {
+export async function createRender(projectId: string, orgId: string, requestedIdempotencyKey?: string) {
   const project = await query(
     'SELECT id FROM video_projects WHERE id = $1 AND organization_id = $2',
     [projectId, orgId]
   );
   if (project.rows.length === 0) throw new NotFoundError('Video project');
+
+  const idempotencyKey = String(requestedIdempotencyKey || `longform-project:${projectId}:render:v1`).trim();
+  if (idempotencyKey.length < 8 || idempotencyKey.length > 255) {
+    throw new AppError(400, 'A valid render idempotency key is required', 'LONGFORM_RENDER_IDEMPOTENCY_INVALID');
+  }
+
+  const replay = await query(
+    `SELECT * FROM video_renders
+     WHERE project_id=$1 AND organization_id=$2 AND idempotency_key=$3
+     LIMIT 1`,
+    [projectId, orgId, idempotencyKey]
+  );
+  if (replay.rows.length > 0) return replay.rows[0];
 
   const active = await query(
     `SELECT * FROM video_renders
@@ -26,11 +39,16 @@ export async function createRender(projectId: string, orgId: string) {
   if (active.rows.length > 0) return active.rows[0];
 
   const result = await query(
-    `INSERT INTO video_renders (project_id, organization_id, status, progress)
-     VALUES ($1, $2, 'pending', 0) RETURNING *`,
-    [projectId, orgId]
+    `INSERT INTO video_renders (project_id, organization_id, status, progress, idempotency_key)
+     VALUES ($1, $2, 'pending', 0, $3)
+     ON CONFLICT (organization_id,project_id,idempotency_key)
+       WHERE idempotency_key IS NOT NULL
+     DO UPDATE SET idempotency_key=EXCLUDED.idempotency_key
+     RETURNING *,(xmax=0) AS inserted`,
+    [projectId, orgId, idempotencyKey]
   );
   const render = result.rows[0];
+  if (render.inserted === false) return render;
   const job = await renderQueue.add(
     'render',
     { renderId: render.id, projectId, organizationId: orgId },

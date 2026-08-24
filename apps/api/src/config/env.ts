@@ -139,6 +139,7 @@ export const env = {
 
   STRIPE_SECRET_KEY: getEnv('STRIPE_SECRET_KEY'),
   STRIPE_WEBHOOK_SECRET: getEnv('STRIPE_WEBHOOK_SECRET'),
+  MARKETING_CREDIT_SALES_ENABLED: getEnvBoolean('MARKETING_CREDIT_SALES_ENABLED', false),
 
   SMTP_HOST: getEnv('SMTP_HOST', 'smtp.gmail.com'),
   SMTP_PORT: getEnvNumber('SMTP_PORT', 587),
@@ -152,4 +153,5 @@ export const env = {
   HEALTHCHECK_TIMEOUT_MS: getEnvNumber('HEALTHCHECK_TIMEOUT_MS', 3000),
 
   FIRST_RUN: getEnvBoolean('FIRST_RUN', true),
+  SCHEDULER_ENABLED: getEnvBoolean('SCHEDULER_ENABLED', true),
 } as const;

@@ -5,6 +5,8 @@ import { requireOrganizationRole } from '../middleware/organization-access';
 import { ApiResponse } from '../types';
 import * as credits from '../services/generation-credit.service';
 import * as creditStripe from '../services/generation-credit-stripe.service';
+import { env } from '../config/env';
+import { AppError } from '../middleware/errorHandler';
 
 const router = Router();
 
@@ -25,11 +27,20 @@ router.get('/wallet', async (req: AuthRequest, res: Response<ApiResponse>, next:
   } catch (error) { next(error); }
 });
 
+router.get('/activity', requireOrganizationRole('owner', 'admin'), async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
+  try {
+    res.json({ success: true, data: await credits.getCreditActivity(req.organizationId!, String(req.query.since || '')) });
+  } catch (error) { next(error); }
+});
+
 router.post(
   '/checkout',
   requireOrganizationRole('owner', 'admin'),
   async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
     try {
+      if (!env.MARKETING_CREDIT_SALES_ENABLED) {
+        throw new AppError(503, 'Marketing commercial credit purchases are not enabled', 'MARKETING_CREDIT_SALES_DISABLED');
+      }
       const input = checkoutSchema.parse(req.body);
       const checkout = await creditStripe.createCreditCheckout({
         organizationId: input.organization_id,

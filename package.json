@@ -3,7 +3,10 @@
   "version": "0.3.0",
   "private": true,
   "description": "AmarktAI Marketing - AI Marketing Operating System",
-  "workspaces": ["apps/*", "packages/*"],
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
   "scripts": {
     "dev": "turbo dev",
     "build": "turbo build",
@@ -25,6 +28,10 @@
     "vps:restore": "bash scripts/vps-restore.sh",
     "vps:update": "bash scripts/vps-update.sh",
     "acceptance:provider": "node scripts/live-provider-acceptance.mjs",
+    "acceptance:autonomy": "node scripts/autonomy-acceptance.mjs",
+    "test:white-label-build": "node scripts/verify-white-label-build.mjs",
+    "test:migrations": "node scripts/migration-acceptance.mjs",
+    "test:e2e": "playwright test",
     "clean": "turbo clean",
     "verify": "node scripts/verify.js",
     "verify:types": "node scripts/verify-types.js",
@@ -36,8 +43,20 @@
     "verify:branding": "node scripts/verify-branding.js",
     "verify:version": "node scripts/verify-version.js"
   },
-  "devDependencies": {"nanoid": "3.3.18", "turbo": "^2.3.0", "typescript": "^5.7.0"},
-  "overrides": {"postcss": "8.5.23", "sharp": "0.35.0", "uuid": "11.1.1", "nanoid": "3.3.18"},
-  "engines": {"node": ">=22.0.0"},
+  "devDependencies": {
+    "@playwright/test": "^1.55.1",
+    "nanoid": "3.3.18",
+    "turbo": "^2.3.0",
+    "typescript": "^5.7.0"
+  },
+  "overrides": {
+    "postcss": "8.5.23",
+    "sharp": "0.35.0",
+    "uuid": "11.1.1",
+    "nanoid": "3.3.18"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  },
   "packageManager": "npm@10.8.2"
 }

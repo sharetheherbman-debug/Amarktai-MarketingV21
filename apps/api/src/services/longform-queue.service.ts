@@ -22,6 +22,7 @@ interface PlannedModel {
   estimatedCredits: number;
   retailChargeGbp: number;
   priceSnapshotId: string;
+  pricingLastSyncedAt: string;
 }
 
 function objectValue(value: unknown): Record<string, any> {
@@ -94,7 +95,13 @@ async function resolveModel(scene: Record<string, any>, operation: string, quant
         operation,
         quantity,
       });
-      return { id: model.id, estimatedCredits: quote.reservation_credits, retailChargeGbp: quote.retail_charge_gbp, priceSnapshotId: quote.price_snapshot_id };
+      return {
+        id: model.id,
+        estimatedCredits: quote.reservation_credits,
+        retailChargeGbp: quote.retail_charge_gbp,
+        priceSnapshotId: quote.price_snapshot_id,
+        pricingLastSyncedAt: quote.pricing_last_synced_at,
+      };
     }
   }
 
@@ -115,6 +122,7 @@ async function resolveModel(scene: Record<string, any>, operation: string, quant
         estimatedCredits: quote.reservation_credits,
         retailChargeGbp: quote.retail_charge_gbp,
         priceSnapshotId: quote.price_snapshot_id,
+        pricingLastSyncedAt: quote.pricing_last_synced_at,
         runtimeConfirmed: model.verification_status === 'runtime_confirmed',
       });
     } catch {
@@ -138,6 +146,7 @@ async function resolveModel(scene: Record<string, any>, operation: string, quant
     estimatedCredits: selected.estimatedCredits,
     retailChargeGbp: selected.retailChargeGbp,
     priceSnapshotId: selected.priceSnapshotId,
+    pricingLastSyncedAt: selected.pricingLastSyncedAt,
   };
 }
 
@@ -187,6 +196,7 @@ export async function quoteProjectGeneration(projectId: string, orgId: string) {
       model_id: model.id,
       estimated_credits: model.estimatedCredits,
       price_snapshot_id: model.priceSnapshotId,
+      pricing_last_synced_at: model.pricingLastSyncedAt,
       reuses_generated_still: mode === 'still_motion' && Boolean(scene.source_image_url && objectValue(scene.metadata).generated_still_asset === true),
     });
   }
@@ -294,9 +304,23 @@ export async function enqueueSceneGeneration(sceneId: string, orgId: string) {
   return updated.rows[0];
 }
 
-export async function enqueueProjectGeneration(projectId: string, orgId: string) {
+export async function enqueueProjectGeneration(projectId: string, orgId: string, requestedIdempotencyKey?: string) {
   const project = await query('SELECT * FROM video_projects WHERE id=$1 AND organization_id=$2', [projectId, orgId]);
   if (project.rows.length === 0) throw new NotFoundError('Video project');
+  const idempotencyKey = String(requestedIdempotencyKey || `longform-project:${projectId}:generation:v1`).trim();
+  if (idempotencyKey.length < 8 || idempotencyKey.length > 255) {
+    throw new AppError(400, 'A valid project generation idempotency key is required', 'LONGFORM_IDEMPOTENCY_INVALID');
+  }
+  const claimed = await query(
+    `UPDATE video_projects SET generation_idempotency_key=COALESCE(generation_idempotency_key,$1),updated_at=NOW()
+     WHERE id=$2 AND organization_id=$3
+       AND (generation_idempotency_key IS NULL OR generation_idempotency_key=$1)
+     RETURNING generation_idempotency_key`,
+    [idempotencyKey, projectId, orgId]
+  );
+  if (claimed.rows.length === 0) {
+    throw new AppError(409, 'Project generation already used a different idempotency key', 'LONGFORM_IDEMPOTENCY_CONFLICT');
+  }
   const quote = await quoteProjectGeneration(projectId, orgId);
   const budget = Number(project.rows[0].max_project_credits || 0);
   if (budget <= 0) throw new AppError(409, 'Set an explicit maximum project credit budget before generation', 'LONGFORM_BUDGET_REQUIRED');
@@ -327,7 +351,7 @@ export async function enqueueProjectGeneration(projectId: string, orgId: string)
      WHERE id=$2 AND organization_id=$3`,
     [results.length, projectId, orgId]
   );
-  return { queued: results.length, scenes: results };
+  return { queued: results.length, scenes: results, idempotency_key: idempotencyKey, replayed: results.length === 0 };
 }
 
 export async function cancelProjectGeneration(projectId: string, orgId: string) {

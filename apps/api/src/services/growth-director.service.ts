@@ -244,7 +244,7 @@ async function selectOrCreateCampaignPlan(
   const opportunity = objectValue(cycle.opportunity);
   const opportunityScopes = productScopes(opportunity.product_lines, opportunity.product_line);
   const scopeFilter = opportunityScopes.length > 0 ? opportunityScopes : null;
-  const current = await query(
+  const current = String(cycle.trigger_type) === 'manual' ? { rows: [] } : await query(
     `SELECT plan.* FROM campaign_plans plan
      WHERE plan.organization_id=$1 AND plan.strategy_validation_status='valid'
        AND plan.status<>'archived' AND plan.updated_at>=NOW()-INTERVAL '30 days'
@@ -289,7 +289,7 @@ async function selectOrCreateCampaignPlan(
     objective_stage: 'conversion',
     offer: 'Use only an approved current offer from structured connector or owner knowledge; otherwise avoid offer-dependent claims.',
     success_criteria: ['qualified organic engagement', 'attributable traffic', 'signup or conversion evidence'],
-    generation_credit_limit: 0,
+    generation_credit_limit: Number(cycle.generation_credit_ceiling || 0),
     idempotency_key: `growth-cycle:${String(cycle.id)}:campaign-plan:v1`,
   }, ownerId);
   return {
@@ -537,6 +537,155 @@ export async function ensureBaselineCycle(organizationId: string): Promise<strin
   return String(cycle.rows[0].id);
 }
 
+export async function createOwnerGrowthCycle(input: {
+  organizationId: string;
+  userId: string;
+  objective: string;
+  productLines?: string[];
+  idempotencyKey: string;
+  generationCreditCeiling: number;
+}): Promise<Record<string, unknown>> {
+  const objective = input.objective.trim();
+  const idempotencyKey = input.idempotencyKey.trim();
+  const scopes = normalizeProductScopes(input.productLines || []).sort();
+  if (objective.length < 10 || objective.length > 10_000) {
+    throw new AppError(400, 'Objective must contain 10 to 10,000 characters', 'GROWTH_OBJECTIVE_INVALID');
+  }
+  if (!idempotencyKey || idempotencyKey.length > 255) {
+    throw new AppError(400, 'A valid idempotency key is required', 'GROWTH_IDEMPOTENCY_INVALID');
+  }
+  if (!Number.isSafeInteger(input.generationCreditCeiling) || input.generationCreditCeiling <= 0) {
+    throw new AppError(400, 'Generation Credit ceiling must be a positive integer', 'GROWTH_CREDIT_CEILING_INVALID');
+  }
+  await ensureMarketingWorkforce(input.organizationId);
+
+  return transaction(async (client) => {
+    await client.query(
+      `INSERT INTO relaunch_control_policies (organization_id)
+       VALUES ($1) ON CONFLICT (organization_id) DO NOTHING`,
+      [input.organizationId]
+    );
+    const policyResult = await client.query(
+      'SELECT * FROM relaunch_control_policies WHERE organization_id=$1 FOR UPDATE',
+      [input.organizationId]
+    );
+    const policy = policyResult.rows[0] as Record<string, unknown>;
+    if (policy.emergency_stop === true) {
+      throw new AppError(409, 'Emergency Stop is active', 'EMERGENCY_STOP_ACTIVE');
+    }
+
+    const existing = await client.query(
+      `SELECT * FROM autonomous_growth_cycles
+       WHERE organization_id=$1 AND idempotency_key=$2 FOR UPDATE`,
+      [input.organizationId, idempotencyKey]
+    );
+    if (existing.rows[0]) {
+      const row = existing.rows[0] as Record<string, unknown>;
+      const existingScopes = productScopes(row.product_lines).sort();
+      if (
+        String(row.originating_instruction || row.objective || '') !== objective
+        || Number(row.generation_credit_ceiling || 0) !== input.generationCreditCeiling
+        || JSON.stringify(existingScopes) !== JSON.stringify(scopes)
+      ) {
+        throw new AppError(409, 'Idempotency key was already used for a different autonomous run', 'GROWTH_IDEMPOTENCY_CONFLICT');
+      }
+      return row;
+    }
+
+    const opportunity = {
+      source: 'owner_instruction',
+      summary: objective,
+      product_lines: scopes,
+      product_line: legacyProductLine(scopes),
+    };
+    const state = {
+      originating_instruction: objective,
+      governance_mode_at_start: String(policy.operating_mode || 'manual'),
+      policy_version_at_start: Number(policy.version || 0),
+      generation_credit_ceiling: input.generationCreditCeiling,
+      initiated_by: 'owner',
+    };
+    const cycle = await client.query(
+      `INSERT INTO autonomous_growth_cycles
+         (organization_id,status,trigger_type,objective,originating_instruction,
+          opportunity,product_lines,generation_credit_ceiling,idempotency_key,
+          initiated_by_user_id,state,next_run_at)
+       VALUES ($1,'observing','manual',$2,$2,$3,$4,$5,$6,$7,$8,NOW())
+       RETURNING *`,
+      [
+        input.organizationId,
+        objective,
+        JSON.stringify(opportunity),
+        JSON.stringify(scopes),
+        input.generationCreditCeiling,
+        idempotencyKey,
+        input.userId,
+        JSON.stringify(state),
+      ]
+    );
+    await client.query(
+      `INSERT INTO autonomous_growth_events
+         (cycle_id,organization_id,phase,event_type,detail)
+       VALUES ($1,$2,'observing','owner_objective_received',$3)`,
+      [cycle.rows[0].id, input.organizationId, JSON.stringify({
+        originating_instruction: objective,
+        product_lines: scopes,
+        generation_credit_ceiling: input.generationCreditCeiling,
+        governance_mode: String(policy.operating_mode || 'manual'),
+      })]
+    );
+    return cycle.rows[0] as Record<string, unknown>;
+  });
+}
+
+export async function getOwnerGrowthCycle(
+  cycleId: string,
+  organizationId: string
+): Promise<Record<string, unknown>> {
+  const cycleResult = await query(
+    `SELECT cycle.*,policy.operating_mode,policy.emergency_stop,policy.version AS current_policy_version
+     FROM autonomous_growth_cycles cycle
+     LEFT JOIN relaunch_control_policies policy ON policy.organization_id=cycle.organization_id
+     WHERE cycle.id=$1 AND cycle.organization_id=$2`,
+    [cycleId, organizationId]
+  );
+  if (!cycleResult.rows[0]) throw new AppError(404, 'Autonomous growth cycle not found', 'GROWTH_CYCLE_NOT_FOUND');
+  const cycle = cycleResult.rows[0] as Record<string, unknown>;
+  const campaignPlanId = cycle.campaign_plan_id ? String(cycle.campaign_plan_id) : null;
+  const [events, work] = await Promise.all([
+    query(
+      `SELECT id,phase,event_type,detail,created_at FROM autonomous_growth_events
+       WHERE cycle_id=$1 AND organization_id=$2 ORDER BY created_at,id`,
+      [cycleId, organizationId]
+    ),
+    campaignPlanId
+      ? query(
+        `SELECT run.id AS campaign_asset_run_id,run.status,run.resolution_status,
+                run.content_id,run.studio_generation_id,content.campaign_id,
+                asset.id AS studio_asset_id,asset.url AS studio_asset_url
+         FROM campaign_asset_runs run
+         LEFT JOIN content_items content ON content.id=run.content_id AND content.organization_id=run.organization_id
+         LEFT JOIN studio_assets asset ON asset.metadata->>'generation_id'=run.studio_generation_id::text AND asset.organization_id=run.organization_id
+         WHERE run.organization_id=$1 AND run.campaign_plan_id=$2
+         ORDER BY run.created_at,asset.created_at`,
+        [organizationId, campaignPlanId]
+      )
+      : Promise.resolve({ rows: [] }),
+  ]);
+  const rows = work.rows as Array<Record<string, unknown>>;
+  return {
+    ...cycle,
+    campaign_plan_ids: campaignPlanId ? [campaignPlanId] : [],
+    campaign_ids: [...new Set(rows.map((row) => row.campaign_id).filter(Boolean).map(String))],
+    content_ids: [...new Set(rows.map((row) => row.content_id).filter(Boolean).map(String))],
+    generation_ids: [...new Set(rows.map((row) => row.studio_generation_id).filter(Boolean).map(String))],
+    asset_ids: [...new Set(rows.map((row) => row.studio_asset_id).filter(Boolean).map(String))],
+    assets: rows.filter((row) => row.studio_asset_id).map((row) => ({ id: row.studio_asset_id, url: row.studio_asset_url })),
+    work: rows,
+    events: events.rows,
+  };
+}
+
 export async function advanceGrowthCycles(limit = 20): Promise<number> {
   const due = await query(
     `SELECT cycle.* FROM autonomous_growth_cycles cycle
@@ -558,6 +707,21 @@ export async function advanceGrowthCycles(limit = 20): Promise<number> {
     if (claimed.rows.length === 0) continue;
     try {
       const status = String(claimed.rows[0].status);
+      const currentPolicy = await query(
+        'SELECT emergency_stop,operating_mode,version FROM relaunch_control_policies WHERE organization_id=$1',
+        [orgId]
+      );
+      if (currentPolicy.rows[0]?.emergency_stop === true) {
+        await query(
+          "UPDATE autonomous_growth_cycles SET status='paused',next_run_at=NULL,claim_token=NULL,claimed_at=NULL,updated_at=NOW(),state=state || $1::jsonb WHERE id=$2",
+          [JSON.stringify({ paused_by: 'emergency_stop', policy_version: Number(currentPolicy.rows[0].version || 0) }), cycleId]
+        );
+        await recordEvent(cycleId, orgId, 'paused', 'cycle_paused_by_emergency_stop', {
+          policy_version: Number(currentPolicy.rows[0].version || 0),
+        });
+        advanced += 1;
+        continue;
+      }
       if (status === 'observing') {
         await query("UPDATE autonomous_growth_cycles SET status='planning',next_run_at=NOW(),claim_token=NULL,claimed_at=NULL,updated_at=NOW() WHERE id=$1", [cycleId]);
         await recordEvent(cycleId, orgId, 'planning', 'business_brain_reviewed', {});

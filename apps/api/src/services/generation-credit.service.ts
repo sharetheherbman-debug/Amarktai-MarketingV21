@@ -1,4 +1,4 @@
-import { transaction } from '../config/database';
+import { query, transaction } from '../config/database';
 import { AppError, NotFoundError } from '../middleware/errorHandler';
 
 export type WalletType = 'customer' | 'internal';
@@ -149,6 +149,37 @@ export async function getWallet(
     const row = await lockWallet(client, organizationId, walletType);
     return mapWallet(row);
   });
+}
+
+export async function getCreditActivity(
+  organizationId: string,
+  since?: string
+): Promise<Record<string, unknown>> {
+  const sinceDate = since ? new Date(since) : null;
+  if (sinceDate && !Number.isFinite(sinceDate.getTime())) {
+    throw new AppError(400, 'since must be a valid timestamp', 'CREDIT_ACTIVITY_SINCE_INVALID');
+  }
+  const boundary = sinceDate?.toISOString() || new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  const [wallet, reservations, ledger] = await Promise.all([
+    getWallet(organizationId),
+    query(
+      `SELECT id,generation_job_id,provider_job_id,model_id,operation,reserved_credits,
+              settled_credits,released_credits,status,idempotency_key,created_at,updated_at
+       FROM generation_credit_reservations
+       WHERE organization_id=$1 AND created_at >= $2
+       ORDER BY created_at,id LIMIT 500`,
+      [organizationId, boundary]
+    ),
+    query(
+      `SELECT id,reservation_id,entry_type,direction,credits,model_id,operation,
+              provider_job_id,idempotency_key,created_at
+       FROM generation_credit_ledger
+       WHERE organization_id=$1 AND created_at >= $2
+       ORDER BY created_at,id LIMIT 1000`,
+      [organizationId, boundary]
+    ),
+  ]);
+  return { since: boundary, wallet, reservations: reservations.rows, ledger: ledger.rows };
 }
 
 export async function grantCredits(input: {

@@ -280,6 +280,7 @@ async function processStillMotion(job: Job): Promise<void> {
           production_mode: 'still_motion',
           motion_style: style,
           local_motion_render: true,
+          generated_clip_asset_id: videoAsset.id,
           local_motion_size_bytes: rendered.sizeBytes,
           local_motion_duration_seconds: rendered.durationSeconds,
           provider_video_cost_avoided: true,

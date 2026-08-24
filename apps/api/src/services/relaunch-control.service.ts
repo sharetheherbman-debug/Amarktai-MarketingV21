@@ -158,6 +158,9 @@ export async function getControlCentre(organizationId: string): Promise<Record<s
   const operatingMode = String(policy.operating_mode);
 
   return {
+    // Keep the canonical nested policy for the Control Centre while exposing
+    // the commonly consumed safety fields at the root for dashboard clients.
+    ...policy,
     policy,
     runtime: {
       state: emergencyStop ? 'stopped' : operatingMode === 'manual' ? 'manual' : inWindow ? 'ready' : 'outside_schedule',

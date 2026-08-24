@@ -196,7 +196,7 @@ async function startServer() {
       logger.info(`Environment: ${env.NODE_ENV}`);
       logger.info(`API URL: ${env.API_URL}`);
       logger.info(`App URL: ${env.APP_URL}`);
-      scheduler.startScheduler();
+      if (env.SCHEDULER_ENABLED) scheduler.startScheduler();
     });
 
     let shuttingDown = false;

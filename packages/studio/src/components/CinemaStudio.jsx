@@ -42,29 +42,6 @@ const APERTURE_EFFECT = {
     "f/11": "deep focus clarity, sharp foreground to background"
 };
 
-const ASSET_URLS = {
-    "Modular 8K Digital": "/assets/cinema/modular_8k_digital.webp",
-    "Full-Frame Cine Digital": "/assets/cinema/full_frame_cine_digital.webp",
-    "Grand Format 70mm Film": "/assets/cinema/grand_format_70mm_film.webp",
-    "Studio Digital S35": "/assets/cinema/studio_digital_s35.webp",
-    "Classic 16mm Film": "/assets/cinema/classic_16mm_film.webp",
-    "Premium Large Format Digital": "/assets/cinema/premium_large_format_digital.webp",
-    "Creative Tilt Lens": "/assets/cinema/creative_tilt_lens.webp",
-    "Compact Anamorphic": "/assets/cinema/compact_anamorphic.webp",
-    "Extreme Macro": "/assets/cinema/extreme_macro.webp",
-    "70s Cinema Prime": "/assets/cinema/70s_cinema_prime.webp",
-    "Classic Anamorphic": "/assets/cinema/classic_anamorphic.webp",
-    "Premium Modern Prime": "/assets/cinema/premium_modern_prime.webp",
-    "Warm Cinema Prime": "/assets/cinema/warm_cinema_prime.webp",
-    "Swirl Bokeh Portrait": "/assets/cinema/swirl_bokeh_portrait.webp",
-    "Vintage Prime": "/assets/cinema/vintage_prime.webp",
-    "Halation Diffusion": "/assets/cinema/halation_diffusion.webp",
-    "Clinical Sharp Prime": "/assets/cinema/clinical_sharp_prime.webp",
-    "f/1.4": "/assets/cinema/f_1_4.webp",
-    "f/4": "/assets/cinema/f_4.webp",
-    "f/11": "/assets/cinema/f_11.webp"
-};
-
 const ASPECT_RATIOS = ['16:9', '21:9', '9:16', '1:1', '4:5'];
 const RESOLUTIONS = ['1K', '2K', '4K'];
 const CAMERAS = Object.keys(CAMERA_MAP);
@@ -300,7 +277,11 @@ function ScrollColumn({ title, items, columnKey, value, onChange }) {
                     <div style={{ height: 'calc(50% - 50px)' }} />
 
                     {items.map(item => {
-                        const imageUrl = ASSET_URLS[item];
+                        const controlMark = columnKey === 'focal'
+                            ? String(item)
+                            : columnKey === 'aperture'
+                                ? String(item).replace('f/', 'ƒ')
+                                : String(item).split(/\s+/).map(part => part[0]).join('').slice(0, 2).toUpperCase();
                         return (
                             <div
                                 key={item}
@@ -312,19 +293,9 @@ function ScrollColumn({ title, items, columnKey, value, onChange }) {
                                     data-imgbox="true"
                                     className="w-14 h-14 rounded-xl border border-white/10 bg-white/5 flex items-center justify-center transition-all duration-500 shadow-inner overflow-hidden relative"
                                 >
-                                    {imageUrl ? (
-                                        <img
-                                            src={imageUrl}
-                                            alt={String(item)}
-                                            className="w-full h-full object-cover opacity-80"
-                                        />
-                                    ) : columnKey === 'focal' ? (
-                                        <span data-focal-text="true" className="text-lg font-bold text-white/50">
-                                            {item}
-                                        </span>
-                                    ) : (
-                                        <div className="w-3 h-3 bg-white/20 rounded-full" />
-                                    )}
+                                    <span data-control-mark="true" aria-hidden="true" className="flex h-full w-full items-center justify-center bg-gradient-to-br from-white/10 via-white/[0.03] to-primary/10 text-sm font-black tracking-tight text-white/60">
+                                        {controlMark}
+                                    </span>
                                 </div>
                                 <span
                                     data-label="true"

@@ -140,7 +140,11 @@ router.post('/projects/:id/generate', async (req: AuthRequest, res: Response<Api
   try {
     const auth = await resolveOrg(req, 'body');
     if (auth.error) return fail(res, auth.status, auth.error);
-    res.status(202).json({ success: true, data: await generationService.enqueueProjectGeneration(req.params.id, auth.orgId) });
+    res.status(202).json({ success: true, data: await generationService.enqueueProjectGeneration(
+      req.params.id,
+      auth.orgId,
+      req.body.idempotency_key ? String(req.body.idempotency_key) : undefined
+    ) });
   } catch (error) { next(error); }
 });
 
@@ -172,7 +176,11 @@ router.post('/projects/:id/renders', async (req: AuthRequest, res: Response<ApiR
   try {
     const auth = await resolveOrg(req, 'body');
     if (auth.error) return fail(res, auth.status, auth.error);
-    const render = await renderService.createRender(req.params.id, auth.orgId);
+    const render = await renderService.createRender(
+      req.params.id,
+      auth.orgId,
+      req.body.idempotency_key ? String(req.body.idempotency_key) : undefined
+    );
     res.status(202).json({ success: true, data: render });
   } catch (error) { next(error); }
 });

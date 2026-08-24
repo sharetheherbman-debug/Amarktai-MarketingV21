@@ -30,6 +30,7 @@ export interface GenXPriceQuote {
   target_margin_bps: number;
   price_snapshot_id: string;
   price_effective_from: string;
+  pricing_last_synced_at: string;
 }
 
 type PriceCandidate = {
@@ -739,6 +740,7 @@ export async function quoteGeneration(input: {
     target_margin_bps: Number(row.target_margin_bps),
     price_snapshot_id: String(row.id),
     price_effective_from: effectiveFrom.toISOString(),
+    pricing_last_synced_at: pricingLastSyncedAt.toISOString(),
   };
 }
 
