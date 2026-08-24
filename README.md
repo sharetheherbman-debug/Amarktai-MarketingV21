@@ -1,229 +1,89 @@
 # AmarktAI Marketing
 
-**AmarktAI Marketing** is a standalone, reusable multi-tenant AI marketing operating system with campaign automation, content workflows, provider routing, Creative Studio generation, host-application connectors and a persistent long-form production pipeline.
+AmarktAI Marketing is a standalone, reusable, white-label marketing operating system. It combines business knowledge, research, campaign planning, governed content and media production, approvals, publishing, CRM, analytics, and controlled autonomous operation.
 
-The first customer deployment is EquiProfile Marketing at `https://marketing.equiprofile.online`. The application itself remains white-label and connects to host products through the signed server-side Application Connector rather than product-specific browser coupling.
+EquiProfile is customer deployment #1. EquiProfile branding and host-product context are deployment configuration; the engine is not coupled to EquiProfile source code.
 
-## Current runtime
+## Repository architecture
 
-The repository contains:
+- `apps/web` — Next.js client application.
+- `apps/api` — Express API, PostgreSQL access, queues, workers, provider boundaries, and signed Application Connector.
+- `packages/studio` — reusable Creative Studio and long-form production UI.
+- `packages/application-connector-sdk` — server-side host connector SDK.
+- `packages/ui` — shared presentation primitives.
+- `docker` — local and production Compose definitions and reverse-proxy configuration.
+- `scripts` — verification and controlled deployment helpers.
 
-- Next.js 15 and React 19 web application;
-- Express and TypeScript API;
-- PostgreSQL 16 with pgvector;
-- Redis 7 and BullMQ;
-- dedicated generation, long-form still-motion and FFmpeg render workers;
-- GenX Router integration with server-side credentials;
-- reusable signed Application Connector SDK;
-- secure organization-owned media assets;
-- Creative Studio image, video and audio workflows;
-- long-form projects, scripts, storyboards, scenes, continuity, narration, music, captions, rendering and exports;
-- Docker images for API, web and workers;
-- internal Nginx reverse proxy;
-- optional Caddy standalone HTTPS edge;
-- encrypted database/Redis/media/config backup and restore scripts;
-- exact-SHA, backup-first deployment/update/rollback workflow.
+The worker architecture contains a generation worker, long-form still-motion worker, and render worker. PostgreSQL owns durable product state; Redis/BullMQ owns queued work; generated media must be copied into organization-owned durable Studio storage.
 
-## Repository
+## Product
 
-```bash
-git clone https://github.com/sharetheherbman-debug/Amarktai-MarketingV21.git
-cd Amarktai-MarketingV21
-```
+The intended client navigation is:
+
+1. Command Centre
+2. Business Brain
+3. Research & Intelligence
+4. Strategy & Campaigns
+5. Content Studio
+6. Creative Studio
+7. Calendar & Production
+8. Publish & Channels
+9. CRM
+10. Analytics & Optimisation
+11. Marketing Team
+12. Workflows & Approvals
+13. Connections
+14. Usage & Safety
+15. Settings
+
+Developer and platform-administration routes may remain available to authorised operators, but they are not part of ordinary client navigation.
+
+## Application Connector
+
+Host applications integrate server-to-server through the signed Application Connector under `/api/v1/application-connectors`. The contract uses an application identifier, key, HMAC signature, timestamp, replay protection, one-use SSO codes, explicit product/service scopes, approved business snapshots, and idempotent conversion events. Shared secrets never belong in browser code.
+
+See [Application Connector](docs/APPLICATION_CONNECTOR.md) and the [connector SDK](packages/application-connector-sdk/README.md).
 
 ## Development
 
-Prerequisites:
-
-- Node.js 22 LTS or newer supported by the repository engine;
-- npm 10;
-- PostgreSQL 16;
-- Redis 7.
+Requirements: Node.js 22+, npm 10+, PostgreSQL 16 with pgvector, Redis, and FFmpeg for render workflows.
 
 ```bash
 npm ci
 cp .env.example .env
-# Fill in the development database, Redis and provider settings.
 npm run db:migrate
 npm run dev
 ```
 
-Default development endpoints:
+Do not put production secrets in `.env`, documentation, browser configuration, or Git.
 
-- Web: `http://localhost:3000`
-- API: `http://localhost:4000`
-
-## Docker validation
-
-The base Compose stack is intended for a complete local/server-like Docker run and requires explicit database, Redis, JWT, encryption and GenX values.
+## Testing
 
 ```bash
-cp .env.example .env
-# Replace all required placeholder values, including GENX_API_KEY.
-npm run docker:build
-npm run docker:up
+npm run lint
+npm run build
+npm run test --workspace=@amarktai/api
+npm run verify
 ```
 
-The internal Nginx proxy is bound to loopback by default. PostgreSQL, Redis, API and web ports are not exposed publicly.
+The final release gate also includes fresh and upgrade-path migrations, connector SDK checks, real API/database-backed browser acceptance, Docker image builds, Compose validation, and security audit. See [Testing and acceptance](docs/TESTING_AND_ACCEPTANCE.md).
 
-```bash
-npm run docker:down
-```
+## Deployment
 
-## Production VPS deployment
+Production deployment is an explicit owner-controlled operation. Create and verify a backup, deploy one reviewed SHA, apply only forward migrations, start workers in a controlled order, run live browser/provider acceptance, and retain a tested rollback path. Never deploy an unreviewed branch head or rebuild client assets manually on the server.
 
-Canonical production instructions are in [`docs/VPS_DEPLOYMENT.md`](docs/VPS_DEPLOYMENT.md). That runbook is authoritative for the fresh handover installation.
+See [Deployment](docs/DEPLOYMENT.md), [Operations](docs/OPERATIONS.md), and [Client handover](docs/CLIENT_HANDOVER.md).
 
-The EquiProfile customer topology uses the existing host Nginx on public ports 80/443 and proxies only `marketing.equiprofile.online` to Marketing's loopback edge. Caddy is used only for a standalone deployment when `SHARED_HOST_NGINX=false`.
+## Exact release process
 
-Before any destructive cleanup:
+1. Work on the named reconciliation/release branch.
+2. Keep historical migrations immutable.
+3. Run the complete local acceptance matrix.
+4. Commit coherent changes and confirm a clean tree.
+5. Push without force and wait for CI on the exact SHA.
+6. Record the branch, SHA, migration delta, test/build results, known warnings, and external activation gates.
+7. Deploy only that SHA in a separate authorised task.
 
-1. inventory the live VPS and classify Marketing-owned versus shared resources;
-2. create and verify a complete encrypted rollback backup;
-3. copy the rollback artifact off-server;
-4. remove only explicitly identified obsolete Marketing application assets;
-5. install the exact frozen reviewed SHA.
+## Canonical documentation
 
-Do **not** blindly delete databases, Docker volumes, uploads, certificates, environment files, shared proxy configuration or rollback backups.
-
-Prepare production configuration from the neutral template:
-
-```bash
-cp .env.production.example .env.production
-chmod 600 .env.production
-# Replace every placeholder/example value with the reviewed production configuration.
-```
-
-The release uses an explicit branch only to locate the reviewed commit and always deploys the exact SHA:
-
-```dotenv
-DEPLOY_BRANCH=release-candidate/marketing-product-2026-08-22
-DEPLOY_SHA=<exact frozen green-CI Marketing SHA>
-```
-
-Run preflight/release checks and create the compatible rollback bundle before deployment:
-
-```bash
-npm run vps:preflight
-bash scripts/vps-release-gate.sh
-npm run vps:backup
-```
-
-After the cleanup/inventory procedure in the canonical runbook, deploy core only:
-
-```bash
-bash scripts/vps-deploy.sh core
-```
-
-Workers remain off until signed host connector/SSO + Marketing MFA and direct GenX provider acceptance succeed. Then start them in the controlled worker stage:
-
-```bash
-bash scripts/vps-deploy.sh workers
-npm run vps:smoke -- full
-```
-
-## Health and readiness
-
-The stack exposes liveness/readiness through the internal/public edge and API health routes. Production smoke testing validates core service health and, when requested, the worker processes and their Redis connectivity.
-
-After DNS, host Nginx and TLS are correct:
-
-```bash
-bash scripts/vps-smoke.sh public
-```
-
-## Backups, restore and updates
-
-Create the current project-scoped encrypted rollback bundle:
-
-```bash
-npm run vps:backup
-```
-
-The generated filename is based on `COMPOSE_PROJECT_NAME` and is written beneath `BACKUP_DIR`. Restore only the actual verified artifact produced by the deployment:
-
-```bash
-bash scripts/vps-restore.sh "$BACKUP_DIR/<generated-project-backup>.tar.gz.enc" --yes
-```
-
-A source update is backup-first and exact-SHA pinned:
-
-```bash
-npm run vps:update
-```
-
-Never substitute `latest` or an unreviewed branch head for `DEPLOY_SHA`.
-
-## Host Application Connector
-
-The reusable server-side connector is in `packages/application-connector-sdk`. New integrations use generic `HOST_APP_*` settings; historical `EQUIPROFILE_*` connector names remain compatibility aliases for the first host only.
-
-The connector provides signed health, one-use administrator SSO, conversion delivery and approved business snapshots with HMAC authentication, timestamp/nonce replay protection, generic product/service scopes and a sensitive-data rejection boundary.
-
-Read:
-
-- [`docs/HOST_APP_QUICKSTART.md`](docs/HOST_APP_QUICKSTART.md)
-- [`docs/HOST_APP_INTEGRATION.md`](docs/HOST_APP_INTEGRATION.md)
-- [`docs/HOST_APP_SECURITY.md`](docs/HOST_APP_SECURITY.md)
-- [`docs/HOST_APP_EVENT_CONTRACT.md`](docs/HOST_APP_EVENT_CONTRACT.md)
-
-Browser sessions use HttpOnly cookies and Marketing MFA. For a new connector-created workspace, the first authorized host administrator becomes Marketing owner; subsequent authorized host administrators become Marketing admins.
-
-## Main commands
-
-| Command | Purpose |
-|---|---|
-| `npm run dev` | Start development services |
-| `npm run build` | Build all workspaces |
-| `npm run audit` | Reject high-severity dependency findings |
-| `npm run verify` | Run repository verification |
-| `npm run db:migrate` | Apply database migrations |
-| `npm run docker:build` | Build the base Docker stack |
-| `npm run docker:up` | Start the base Docker stack |
-| `npm run vps:preflight` | Validate VPS resources, production settings and live GenX catalogue/pricing access |
-| `npm run vps:backup` | Create encrypted PostgreSQL/Redis/media/config rollback bundle |
-| `npm run vps:restore` | Restore a verified encrypted backup |
-| `npm run vps:update` | Backup, fetch and deploy an exact reviewed SHA with rollback handling |
-
-## Project structure
-
-```text
-apps/api/                 Express API, providers, queues, workers and migrations
-apps/web/                 Next.js web application
-packages/                 Reusable SDKs/components including the Application Connector SDK
-scripts/                  Verification and VPS operational workflows
-docker/                   Base/production Compose, Nginx and optional Caddy edge
-docs/                     Architecture, connector, deployment and runtime evidence
-```
-
-## Release acceptance
-
-Repository CI must be green on the **exact frozen SHA** for:
-
-- secure dependency lock refresh;
-- high-severity dependency audit;
-- API and Web TypeScript;
-- reusable connector SDK build;
-- API regression tests;
-- clean ordered migrations through the current migration tail;
-- production application builds;
-- Docker images, Compose and proxy validation;
-- repository Verification Suite.
-
-Production acceptance still requires the real VPS and credentials to prove:
-
-1. signed host connector health, one-use SSO, owner/admin behavior and Marketing MFA;
-2. browser authentication without JavaScript-readable JWT storage;
-3. live GenX catalogue/pricing and selected generation paths with no hidden provider fallback;
-4. webhook/error/reversal behavior and Generation Credit accounting;
-5. staged worker recovery/idempotency;
-6. configured SMTP delivery/password-recovery path if retained;
-7. enabled social/provider connectors under owner/control policies;
-8. public DNS/Nginx/TLS and responsive browser acceptance;
-9. rollback/restore evidence.
-
-Only after both repository and production acceptance are recorded should the Marketing release be handed over.
-
-## License
-
-This project is licensed under the MIT License. See [`LICENSE`](LICENSE).
+[docs/INDEX.md](docs/INDEX.md) identifies the authoritative documents and distinguishes specialist reference material from superseded history retained by Git.

@@ -1,77 +1,40 @@
-# Deployment Guide
+# Deployment
 
-The canonical production runbook is [`VPS_DEPLOYMENT.md`](./VPS_DEPLOYMENT.md). Follow that document for the complete fresh-install inventory, backup, cleanup, deployment, provider/browser acceptance and rollback procedure.
+This is the canonical controlled deployment boundary. It does not authorise production changes.
 
-EquiProfile Marketing is the first customer deployment of the reusable standalone Marketing application. It runs as a CPU-only Docker Compose stack containing:
+## Release prerequisites
 
-- PostgreSQL 16 with pgvector;
-- Redis 7 with persistent state;
-- Express API;
-- BullMQ generation worker;
-- BullMQ long-form still-motion worker;
-- BullMQ FFmpeg render worker;
-- Next.js web application;
-- internal Nginx reverse proxy.
+- exact reviewed branch and SHA;
+- clean working tree and green exact-SHA CI;
+- production dependency audit with no blocking severity;
+- fresh and supported upgrade-path migration acceptance;
+- API, web, connector SDK, and worker builds;
+- real API/database-backed browser acceptance;
+- Compose validation and image builds;
+- documented environment/branding/connector configuration;
+- verified backup and rollback rehearsal plan;
+- explicit owner approval for provider costs and worker activation.
 
-Production URL: `https://marketing.equiprofile.online`
+## Minimum controlled sequence
 
-On the EquiProfile VPS, the host Nginx owns public ports 80/443 and proxies only the Marketing hostname to the configured loopback Marketing edge, normally `127.0.0.1:8080`. Caddy is used only for a standalone deployment when `SHARED_HOST_NGINX=false`.
+1. Inventory the current Marketing deployment, database journal, durable media, secrets, proxy/TLS state, running workers, and rollback assets without mutation.
+2. Create and verify database, configuration, and durable-media backups. Record checksums and restore location.
+3. Confirm the repository contains every production-applied migration unchanged, including both divergent `033` and `034` names and `035_genx_account_pricing_source.sql`.
+4. Build or pull images for the exact SHA; never use an unreviewed `latest` image.
+5. Validate production environment and Compose configuration without printing secrets.
+6. Stop or drain Marketing services only according to the approved maintenance plan.
+7. Apply new forward-only migrations once and verify the journal/schema.
+8. Start PostgreSQL/Redis dependencies, API, and web; keep paid generation workers disabled initially.
+9. Run health, authentication, SSO, storage, and unpaid browser acceptance.
+10. Validate provider catalogue/pricing and print the first paid quote.
+11. Start generation, still-motion, and render workers one at a time; verify queue/health/credit behaviour after each.
+12. Run the ordered live acceptance in [Client handover](CLIENT_HANDOVER.md).
+13. Record exact SHA, images, migration result, backup, live tests, costs, worker state, and rollback evidence.
 
-## Controlled production sequence
+## Failure and rollback
 
-Do not delete the existing Marketing application stack first. Read-only inventory and a verified rollback backup must exist before cleanup.
+Do not delete production databases, volumes, media, certificates, proxies, backups, or migration history. On a blocking failure, stop new external work, preserve evidence, roll application services back to the reviewed prior release, and restore data only under the documented owner-approved restore procedure. A migration requiring destructive rollback needs its own reviewed recovery operation.
 
-For a compatible existing checkout, the safe sequence begins with:
+## Environment rules
 
-```bash
-# Exact reviewed SHA and all real production values must be configured in .env.production.
-bash scripts/vps-preflight.sh
-bash scripts/vps-release-gate.sh
-bash scripts/vps-backup.sh
-```
-
-For the handover fresh install, use only the frozen Marketing SHA from:
-
-```dotenv
-DEPLOY_BRANCH=release-candidate/marketing-product-2026-08-22
-DEPLOY_SHA=<exact frozen green-CI Marketing SHA>
-```
-
-After the old Marketing-owned application assets have been explicitly classified and safely removed according to the canonical runbook, install/check out the exact SHA and deploy core:
-
-```bash
-bash scripts/vps-deploy.sh core
-```
-
-Do not start generation/render workers until signed host connector/SSO + Marketing MFA, GenX catalogue/pricing and direct governed generation have passed.
-
-Then:
-
-```bash
-bash scripts/vps-deploy.sh workers
-bash scripts/vps-smoke.sh full
-```
-
-After DNS/host Nginx/TLS are confirmed:
-
-```bash
-bash scripts/vps-smoke.sh public
-```
-
-Safe source updates use the explicit branch only to locate the reviewed commit and always deploy the exact `DEPLOY_SHA`:
-
-```bash
-bash scripts/vps-update.sh
-```
-
-Restore requires a complete encrypted rollback bundle and explicit confirmation. Use the actual project-scoped backup produced in `BACKUP_DIR`; do not use a historical hard-coded EquiProfile filename:
-
-```bash
-bash scripts/vps-restore.sh "$BACKUP_DIR/<generated-project-backup>.tar.gz.enc" --yes
-```
-
-`FIRST_RUN=false` is the safe default. For a fresh workspace, the first authorized administrator entering through the signed host Application Connector becomes Marketing owner and must complete Marketing MFA; subsequent authorized host administrators become Marketing admins.
-
-Do not remove databases, volumes, uploads, environment files, certificates, host Nginx configuration or rollback backups unless the canonical runbook's inventory proves they are Marketing-owned and the handover explicitly chooses to discard/replace that state.
-
-See the canonical runbook for exact-SHA pinning, production environment preflight, encrypted PostgreSQL/Redis/media/config backups, migration coverage through 034, MFA, Generation Credits, GenX acceptance, staged workers, social/email/analytics acceptance, autonomous campaign proof, restore and final host↔Marketing connector acceptance.
+Production `.env` files and provider/connector/session secrets are never committed, logged, or copied to browser configuration. White-label branding is supplied through reviewed public configuration; server secrets remain server-only.

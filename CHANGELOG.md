@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased — client handover reconciliation
+
+- Consolidated active product, architecture, Studio, autonomy, connector, deployment, operations, testing, and handover documentation into one canonical set.
+- Removed superseded phase boards, rescue snapshots, duplicate VPS/backup/admin runbooks, and obsolete product-specific connector instructions from the active branch; Git history retains them.
+- Reconciliation work continues on the controlled `rescue/client-handover-marketing-2026-08-24` branch and will be frozen only after full acceptance.
+
 All notable changes to AmarktAI Marketing are documented in this file.
 
 ## [1.0.0-RC1] - 2026-08-05
