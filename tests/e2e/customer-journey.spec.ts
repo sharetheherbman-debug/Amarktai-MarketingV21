@@ -80,9 +80,9 @@ test('real customer journey, auth refresh, controls, desktop and mobile navigati
   await expect(page.getByText('E2E Academy launch revised', { exact: true }).first()).toBeVisible();
 
   await page.goto('/creative-studio');
-  await expect(page.getByRole('button', { name: 'Chat' })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Text to Image' })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Text to Video' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Chat', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Text to Image', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Text to Video', exact: true })).toBeVisible();
   const currentCookies = await context.cookies();
   const access = currentCookies.find((cookie) => cookie.name === 'accessToken');
   expect(access).toBeTruthy();
@@ -91,7 +91,7 @@ test('real customer journey, auth refresh, controls, desktop and mobile navigati
   const refreshResponse = page.waitForResponse((response) => response.url().includes('/api/v1/auth/refresh') && response.status() === 200);
   await page.getByRole('button', { name: 'Refresh capabilities' }).click();
   await refreshResponse;
-  await expect(page.getByRole('button', { name: 'Chat' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Chat', exact: true })).toBeVisible();
   expect(expectedExpiredAccessResponses).toBe(0);
 
   await page.getByRole('button', { name: 'Long-form Production' }).click();
