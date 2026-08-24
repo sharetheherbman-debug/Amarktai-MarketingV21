@@ -10,6 +10,10 @@ function schema(keys: string[]): Record<string, unknown> {
   };
 }
 
+function isSeedanceReferenceVideoModel(id: string): boolean {
+  return id.startsWith('seedance-') && (id.endsWith('-r2v') || id.endsWith('-reference'));
+}
+
 /**
  * The live Router model-detail endpoint currently returns identity, category,
  * provider and retirement state, but not the model-specific parameter schema.
@@ -32,7 +36,7 @@ export function routerParameterContract(
     };
   }
 
-  if (id === 'seedance-2-r2v' || id === 'seedance-2-reference') {
+  if (isSeedanceReferenceVideoModel(id)) {
     return {
       operations: ['reference_image_video'],
       parameters: schema(['prompt', 'reference_image', 'resolution', 'duration', 'generate_audio']),
@@ -158,7 +162,7 @@ export function translateRouterGenerationParams(
     delete translated.image_url;
   }
 
-  if ((id === 'seedance-2-r2v' || id === 'seedance-2-reference') && translated.reference_image) {
+  if (isSeedanceReferenceVideoModel(id) && translated.reference_image) {
     translated.image_urls = Array.isArray(translated.reference_image)
       ? translated.reference_image
       : [translated.reference_image];
