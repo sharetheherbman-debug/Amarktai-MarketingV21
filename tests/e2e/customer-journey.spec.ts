@@ -158,6 +158,7 @@ test('real customer journey, auth refresh, controls, desktop and mobile navigati
   await expect(page).toHaveURL(/\/settings$/);
 
   await page.setViewportSize({ width: 1440, height: 900 });
+  await page.getByRole('button', { name: 'Toggle navigation' }).click();
   await page.getByRole('button', { name: 'Sign out' }).click();
   await page.waitForURL('**/login');
   expect((await context.cookies()).filter((cookie) => ['accessToken', 'refreshToken'].includes(cookie.name))).toHaveLength(0);
