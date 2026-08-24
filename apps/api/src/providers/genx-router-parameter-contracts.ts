@@ -14,6 +14,10 @@ function isSeedanceReferenceVideoModel(id: string): boolean {
   return id.startsWith('seedance-') && (id.endsWith('-r2v') || id.endsWith('-reference'));
 }
 
+function isSeedance25TextVideoModel(id: string): boolean {
+  return id === 'seedance-2.5';
+}
+
 /**
  * The live Router model-detail endpoint currently returns identity, category,
  * provider and retirement state, but not the model-specific parameter schema.
@@ -86,6 +90,13 @@ export function routerParameterContract(
     return {
       operations: ['text_to_video'],
       parameters: schema(['prompt', 'duration', 'aspect_ratio']),
+    };
+  }
+
+  if (isSeedance25TextVideoModel(id)) {
+    return {
+      operations: ['text_to_video'],
+      parameters: schema(['prompt', 'resolution', 'duration', 'aspect_ratio', 'generate_audio']),
     };
   }
 
@@ -167,6 +178,21 @@ export function translateRouterGenerationParams(
       ? translated.reference_image
       : [translated.reference_image];
     delete translated.reference_image;
+  }
+
+  if (isSeedance25TextVideoModel(id) && typeof translated.resolution === 'string') {
+    const normalizedResolution = translated.resolution.trim().toLowerCase();
+    const resolutionMap: Record<string, string> = {
+      '854x480': '480p',
+      '480p': '480p',
+      '1280x720': '720p',
+      '720p': '720p',
+      '1920x1080': '1080p',
+      '1080p': '1080p',
+    };
+    if (resolutionMap[normalizedResolution]) {
+      translated.resolution = resolutionMap[normalizedResolution];
+    }
   }
 
   return translated;
