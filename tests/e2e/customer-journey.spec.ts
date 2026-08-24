@@ -137,12 +137,12 @@ test('real customer journey, auth refresh, controls, desktop and mobile navigati
   await page.goto('/relaunch-control');
   await expect(page.getByRole('heading', { name: 'Relaunch Control Centre' })).toBeVisible();
   await page.evaluate(() => { window.prompt = () => 'E2E acceptance verifies the real emergency stop.'; });
-  const stopResponse = page.waitForResponse((response) => response.url().endsWith('/api/v1/relaunch-control/emergency-stop') && response.request().method() === 'POST');
+  const stopResponse = page.waitForResponse((response) => response.url().includes('/api/v1/relaunch-control/emergency-stop') && response.request().method() === 'POST');
   await page.getByRole('button', { name: 'Emergency stop' }).click();
   expect((await stopResponse).status()).toBe(200);
   await expect(page.getByRole('button', { name: 'Release emergency stop' })).toBeVisible();
   await page.evaluate(() => { window.prompt = () => 'E2E acceptance restores governed autonomous operation.'; });
-  const releaseResponse = page.waitForResponse((response) => response.url().endsWith('/api/v1/relaunch-control/emergency-stop') && response.request().method() === 'POST');
+  const releaseResponse = page.waitForResponse((response) => response.url().includes('/api/v1/relaunch-control/emergency-stop') && response.request().method() === 'POST');
   await page.getByRole('button', { name: 'Release emergency stop' }).click();
   expect((await releaseResponse).status()).toBe(200);
   await expect(page.getByRole('button', { name: 'Emergency stop' })).toBeVisible();
