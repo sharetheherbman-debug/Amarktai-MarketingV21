@@ -89,7 +89,12 @@ async function resolveModel(scene: Record<string, any>, operation: string, quant
   const quantity = quantityOverride || (operation.includes('video') ? Math.max(1, Number(scene.duration_seconds || 1)) : 1);
   if (scene.model_id) {
     const model = await genxRegistry.getModelById(scene.model_id);
-    if (model && model.available !== false && (model.operations || []).includes(operation)) {
+    if (
+      model &&
+      model.available !== false &&
+      model.verification_status !== 'failed' &&
+      (model.operations || []).includes(operation)
+    ) {
       const quote = await genxPricing.quoteGeneration({
         modelId: model.id,
         operation,
@@ -115,6 +120,7 @@ async function resolveModel(scene: Record<string, any>, operation: string, quant
 
   const priced: Array<PlannedModel & { runtimeConfirmed: boolean }> = [];
   for (const model of models) {
+    if (model.verification_status === 'failed') continue;
     try {
       const quote = await genxPricing.quoteGeneration({ modelId: model.id, operation, quantity });
       priced.push({
