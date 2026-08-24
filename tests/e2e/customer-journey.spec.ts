@@ -41,7 +41,7 @@ test('real customer journey, auth refresh, controls, desktop and mobile navigati
   expect(await page.locator('body').evaluate((node) => getComputedStyle(node).getPropertyValue('--ep-blue').trim())).toBe('#abcdef');
 
   await page.getByLabel('Email').fill(owner.email);
-  await page.getByLabel('Password').fill(owner.password);
+  await page.locator('#password').fill(owner.password);
   await page.getByLabel('Authenticator or recovery code').fill(owner.recoveryCode);
   await page.getByRole('button', { name: 'Sign In' }).click();
   await page.waitForURL('**/dashboard');
