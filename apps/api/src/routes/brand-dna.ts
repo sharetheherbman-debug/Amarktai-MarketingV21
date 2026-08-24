@@ -13,32 +13,31 @@ function record(value: unknown): Record<string, any> {
 
 function customerView(value: Record<string, any> | null): Record<string, unknown> | null {
   if (!value) return null;
-  const metadata = record(value.metadata);
   const audience = record(value.target_audience);
   const colors = record(value.colors);
   return {
     id: value.id,
     organizationId: value.organization_id,
     companyName: value.company_name || '',
-    description: metadata.description || '',
+    description: value.company_description || '',
     industry: value.industry || '',
-    websiteUrl: metadata.website_url || '',
-    products: Array.isArray(metadata.products) ? metadata.products : [],
+    websiteUrl: value.website_url || '',
+    products: Array.isArray(value.products) ? value.products : [],
     voiceDescription: value.brand_voice || '',
-    tone: metadata.tone || 'professional',
+    tone: value.tone || 'professional',
     demographics: audience.demographics || '',
     psychographics: audience.psychographics || '',
     goals: value.goals || [],
     keywords: value.keywords || [],
     writingStyle: value.writing_style || '',
     prohibitedPhrases: value.prohibited_phrases || [],
-    complianceRules: Array.isArray(metadata.compliance_rules) ? metadata.compliance_rules : [],
+    complianceRules: Array.isArray(value.compliance_rules) ? value.compliance_rules : [],
     primaryColor: colors.primary || '#052b57',
     secondaryColor: colors.secondary || '#ffffff',
     accentColor: colors.accent || '#167cc1',
-    logoUrl: metadata.logo_url || '',
-    socialHandles: record(metadata.social_handles),
-    competitors: Array.isArray(metadata.competitors) ? metadata.competitors : [],
+    logoUrl: value.logo_url || '',
+    socialHandles: record(value.social_handles),
+    competitors: Array.isArray(value.competitors) ? value.competitors : [],
     preferredCtas: value.preferred_ctas || [],
     createdAt: value.created_at,
     updatedAt: value.updated_at,
@@ -74,22 +73,14 @@ function serviceInput(body: Record<string, any>): any {
       accent: body.accentColor || '#167cc1',
     };
   }
-  set('fonts', body.fonts);
-  if (body.metadata !== undefined || [
-    'description','websiteUrl','products','tone','complianceRules','logoUrl','socialHandles','competitors',
-  ].some((key) => body[key] !== undefined)) {
-    output.metadata = {
-      ...existingMetadata,
-      description: body.description ?? existingMetadata.description ?? '',
-      website_url: body.websiteUrl ?? existingMetadata.website_url ?? '',
-      products: body.products ?? existingMetadata.products ?? [],
-      tone: body.tone ?? existingMetadata.tone ?? 'professional',
-      compliance_rules: body.complianceRules ?? existingMetadata.compliance_rules ?? [],
-      logo_url: body.logoUrl ?? existingMetadata.logo_url ?? '',
-      social_handles: body.socialHandles ?? existingMetadata.social_handles ?? {},
-      competitors: body.competitors ?? existingMetadata.competitors ?? [],
-    };
-  }
+  set('company_description', body.company_description ?? body.description ?? existingMetadata.description);
+  set('website_url', body.website_url ?? body.websiteUrl ?? existingMetadata.website_url);
+  set('products', body.products ?? existingMetadata.products);
+  set('tone', body.tone ?? existingMetadata.tone);
+  set('compliance_rules', body.compliance_rules ?? body.complianceRules ?? existingMetadata.compliance_rules);
+  set('logo_url', body.logo_url ?? body.logoUrl ?? existingMetadata.logo_url);
+  set('social_handles', body.social_handles ?? body.socialHandles ?? existingMetadata.social_handles);
+  set('competitors', body.competitors ?? existingMetadata.competitors);
   return output;
 }
 

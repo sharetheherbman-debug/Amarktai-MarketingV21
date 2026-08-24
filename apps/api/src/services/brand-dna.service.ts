@@ -18,23 +18,37 @@ export async function get(orgId: string): Promise<BrandDna | null> {
 
 export async function create(orgId: string, data: CreateBrandDnaData): Promise<BrandDna> {
   const result = await query(
-    `INSERT INTO brand_dna (organization_id, company_name, industry, brand_voice, target_audience, goals, keywords, writing_style, prohibited_phrases, preferred_ctas, colors, fonts, metadata)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+    `INSERT INTO brand_dna (
+       organization_id, company_name, company_description, industry, products,
+       brand_voice, tone, colors, logo_url, target_audience, competitors, goals,
+       keywords, writing_style, compliance_rules, preferred_ctas,
+       prohibited_phrases, social_handles, website_url
+     )
+     VALUES (
+       $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
+       $15, $16, $17, $18, $19
+     )
      RETURNING *`,
     [
       orgId,
       data.company_name,
+      data.company_description || null,
       data.industry || null,
+      JSON.stringify(data.products || []),
       data.brand_voice || null,
+      data.tone || 'professional',
+      JSON.stringify(data.colors || {}),
+      data.logo_url || null,
       JSON.stringify(data.target_audience || {}),
+      JSON.stringify(data.competitors || []),
       JSON.stringify(data.goals || []),
       JSON.stringify(data.keywords || []),
       data.writing_style || null,
-      JSON.stringify(data.prohibited_phrases || []),
+      JSON.stringify(data.compliance_rules || []),
       JSON.stringify(data.preferred_ctas || []),
-      JSON.stringify(data.colors || {}),
-      JSON.stringify(data.fonts || {}),
-      JSON.stringify(data.metadata || {}),
+      JSON.stringify(data.prohibited_phrases || []),
+      JSON.stringify(data.social_handles || {}),
+      data.website_url || null,
     ]
   );
 
@@ -52,53 +66,22 @@ export async function update(orgId: string, data: UpdateBrandDnaData): Promise<B
   const values: unknown[] = [];
   let paramCount = 1;
 
-  if (data.company_name !== undefined) {
-    updates.push(`company_name = $${paramCount++}`);
-    values.push(data.company_name);
-  }
-  if (data.industry !== undefined) {
-    updates.push(`industry = $${paramCount++}`);
-    values.push(data.industry);
-  }
-  if (data.brand_voice !== undefined) {
-    updates.push(`brand_voice = $${paramCount++}`);
-    values.push(data.brand_voice);
-  }
-  if (data.target_audience !== undefined) {
-    updates.push(`target_audience = $${paramCount++}`);
-    values.push(JSON.stringify(data.target_audience));
-  }
-  if (data.goals !== undefined) {
-    updates.push(`goals = $${paramCount++}`);
-    values.push(JSON.stringify(data.goals));
-  }
-  if (data.keywords !== undefined) {
-    updates.push(`keywords = $${paramCount++}`);
-    values.push(JSON.stringify(data.keywords));
-  }
-  if (data.writing_style !== undefined) {
-    updates.push(`writing_style = $${paramCount++}`);
-    values.push(data.writing_style);
-  }
-  if (data.prohibited_phrases !== undefined) {
-    updates.push(`prohibited_phrases = $${paramCount++}`);
-    values.push(JSON.stringify(data.prohibited_phrases));
-  }
-  if (data.preferred_ctas !== undefined) {
-    updates.push(`preferred_ctas = $${paramCount++}`);
-    values.push(JSON.stringify(data.preferred_ctas));
-  }
-  if (data.colors !== undefined) {
-    updates.push(`colors = $${paramCount++}`);
-    values.push(JSON.stringify(data.colors));
-  }
-  if (data.fonts !== undefined) {
-    updates.push(`fonts = $${paramCount++}`);
-    values.push(JSON.stringify(data.fonts));
-  }
-  if (data.metadata !== undefined) {
-    updates.push(`metadata = $${paramCount++}`);
-    values.push(JSON.stringify(data.metadata));
+  const jsonFields = new Set<keyof UpdateBrandDnaData>([
+    'products', 'colors', 'target_audience', 'competitors', 'goals', 'keywords',
+    'compliance_rules', 'preferred_ctas', 'prohibited_phrases', 'social_handles',
+  ]);
+  const fields: Array<keyof UpdateBrandDnaData> = [
+    'company_name', 'company_description', 'industry', 'products', 'brand_voice',
+    'tone', 'colors', 'logo_url', 'target_audience', 'competitors', 'goals',
+    'keywords', 'writing_style', 'compliance_rules', 'preferred_ctas',
+    'prohibited_phrases', 'social_handles', 'website_url',
+  ];
+
+  for (const field of fields) {
+    if (data[field] !== undefined) {
+      updates.push(`${field} = $${paramCount++}`);
+      values.push(jsonFields.has(field) ? JSON.stringify(data[field]) : data[field]);
+    }
   }
 
   if (updates.length === 0) {
@@ -155,6 +138,9 @@ export async function getContextString(orgId: string): Promise<string> {
   if (dna.company_name) {
     lines.push(`Company: ${dna.company_name}`);
   }
+  if (dna.company_description) {
+    lines.push(`Description: ${dna.company_description}`);
+  }
   if (dna.industry) {
     lines.push(`Industry: ${dna.industry}`);
   }
@@ -194,7 +180,9 @@ function mapRow(row: Record<string, unknown>): BrandDna {
     id: row.id as string,
     organization_id: row.organization_id as string,
     company_name: row.company_name as string,
+    company_description: row.company_description as string | null,
     industry: row.industry as string | null,
+    products: typeof row.products === 'string' ? JSON.parse(row.products as string) : (row.products as string[]) || [],
     brand_voice: row.brand_voice as string | null,
     target_audience: typeof row.target_audience === 'string' ? JSON.parse(row.target_audience as string) : (row.target_audience as Record<string, unknown>) || {},
     goals: typeof row.goals === 'string' ? JSON.parse(row.goals as string) : (row.goals as string[]) || [],
@@ -203,8 +191,12 @@ function mapRow(row: Record<string, unknown>): BrandDna {
     prohibited_phrases: typeof row.prohibited_phrases === 'string' ? JSON.parse(row.prohibited_phrases as string) : (row.prohibited_phrases as string[]) || [],
     preferred_ctas: typeof row.preferred_ctas === 'string' ? JSON.parse(row.preferred_ctas as string) : (row.preferred_ctas as string[]) || [],
     colors: typeof row.colors === 'string' ? JSON.parse(row.colors as string) : (row.colors as Record<string, unknown>) || {},
-    fonts: typeof row.fonts === 'string' ? JSON.parse(row.fonts as string) : (row.fonts as Record<string, unknown>) || {},
-    metadata: typeof row.metadata === 'string' ? JSON.parse(row.metadata as string) : (row.metadata as Record<string, unknown>) || {},
+    tone: (row.tone as string) || 'professional',
+    compliance_rules: typeof row.compliance_rules === 'string' ? JSON.parse(row.compliance_rules as string) : (row.compliance_rules as string[]) || [],
+    logo_url: row.logo_url as string | null,
+    social_handles: typeof row.social_handles === 'string' ? JSON.parse(row.social_handles as string) : (row.social_handles as Record<string, unknown>) || {},
+    competitors: typeof row.competitors === 'string' ? JSON.parse(row.competitors as string) : (row.competitors as Array<Record<string, unknown>>) || [],
+    website_url: row.website_url as string | null,
     created_at: row.created_at as Date,
     updated_at: row.updated_at as Date,
   };

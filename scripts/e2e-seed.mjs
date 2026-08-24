@@ -62,9 +62,12 @@ try {
   await client.query(
     `INSERT INTO brand_dna
        (organization_id,company_name,industry,brand_voice,target_audience,goals,keywords,
-        writing_style,prohibited_phrases,preferred_ctas,colors,metadata)
+        writing_style,prohibited_phrases,preferred_ctas,colors,company_description,
+        website_url,products,tone,compliance_rules,logo_url,social_handles,competitors)
      VALUES ($1,'Acceptance Equine','Equestrian education','Clear, warm and evidence-led',$2,$3,$4,
-       'Plain English with useful specifics',$5,$6,$7,$8)`,
+       'Plain English with useful specifics',$5,$6,$7,
+       'Practical equestrian learning and responsible products.','https://example.test',$8,
+       'professional',$9,'','{}','[]')`,
     [
       E2E.organizationId,
       JSON.stringify({ demographics: 'UK horse owners and riders', psychographics: 'Safety-conscious lifelong learners' }),
@@ -73,7 +76,8 @@ try {
       JSON.stringify(['guaranteed outcome']),
       JSON.stringify(['Explore the Academy']),
       JSON.stringify({ primary: '#123456', secondary: '#ffffff', accent: '#abcdef' }),
-      JSON.stringify({ description: 'Practical equestrian learning and responsible products.', website_url: 'https://example.test', products: ['Academy','Shop'], tone: 'professional', compliance_rules: ['Use verified claims only'], logo_url: '', social_handles: {}, competitors: [] }),
+      JSON.stringify(['Academy','Shop']),
+      JSON.stringify(['Use verified claims only']),
     ]
   );
   await client.query(

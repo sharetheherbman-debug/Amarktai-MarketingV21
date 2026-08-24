@@ -625,7 +625,9 @@ export interface BrandDna {
   id: string;
   organization_id: string;
   company_name: string;
+  company_description: string | null;
   industry: string | null;
+  products: string[];
   brand_voice: string | null;
   target_audience: Record<string, unknown>;
   goals: string[];
@@ -634,15 +636,21 @@ export interface BrandDna {
   prohibited_phrases: string[];
   preferred_ctas: string[];
   colors: Record<string, unknown>;
-  fonts: Record<string, unknown>;
-  metadata: Record<string, unknown>;
+  tone: string;
+  compliance_rules: string[];
+  logo_url: string | null;
+  social_handles: Record<string, unknown>;
+  competitors: Array<Record<string, unknown>>;
+  website_url: string | null;
   created_at: Date;
   updated_at: Date;
 }
 
 export interface CreateBrandDnaData {
   company_name: string;
+  company_description?: string;
   industry?: string;
+  products?: string[];
   brand_voice?: string;
   target_audience?: Record<string, unknown>;
   goals?: string[];
@@ -651,13 +659,19 @@ export interface CreateBrandDnaData {
   prohibited_phrases?: string[];
   preferred_ctas?: string[];
   colors?: Record<string, unknown>;
-  fonts?: Record<string, unknown>;
-  metadata?: Record<string, unknown>;
+  tone?: string;
+  compliance_rules?: string[];
+  logo_url?: string;
+  social_handles?: Record<string, unknown>;
+  competitors?: Array<Record<string, unknown>>;
+  website_url?: string;
 }
 
 export interface UpdateBrandDnaData {
   company_name?: string;
+  company_description?: string;
   industry?: string;
+  products?: string[];
   brand_voice?: string;
   target_audience?: Record<string, unknown>;
   goals?: string[];
@@ -666,8 +680,12 @@ export interface UpdateBrandDnaData {
   prohibited_phrases?: string[];
   preferred_ctas?: string[];
   colors?: Record<string, unknown>;
-  fonts?: Record<string, unknown>;
-  metadata?: Record<string, unknown>;
+  tone?: string;
+  compliance_rules?: string[];
+  logo_url?: string;
+  social_handles?: Record<string, unknown>;
+  competitors?: Array<Record<string, unknown>>;
+  website_url?: string;
 }
 
 export interface ToolDefinition {
