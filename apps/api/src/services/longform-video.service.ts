@@ -23,6 +23,10 @@ export interface VideoProject {
   music_settings: Record<string, unknown>;
   caption_settings: Record<string, unknown>;
   status: string;
+  production_strategy: 'economy' | 'smart' | 'cinematic' | 'premium';
+  max_project_credits: number | null;
+  cost_quote: Record<string, unknown> | null;
+  cost_quote_created_at: string | null;
   final_output_url: string | null;
   thumbnail_url: string | null;
   metadata: Record<string, unknown>;
@@ -52,6 +56,10 @@ export interface VideoScene {
   audio_clip_url: string | null;
   caption_text: string | null;
   status: string;
+  production_mode: 'ai_video' | 'still_motion' | null;
+  planned_operation: string | null;
+  estimated_credits: number | null;
+  production_plan_locked_at: string | null;
   provider_job_id: string | null;
   error_message: string | null;
   retry_count: number;
@@ -87,12 +95,15 @@ export async function createProject(orgId: string, userId: string, data: {
   resolution?: string;
   frame_rate?: number;
   script?: string;
+  production_strategy?: 'economy' | 'smart' | 'cinematic' | 'premium';
+  max_project_credits?: number;
 }): Promise<VideoProject> {
   const result = await query(
-    `INSERT INTO video_projects (organization_id, owner_id, name, description, target_duration_seconds, aspect_ratio, resolution, frame_rate, script)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
+    `INSERT INTO video_projects (organization_id, owner_id, name, description, target_duration_seconds, aspect_ratio, resolution, frame_rate, script, production_strategy, max_project_credits)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *`,
     [orgId, userId, data.name, data.description || null, data.target_duration_seconds || 60,
-     data.aspect_ratio || '16:9', data.resolution || '1920x1080', data.frame_rate || 24, data.script || null]
+     data.aspect_ratio || '16:9', data.resolution || '1920x1080', data.frame_rate || 24, data.script || null,
+     data.production_strategy || 'smart', data.max_project_credits || null]
   );
   logger.info(`Video project created: ${data.name}`);
   return mapProjectRow(result.rows[0]);
@@ -109,6 +120,8 @@ export async function updateProject(id: string, orgId: string, data: Partial<Vid
   if (data.storyboard !== undefined) { updates.push(`storyboard = $${idx++}`); values.push(JSON.stringify(data.storyboard)); }
   if (data.status !== undefined) { updates.push(`status = $${idx++}`); values.push(data.status); }
   if (data.final_output_url !== undefined) { updates.push(`final_output_url = $${idx++}`); values.push(data.final_output_url); }
+  if (data.production_strategy !== undefined) { updates.push(`production_strategy = $${idx++}`); values.push(data.production_strategy); }
+  if (data.max_project_credits !== undefined) { updates.push(`max_project_credits = $${idx++}`); values.push(data.max_project_credits); }
 
   if (updates.length === 0) return getProject(id, orgId);
   updates.push('updated_at = NOW()');
@@ -154,6 +167,7 @@ export async function addScene(projectId: string, orgId: string, data: {
   model_id?: string;
   duration_seconds?: number;
   camera_instructions?: string;
+  production_mode?: 'ai_video' | 'still_motion';
 }): Promise<VideoScene> {
   // Get next scene number if not provided
   let sceneNumber = data.scene_number;
@@ -166,11 +180,11 @@ export async function addScene(projectId: string, orgId: string, data: {
   }
 
   const result = await query(
-    `INSERT INTO video_scenes (project_id, organization_id, scene_number, title, narration, visual_prompt, negative_prompt, model_id, duration_seconds, camera_instructions)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *`,
+    `INSERT INTO video_scenes (project_id, organization_id, scene_number, title, narration, visual_prompt, negative_prompt, model_id, duration_seconds, camera_instructions, production_mode)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *`,
     [projectId, orgId, sceneNumber, data.title || null, data.narration || null,
      data.visual_prompt || null, data.negative_prompt || null, data.model_id || null,
-     data.duration_seconds || 5, data.camera_instructions || null]
+     data.duration_seconds || 5, data.camera_instructions || null, data.production_mode || null]
   );
   return mapSceneRow(result.rows[0]);
 }
@@ -188,6 +202,7 @@ export async function updateScene(id: string, orgId: string, data: Partial<Video
   if (data.status !== undefined) { updates.push(`status = $${idx++}`); values.push(data.status); }
   if (data.generated_clip_url !== undefined) { updates.push(`generated_clip_url = $${idx++}`); values.push(data.generated_clip_url); }
   if (data.provider_job_id !== undefined) { updates.push(`provider_job_id = $${idx++}`); values.push(data.provider_job_id); }
+  if (data.production_mode !== undefined) { updates.push(`production_mode = $${idx++}`); values.push(data.production_mode); }
 
   if (updates.length === 0) return getScene(id, orgId);
   updates.push('updated_at = NOW()');
@@ -356,6 +371,10 @@ function mapProjectRow(row: Record<string, unknown>): VideoProject {
     music_settings: typeof row.music_settings === 'string' ? JSON.parse(row.music_settings) : (row.music_settings as Record<string, unknown>) || {},
     caption_settings: typeof row.caption_settings === 'string' ? JSON.parse(row.caption_settings) : (row.caption_settings as Record<string, unknown>) || {},
     status: row.status as string,
+    production_strategy: (row.production_strategy as VideoProject['production_strategy']) || 'smart',
+    max_project_credits: row.max_project_credits == null ? null : Number(row.max_project_credits),
+    cost_quote: row.cost_quote == null ? null : (typeof row.cost_quote === 'string' ? JSON.parse(row.cost_quote) : row.cost_quote as Record<string, unknown>),
+    cost_quote_created_at: row.cost_quote_created_at as string | null,
     final_output_url: row.final_output_url as string | null,
     thumbnail_url: row.thumbnail_url as string | null,
     metadata: typeof row.metadata === 'string' ? JSON.parse(row.metadata) : (row.metadata as Record<string, unknown>) || {},
@@ -387,6 +406,10 @@ function mapSceneRow(row: Record<string, unknown>): VideoScene {
     audio_clip_url: row.audio_clip_url as string | null,
     caption_text: row.caption_text as string | null,
     status: row.status as string,
+    production_mode: row.production_mode as VideoScene['production_mode'],
+    planned_operation: row.planned_operation as string | null,
+    estimated_credits: row.estimated_credits == null ? null : Number(row.estimated_credits),
+    production_plan_locked_at: row.production_plan_locked_at as string | null,
     provider_job_id: row.provider_job_id as string | null,
     error_message: row.error_message as string | null,
     retry_count: parseInt(row.retry_count as string) || 0,

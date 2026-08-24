@@ -30,11 +30,14 @@ function parseObject(value: unknown): Record<string, unknown> {
 }
 
 function mapModel(row: Record<string, any>) {
+  const operationLabel = String(row.category || parseArray(row.operations)[0] || 'creative')
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
   return {
     id: row.id,
-    name: row.name,
+    name: `Amarktai ${operationLabel}`,
     category: row.category,
-    provider: 'genx',
+    provider: 'amarktai_network',
     operations: parseArray(row.operations),
     inputs: parseArray(row.inputs),
     outputs: parseArray(row.outputs),
@@ -99,7 +102,7 @@ router.post('/generations', requireAuth, async (
         error: {
           message: req.body.model
             ? `Selected model is not runtime-confirmed for ${operation}`
-            : `No runtime-confirmed GenX model is available for ${operation}`,
+            : `No Amarktai Network model is currently available for ${operation}`,
           code: 'MODEL_NOT_RUNTIME_CONFIRMED',
         },
       });

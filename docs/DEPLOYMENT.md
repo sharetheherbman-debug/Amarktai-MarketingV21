@@ -2,6 +2,8 @@
 
 This is the canonical controlled deployment boundary. It does not authorise production changes.
 
+EquiProfile deployment #1 currently uses `marketing.equiprofile.online`. That hostname is deployment configuration, not a reusable-engine default.
+
 ## Release prerequisites
 
 - exact reviewed branch and SHA;

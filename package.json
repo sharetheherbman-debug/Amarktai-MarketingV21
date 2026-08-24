@@ -24,6 +24,7 @@
     "vps:backup": "bash scripts/vps-backup.sh",
     "vps:restore": "bash scripts/vps-restore.sh",
     "vps:update": "bash scripts/vps-update.sh",
+    "acceptance:provider": "node scripts/live-provider-acceptance.mjs",
     "clean": "turbo clean",
     "verify": "node scripts/verify.js",
     "verify:types": "node scripts/verify-types.js",

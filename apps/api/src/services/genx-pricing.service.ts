@@ -446,8 +446,6 @@ export function extractAccountPriceComponents(
       billableUnit: contract.billableUnit,
       sourceCurrency: 'USD',
       sourceUnitCost: sourceUnitCostUsd,
-      // /account/pricing is documented as adjusted for the authenticated
-      // account tier. The launch key is expected to be Agent tier.
       agentTierApplied: env.GENX_AGENT_TIER_ENABLED,
       rawMetadata: {
         source: 'genx_account_pricing',
@@ -681,7 +679,7 @@ export async function quoteGeneration(input: {
   }
 
   const result = await query(
-    `SELECT gps.*,gm.retail_enabled,gm.pricing_status
+    `SELECT gps.*,gm.retail_enabled,gm.pricing_status,gm.pricing_last_synced_at
      FROM genx_price_snapshots gps
      JOIN genx_models gm ON gm.id=gps.model_id
      WHERE gps.model_id=$1 AND gps.operation=$2 AND gps.effective_to IS NULL
@@ -700,10 +698,11 @@ export async function quoteGeneration(input: {
   }
 
   const effectiveFrom = new Date(row.effective_from);
+  const pricingLastSyncedAt = new Date(row.pricing_last_synced_at);
   const maximumAgeMs = env.GENX_PRICE_MAX_AGE_MINUTES * 60_000;
   if (
-    !Number.isFinite(effectiveFrom.getTime()) ||
-    Date.now() - effectiveFrom.getTime() > maximumAgeMs
+    !Number.isFinite(pricingLastSyncedAt.getTime()) ||
+    Date.now() - pricingLastSyncedAt.getTime() > maximumAgeMs
   ) {
     throw new AppError(
       503,

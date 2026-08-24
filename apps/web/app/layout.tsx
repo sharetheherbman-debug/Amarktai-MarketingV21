@@ -1,5 +1,11 @@
+import type { CSSProperties } from 'react';
 import type { Metadata, Viewport } from 'next';
-import { MARKETING_BRAND_DESCRIPTION, MARKETING_BRAND_NAME } from '@/lib/branding';
+import {
+  MARKETING_BRAND_ACCENT_COLOR,
+  MARKETING_BRAND_DESCRIPTION,
+  MARKETING_BRAND_NAME,
+  MARKETING_BRAND_PRIMARY_COLOR,
+} from '@/lib/branding';
 import './globals.css';
 
 export const metadata: Metadata = {
@@ -35,7 +41,7 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: '#050505',
+  themeColor: MARKETING_BRAND_PRIMARY_COLOR,
   width: 'device-width',
   initialScale: 1,
 };
@@ -70,6 +76,10 @@ export default function RootLayout({
       </head>
       <body
         className="font-sans antialiased bg-[var(--color-bg)] text-[var(--color-text)]"
+        style={{
+          '--ep-navy': MARKETING_BRAND_PRIMARY_COLOR,
+          '--ep-blue': MARKETING_BRAND_ACCENT_COLOR,
+        } as CSSProperties}
       >
         {children}
       </body>

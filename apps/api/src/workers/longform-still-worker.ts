@@ -125,6 +125,9 @@ async function processStillMotion(job: Job): Promise<void> {
   );
   if (sceneResult.rows.length === 0) throw new Error('Long-form still-motion scene not found');
   const scene = sceneResult.rows[0] as Record<string, any>;
+  if (String(scene.production_mode || '') !== 'still_motion') {
+    throw new Error('Long-form still worker rejected a scene without persisted still_motion intent');
+  }
   const sceneMetadata = asObject(scene.metadata);
   const projectMetadata = asObject(scene.project_metadata);
   const workerId = `still-motion-${process.pid}`;
@@ -156,7 +159,9 @@ async function processStillMotion(job: Job): Promise<void> {
         modelId: String(scene.model_id),
         operation: 'text_to_image',
         quantity: 1,
-        idempotencyKey: `longform-still:${scene.id}:attempt:${Number(scene.retry_count || 0) + 1}`,
+        // Stable across local FFmpeg retries: a successfully purchased still is
+        // reused and its credit reservation cannot be duplicated by retry_count.
+        idempotencyKey: `longform-still:${scene.id}:image:v1`,
         title: `Create long-form scene artwork ${Number(scene.scene_number || 0)}`,
         summary: String(scene.visual_prompt || '').slice(0, 500),
         requestedBy: 'system',
@@ -213,7 +218,7 @@ async function processStillMotion(job: Job): Promise<void> {
       );
       imageAssetUrl = imageAsset.url;
       await query(
-        `UPDATE video_scenes SET source_image_url=$1,provider_result_url=$2,
+        `UPDATE video_scenes SET source_image_url=$1,provider_result_url=$2,production_mode='still_motion',
            metadata=COALESCE(metadata,'{}'::jsonb) || $3::jsonb,updated_at=NOW()
          WHERE id=$4 AND organization_id=$5`,
         [

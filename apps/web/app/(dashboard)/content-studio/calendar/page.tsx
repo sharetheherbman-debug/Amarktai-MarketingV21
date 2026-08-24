@@ -1,137 +1,36 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
-import {
-  CalendarDays,
-  Plus,
-  Loader2,
-  AlertCircle,
-  X,
-  ChevronLeft,
-  ChevronRight,
-} from 'lucide-react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
+import { AlertCircle, CalendarDays, ChevronLeft, ChevronRight, Loader2, Plus, X } from 'lucide-react';
 import { api } from '@/lib/api';
+import { useAuthStore } from '@/stores/auth.store';
 import type { ApiResponse } from '@/types';
 
-interface CalendarEvent {
-  id: string;
-  title: string;
-  platform: string | null;
-  content_type: string | null;
-  scheduled_date: string;
-  scheduled_time: string | null;
-  status: string;
-}
+type CalendarEvent={id:string;title:string;platform:string|null;content_type:string|null;scheduled_date:string;scheduled_time:string|null;status:string};
+const DAYS=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+const MONTHS=['January','February','March','April','May','June','July','August','September','October','November','December'];
 
-const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+export default function CalendarPage(){
+  const {currentOrganization}=useAuthStore();const orgId=currentOrganization?.id||'';
+  const [events,setEvents]=useState<CalendarEvent[]>([]);const [loading,setLoading]=useState(true);const [error,setError]=useState<string|null>(null);const [currentDate,setCurrentDate]=useState(()=>new Date());const [selected,setSelected]=useState<CalendarEvent|null>(null);const [platform,setPlatform]=useState('all');
+  const fetchEvents=useCallback(async()=>{if(!orgId){setLoading(false);return;}setLoading(true);setError(null);try{const response=await api.get<ApiResponse<CalendarEvent[]>>('/calendar',{params:{month:String(currentDate.getMonth()+1),year:String(currentDate.getFullYear())}});setEvents(response.data||[]);}catch(caught){setError(caught instanceof Error?caught.message:'The production calendar could not be loaded.');}finally{setLoading(false);}},[currentDate,orgId]);
+  useEffect(()=>{void fetchEvents();},[fetchEvents]);
+  const year=currentDate.getFullYear(),month=currentDate.getMonth(),firstDay=new Date(year,month,1).getDay(),daysInMonth=new Date(year,month+1,0).getDate(),today=new Date();
+  const platforms=useMemo(()=>['all',...Array.from(new Set(events.map((event)=>event.platform).filter(Boolean) as string[]))],[events]);
+  const visibleEvents=platform==='all'?events:events.filter((event)=>event.platform===platform);
+  const cells=Array.from({length:42},(_,index)=>{const day=index-firstDay+1;return day>=1&&day<=daysInMonth?day:null;});
+  const eventsForDay=(day:number)=>{const date=`${year}-${String(month+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`;return visibleEvents.filter((event)=>event.scheduled_date===date);};
+  const scheduled=events.filter((event)=>event.status==='scheduled').length;
 
-export default function CalendarPage() {
-  const [events, setEvents] = useState<CalendarEvent[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [currentDate, setCurrentDate] = useState(new Date());
-
-  const orgId = typeof window !== 'undefined' ? localStorage.getItem('org_id') || '' : '';
-
-  const fetchEvents = useCallback(async () => {
-    if (!orgId) return;
-    try {
-      setLoading(true);
-      const res = await api.get<ApiResponse<CalendarEvent[]>>('/calendar', {
-        params: {
-          organization_id: orgId,
-          month: String(currentDate.getMonth() + 1),
-          year: String(currentDate.getFullYear()),
-        },
-      });
-      setEvents(res.data);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load calendar');
-    } finally {
-      setLoading(false);
-    }
-  }, [orgId, currentDate]);
-
-  useEffect(() => { fetchEvents(); }, [fetchEvents]);
-
-  const year = currentDate.getFullYear();
-  const month = currentDate.getMonth();
-  const firstDay = new Date(year, month, 1).getDay();
-  const daysInMonth = new Date(year, month + 1, 0).getDate();
-
-  const prevMonth = () => setCurrentDate(new Date(year, month - 1, 1));
-  const nextMonth = () => setCurrentDate(new Date(year, month + 1, 1));
-
-  const getEventsForDay = (day: number) => {
-    const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-    return events.filter(e => e.scheduled_date === dateStr);
-  };
-
-  return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-white">Content Calendar</h1>
-          <p className="mt-1 text-sm text-zinc-400">Schedule and manage your content publishing.</p>
-        </div>
-        <button className="inline-flex items-center gap-2 rounded-lg bg-brand-500 px-4 py-2.5 text-sm font-semibold text-white hover:bg-brand-400">
-          <Plus className="h-4 w-4" /> Schedule Content
-        </button>
-      </div>
-
-      {error && (
-        <div className="flex items-center gap-3 rounded-lg border border-red-500/20 bg-red-500/5 px-4 py-3">
-          <AlertCircle className="h-4 w-4 text-red-400" />
-          <p className="text-sm text-red-300">{error}</p>
-          <button onClick={() => setError(null)} className="ml-auto text-red-400 hover:text-red-300"><X className="h-4 w-4" /></button>
-        </div>
-      )}
-
-      <div className="rounded-xl border border-white/[0.06] bg-surface-100 p-6">
-        <div className="flex items-center justify-between mb-6">
-          <button onClick={prevMonth} className="rounded-lg p-2 text-zinc-400 hover:bg-white/[0.04] hover:text-white">
-            <ChevronLeft className="h-5 w-5" />
-          </button>
-          <h2 className="text-lg font-semibold text-white">{MONTHS[month]} {year}</h2>
-          <button onClick={nextMonth} className="rounded-lg p-2 text-zinc-400 hover:bg-white/[0.04] hover:text-white">
-            <ChevronRight className="h-5 w-5" />
-          </button>
-        </div>
-
-        {loading ? (
-          <div className="flex items-center justify-center py-20"><Loader2 className="h-8 w-8 animate-spin text-brand-400" /></div>
-        ) : (
-          <div className="grid grid-cols-7 gap-px bg-white/[0.04] rounded-lg overflow-hidden">
-            {DAYS.map(day => (
-              <div key={day} className="bg-surface-100 p-3 text-center text-xs font-semibold text-zinc-400">{day}</div>
-            ))}
-            {Array.from({ length: firstDay }, (_, i) => (
-              <div key={`empty-${i}`} className="bg-surface-100 p-3 min-h-[100px]" />
-            ))}
-            {Array.from({ length: daysInMonth }, (_, i) => {
-              const day = i + 1;
-              const dayEvents = getEventsForDay(day);
-              const isToday = new Date().getDate() === day && new Date().getMonth() === month && new Date().getFullYear() === year;
-              return (
-                <div key={day} className={`bg-surface-100 p-2 min-h-[100px] ${isToday ? 'ring-1 ring-brand-500/50' : ''}`}>
-                  <div className={`text-sm font-medium mb-2 ${isToday ? 'text-brand-400' : 'text-zinc-300'}`}>{day}</div>
-                  <div className="space-y-1">
-                    {dayEvents.slice(0, 2).map(event => (
-                      <div key={event.id} className="rounded bg-brand-500/10 px-2 py-1 text-[11px] text-brand-300 truncate">
-                        {event.title}
-                      </div>
-                    ))}
-                    {dayEvents.length > 2 && (
-                      <div className="text-[11px] text-zinc-500">+{dayEvents.length - 2} more</div>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
-    </div>
-  );
+  return <div className="space-y-6">
+    <header className="ep-panel p-6 sm:p-8"><div className="flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between"><div className="max-w-3xl"><p className="ep-section-label">Calendar & Production</p><h1 className="ep-page-title mt-2">See when approved work is expected to move.</h1><p className="ep-page-copy mt-3 text-sm leading-6 sm:text-base">Scheduled content and publishing activity stay visible beside the campaign and content production workflow.</p></div><Link href="/content-studio/generate" className="ep-button-primary px-4 py-2.5 text-sm"><Plus className="h-4 w-4"/> Create content</Link></div></header>
+    {error&&<div className="ep-status-danger flex items-center gap-3 rounded-xl border px-4 py-3 text-sm"><AlertCircle className="h-4 w-4"/><span className="flex-1">{error}</span><button type="button" onClick={()=>void fetchEvents()} className="font-extrabold">Retry</button></div>}
+    <section className="grid gap-3 sm:grid-cols-3"><article className="ep-card p-4"><p className="text-xs font-bold text-[var(--ep-text-muted)]">This month</p><p className="mt-2 text-2xl font-extrabold text-[var(--ep-navy)]">{events.length}</p></article><article className="ep-card p-4"><p className="text-xs font-bold text-[var(--ep-text-muted)]">Scheduled</p><p className="mt-2 text-2xl font-extrabold text-[var(--ep-navy)]">{scheduled}</p></article><article className="ep-card p-4"><p className="text-xs font-bold text-[var(--ep-text-muted)]">Platforms represented</p><p className="mt-2 text-2xl font-extrabold text-[var(--ep-navy)]">{Math.max(0,platforms.length-1)}</p></article></section>
+    <section className="ep-card overflow-hidden"><div className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--ep-border)] px-4 py-3"><div className="flex items-center gap-1"><button type="button" aria-label="Previous month" onClick={()=>setCurrentDate(new Date(year,month-1,1))} className="rounded-lg p-2 text-[var(--ep-text-muted)] hover:bg-[var(--ep-blue-soft)]"><ChevronLeft className="h-5 w-5"/></button><button type="button" aria-label="Next month" onClick={()=>setCurrentDate(new Date(year,month+1,1))} className="rounded-lg p-2 text-[var(--ep-text-muted)] hover:bg-[var(--ep-blue-soft)]"><ChevronRight className="h-5 w-5"/></button><button type="button" onClick={()=>setCurrentDate(new Date())} className="ep-button-secondary ml-2 px-3 py-1.5 text-xs">Today</button></div><h2 className="text-base font-extrabold text-[var(--ep-navy)]">{MONTHS[month]} {year}</h2><label className="text-xs font-bold text-[var(--ep-text-muted)]">Platform <select value={platform} onChange={(event)=>setPlatform(event.target.value)} className="ep-input ml-2 min-h-8 w-auto px-2 text-xs font-normal">{platforms.map((item)=><option key={item} value={item}>{item==='all'?'All':item}</option>)}</select></label></div>
+      {loading?<div className="flex h-[456px] items-center justify-center"><Loader2 className="h-8 w-8 animate-spin text-[var(--ep-blue)]"/></div>:<div className="overflow-x-auto"><div className="min-w-[700px]"><div className="grid grid-cols-7 border-b border-[var(--ep-border)] bg-[var(--ep-page)]">{DAYS.map((day)=><div key={day} className="px-2 py-2 text-center text-[11px] font-extrabold uppercase tracking-wide text-[var(--ep-text-muted)]">{day}</div>)}</div><div className="grid grid-cols-7">{cells.map((day,index)=>{const dayEvents=day?eventsForDay(day):[];const isToday=day===today.getDate()&&month===today.getMonth()&&year===today.getFullYear();return <div key={index} className={`min-h-[96px] border-b border-r border-[var(--ep-border)] p-2 ${day?'bg-white':'bg-[var(--ep-page)]'}`}>{day&&<><div className={`mb-2 flex h-6 w-6 items-center justify-center rounded-full text-xs font-bold ${isToday?'bg-[var(--ep-blue)] text-white':'text-[var(--ep-text-muted)]'}`}>{day}</div><div className="space-y-1">{dayEvents.slice(0,3).map((event)=><button type="button" key={event.id} onClick={()=>setSelected(event)} className="block w-full truncate rounded-lg bg-[var(--ep-blue-soft)] px-2 py-1 text-left text-[10px] font-bold text-[var(--ep-navy)] hover:bg-[#dceef9]">{event.scheduled_time?`${event.scheduled_time.slice(0,5)} `:''}{event.title}</button>)}{dayEvents.length>3&&<button type="button" onClick={()=>setSelected(dayEvents[3])} className="text-[10px] font-bold text-[var(--ep-blue)]">+{dayEvents.length-3} more</button>}</div></>}</div>;})}</div></div></div>}
+      {!loading&&events.length===0&&<div className="border-t border-[var(--ep-border)] px-4 py-4 text-center text-xs text-[var(--ep-text-muted)]">Nothing is scheduled this month.</div>}
+    </section>
+    {selected&&<div role="dialog" aria-modal="true" aria-label="Scheduled content details" className="fixed inset-0 z-50 flex items-center justify-center bg-[#031a35]/35 p-4" onMouseDown={(event)=>{if(event.target===event.currentTarget)setSelected(null);}}><div className="ep-panel w-full max-w-md p-6 shadow-[var(--ep-shadow-float)]"><div className="flex items-start justify-between gap-4"><div className="flex items-start gap-3"><div className="rounded-xl bg-[var(--ep-blue-soft)] p-2.5 text-[var(--ep-blue)]"><CalendarDays className="h-5 w-5"/></div><div><h2 className="text-lg font-extrabold text-[var(--ep-navy)]">{selected.title}</h2><p className="mt-1 text-sm text-[var(--ep-text-muted)]">{new Date(`${selected.scheduled_date}T00:00:00`).toLocaleDateString('en-ZA',{day:'numeric',month:'long',year:'numeric'})}{selected.scheduled_time?` at ${selected.scheduled_time.slice(0,5)}`:''}</p></div></div><button type="button" aria-label="Close details" onClick={()=>setSelected(null)} className="rounded-lg p-1 text-[var(--ep-text-soft)] hover:bg-[var(--ep-surface-subtle)]"><X className="h-5 w-5"/></button></div><dl className="mt-5 grid grid-cols-2 gap-3 text-sm"><div><dt className="text-[var(--ep-text-soft)]">Status</dt><dd className="mt-1 capitalize font-semibold text-[var(--ep-navy)]">{selected.status}</dd></div><div><dt className="text-[var(--ep-text-soft)]">Platform</dt><dd className="mt-1 capitalize font-semibold text-[var(--ep-navy)]">{selected.platform||'Not selected'}</dd></div><div><dt className="text-[var(--ep-text-soft)]">Content type</dt><dd className="mt-1 capitalize font-semibold text-[var(--ep-navy)]">{selected.content_type?.replaceAll('_',' ')||'Content'}</dd></div></dl></div></div>}
+  </div>;
 }

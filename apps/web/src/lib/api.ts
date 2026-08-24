@@ -18,10 +18,28 @@ interface ApiError {
 }
 
 class ApiClient {
+  private refreshPromise: Promise<boolean> | null = null;
+
   constructor(private baseURL: string) {}
 
   private getOrganizationId(): string | null {
-    return typeof window === 'undefined' ? null : localStorage.getItem('org_id');
+    if (typeof window === 'undefined') return null;
+    const selected = localStorage.getItem('org_id');
+    if (selected) return selected;
+    try {
+      const persisted = JSON.parse(localStorage.getItem('auth-storage') || '{}') as {
+        state?: { currentOrganization?: { id?: string } | null };
+      };
+      const recovered = String(persisted.state?.currentOrganization?.id || '').trim();
+      if (recovered) {
+        localStorage.setItem('org_id', recovered);
+        return recovered;
+      }
+    } catch {
+      // Malformed convenience state is ignored; the request fails closed
+      // without an authenticated organisation context.
+    }
+    return null;
   }
 
   private isFormData(value: unknown): value is FormData {
@@ -83,6 +101,27 @@ class ApiClient {
     return response.json();
   }
 
+  private async refreshAccessCookie(): Promise<boolean> {
+    if (typeof window === 'undefined') return false;
+    if (this.refreshPromise) return this.refreshPromise;
+    this.refreshPromise = (async () => {
+      try {
+        const response = await fetch(`${this.baseURL.replace(/\/+$/, '')}/auth/refresh`, {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({}),
+        });
+        return response.ok;
+      } catch {
+        return false;
+      }
+    })().finally(() => {
+      this.refreshPromise = null;
+    });
+    return this.refreshPromise;
+  }
+
   private getHeaders(body?: unknown): HeadersInit {
     const headers: HeadersInit = {};
     if (!this.isFormData(body)) headers['Content-Type'] = 'application/json';
@@ -91,49 +130,41 @@ class ApiClient {
     return headers;
   }
 
-  private requestInit(method: string, body: unknown, headers?: HeadersInit): RequestInit {
-    return {
+  private async request<T>(method: string, endpoint: string, config?: RequestConfig): Promise<T> {
+    const hasBody = !['GET', 'HEAD', 'DELETE'].includes(method);
+    const body = hasBody ? this.prepareBody(config?.body) : undefined;
+    const url = this.buildURL(endpoint, config?.params);
+    const perform = () => fetch(url, {
       method,
       credentials: 'include',
-      headers: { ...this.getHeaders(body), ...headers },
-      body: this.serializeBody(body),
-    };
+      headers: { ...this.getHeaders(body), ...config?.headers },
+      body: hasBody ? this.serializeBody(body) : undefined,
+    });
+    let response = await perform();
+    if (response.status === 401 && !endpoint.replace(/^\/+/, '').startsWith('auth/refresh')) {
+      if (await this.refreshAccessCookie()) response = await perform();
+    }
+    return this.handleResponse<T>(response);
   }
 
   async get<T>(endpoint: string, config?: RequestConfig): Promise<T> {
-    const response = await fetch(this.buildURL(endpoint, config?.params), {
-      method: 'GET',
-      credentials: 'include',
-      headers: { ...this.getHeaders(), ...config?.headers },
-    });
-    return this.handleResponse<T>(response);
+    return this.request<T>('GET', endpoint, config);
   }
 
   async post<T>(endpoint: string, config?: RequestConfig): Promise<T> {
-    const body = this.prepareBody(config?.body);
-    const response = await fetch(this.buildURL(endpoint, config?.params), this.requestInit('POST', body, config?.headers));
-    return this.handleResponse<T>(response);
+    return this.request<T>('POST', endpoint, config);
   }
 
   async put<T>(endpoint: string, config?: RequestConfig): Promise<T> {
-    const body = this.prepareBody(config?.body);
-    const response = await fetch(this.buildURL(endpoint, config?.params), this.requestInit('PUT', body, config?.headers));
-    return this.handleResponse<T>(response);
+    return this.request<T>('PUT', endpoint, config);
   }
 
   async delete<T>(endpoint: string, config?: RequestConfig): Promise<T> {
-    const response = await fetch(this.buildURL(endpoint, config?.params), {
-      method: 'DELETE',
-      credentials: 'include',
-      headers: { ...this.getHeaders(), ...config?.headers },
-    });
-    return this.handleResponse<T>(response);
+    return this.request<T>('DELETE', endpoint, config);
   }
 
   async patch<T>(endpoint: string, config?: RequestConfig): Promise<T> {
-    const body = this.prepareBody(config?.body);
-    const response = await fetch(this.buildURL(endpoint, config?.params), this.requestInit('PATCH', body, config?.headers));
-    return this.handleResponse<T>(response);
+    return this.request<T>('PATCH', endpoint, config);
   }
 }
 

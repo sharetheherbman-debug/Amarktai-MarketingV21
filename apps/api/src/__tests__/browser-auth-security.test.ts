@@ -37,8 +37,10 @@ describe('Marketing browser authentication and white-label shell', () => {
     for (const source of [mfa, dashboard, billing, studio]) {
       expect(source).not.toContain('Authorization: `Bearer');
       expect(source).not.toContain("localStorage.getItem('auth_token'");
-      expect(source).toContain("credentials: 'include'");
     }
+    // Pages use the central client; cookie credentials and refresh/retry belong in one place.
+    expect(client).toContain("credentials: 'include'");
+    expect(client).toContain('/auth/refresh');
     expect(studio).not.toContain('getToken:');
   });
 
@@ -67,8 +69,8 @@ describe('Marketing browser authentication and white-label shell', () => {
       expect(source).not.toContain('equiprofile.online');
       expect(source).not.toContain('EquiProfile');
     }
-    expect(dashboardHome).toContain('MARKETING_BRAND_NAME');
-    expect(studio).toContain('MARKETING_BRAND_NAME');
+    expect(branding).toContain('MARKETING_BRAND_LOGO_URL');
+    expect(branding).toContain('MARKETING_BRAND_PRIMARY_COLOR');
     expect(studio).not.toContain('equiprofile-');
     expect(register).toContain('Public self-registration is disabled');
   });

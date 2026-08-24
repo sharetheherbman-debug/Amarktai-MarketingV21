@@ -4,14 +4,21 @@ const path = require('path');
 const root = path.join(__dirname, '..');
 
 const requiredDocs = [
+  'README.md',
+  'docs/INDEX.md',
+  'docs/PRODUCT.md',
   'docs/API.md',
   'docs/ARCHITECTURE.md',
+  'docs/STUDIO.md',
+  'docs/AUTONOMY.md',
+  'docs/APPLICATION_CONNECTOR.md',
   'docs/DATABASE.md',
   'docs/DEPLOYMENT.md',
   'docs/DEVELOPMENT.md',
-  'docs/GIT_WORKFLOW.md',
+  'docs/OPERATIONS.md',
+  'docs/TESTING_AND_ACCEPTANCE.md',
+  'docs/CLIENT_HANDOVER.md',
   'CHANGELOG.md',
-  'ROADMAP.md',
   'version.json',
 ];
 

@@ -1,187 +1,171 @@
 'use client';
 
-import { usePathname } from 'next/navigation';
+import type { ComponentType } from 'react';
 import Link from 'next/link';
+import { usePathname, useRouter } from 'next/navigation';
 import {
-  Activity,
-  BarChart3,
-  Bot,
-  CalendarDays,
-  ChevronLeft,
-  ChevronRight,
-  Coins,
-  Image,
-  LayoutDashboard,
-  LogOut,
-  Megaphone,
-  Puzzle,
-  Settings,
-  Share2,
-  ShieldCheck,
-  Sparkles,
-  Target,
-  Users,
+  BarChart3, BookOpenCheck, BrainCircuit, CalendarRange, FileCheck2, FlaskConical,
+  LayoutDashboard, LogOut, Megaphone, Palette, PanelLeft, Plug, Send, Settings,
+  ShieldCheck, Sparkles, UsersRound,
 } from 'lucide-react';
 import { useAuthStore } from '@/stores/auth.store';
 import { useUIStore } from '@/stores/ui.store';
 import { cn, getInitials } from '@/lib/utils';
+import { MARKETING_BRAND_LOGO_URL, MARKETING_BRAND_NAME } from '@/lib/branding';
 
-interface NavItem {
-  label: string;
-  href: string;
-  icon: React.ComponentType<{ className?: string }>;
-}
+type NavItem = { label: string; href: string; icon: ComponentType<{ className?: string }> };
+type NavSection = { title?: string; items: NavItem[] };
 
-interface NavSection {
-  title?: string;
-  items: NavItem[];
-}
-
-const workspaceNav: NavSection[] = [
-  {
-    items: [
-      { label: 'Overview', href: '/dashboard', icon: LayoutDashboard },
-      { label: 'Relaunch Control', href: '/relaunch-control', icon: ShieldCheck },
-      { label: 'Campaigns', href: '/campaigns', icon: Megaphone },
-      { label: 'Creative Studio', href: '/creative-studio', icon: Image },
-      { label: 'Content Library', href: '/content-studio', icon: Sparkles },
-      { label: 'Content Calendar', href: '/content-studio/calendar', icon: CalendarDays },
-    ],
-  },
-  {
-    title: 'Distribution',
-    items: [
-      { label: 'Publishing', href: '/social', icon: Share2 },
-      { label: 'Advertising', href: '/advertising', icon: Megaphone },
-      { label: 'Analytics', href: '/analytics', icon: BarChart3 },
-    ],
-  },
-  {
-    title: 'Audience & Automation',
-    items: [
-      { label: 'Audience & CRM', href: '/crm', icon: Users },
-      { label: 'AI Agents', href: '/agents', icon: Bot },
-      { label: 'Campaign Planner', href: '/campaign-planner', icon: Target },
-    ],
-  },
-  {
-    title: 'Workspace',
-    items: [
-      { label: 'Connections', href: '/integrations', icon: Puzzle },
-      { label: 'Generation Credits', href: '/billing', icon: Coins },
-      { label: 'Settings', href: '/settings', icon: Settings },
-    ],
-  },
+const navigation: NavSection[] = [
+  { items: [
+    { label: 'Command Centre', href: '/dashboard', icon: LayoutDashboard },
+    { label: 'Business Brain', href: '/business-brain', icon: BrainCircuit },
+    { label: 'Research & Intelligence', href: '/intelligence', icon: FlaskConical },
+  ] },
+  { title: 'Plan & create', items: [
+    { label: 'Strategy & Campaigns', href: '/campaigns', icon: Megaphone },
+    { label: 'Content Studio', href: '/content-studio', icon: BookOpenCheck },
+    { label: 'Creative Studio', href: '/creative-studio', icon: Palette },
+    { label: 'Calendar & Production', href: '/content-studio/calendar', icon: CalendarRange },
+  ] },
+  { title: 'Reach & grow', items: [
+    { label: 'Publish & Channels', href: '/social', icon: Send },
+    { label: 'CRM', href: '/crm', icon: UsersRound },
+    { label: 'Analytics & Optimisation', href: '/analytics', icon: BarChart3 },
+  ] },
+  { title: 'Team & operations', items: [
+    { label: 'Marketing Team', href: '/marketing-team', icon: Sparkles },
+    { label: 'Workflows & Approvals', href: '/approvals', icon: FileCheck2 },
+    { label: 'Connections', href: '/connections', icon: Plug },
+    { label: 'Usage & Safety', href: '/usage-safety', icon: ShieldCheck },
+    { label: 'Settings', href: '/settings', icon: Settings },
+  ] },
 ];
 
-const adminNav: NavSection[] = [
-  {
-    title: 'Platform Admin',
-    items: [
-      { label: 'Console', href: '/admin/console', icon: Activity },
-      { label: 'GenX Runtime', href: '/admin/providers', icon: Sparkles },
-      { label: 'Users', href: '/admin/users', icon: Users },
-    ],
-  },
-];
+function isActivePath(pathname: string, href: string): boolean {
+  return pathname === href || pathname.startsWith(`${href}/`);
+}
 
 export function DashboardSidebar() {
-  const pathname = usePathname();
-  const { user, logout } = useAuthStore();
-  const { sidebarOpen, toggleSidebar } = useUIStore();
-  const isAdmin = user?.role === 'admin' || user?.role === 'superadmin';
-  const sections = isAdmin ? [...workspaceNav, ...adminNav] : workspaceNav;
-  const appName = process.env.NEXT_PUBLIC_APP_NAME || 'EquiProfile Marketing';
+  const pathname = usePathname() || '/dashboard';
+  const router = useRouter();
+  const { user, logout, currentOrganization } = useAuthStore();
+  const { sidebarOpen, toggleSidebar, setSidebarOpen } = useUIStore();
+
+  const closeOnMobile = () => {
+    if (typeof window !== 'undefined' && window.innerWidth < 1024) setSidebarOpen(false);
+  };
+
+  const signOut = async () => {
+    await logout();
+    router.replace('/login');
+  };
 
   return (
-    <aside className={cn(
-      'fixed inset-y-0 left-0 z-40 flex flex-col border-r border-white/[0.06] glass transition-all duration-300',
-      sidebarOpen ? 'w-64' : 'w-16'
-    )}>
-      <div className="flex h-16 items-center justify-between border-b border-white/[0.06] px-4">
-        <Link href="/dashboard" className="flex items-center gap-2 overflow-hidden">
-          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-brand-500/20">
-            <svg className="h-5 w-5 text-brand-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
-            </svg>
-          </div>
-          {sidebarOpen && (
-            <span className="max-w-[175px] truncate whitespace-nowrap text-sm font-bold text-white">
-              {appName}
-            </span>
-          )}
-        </Link>
+    <>
+      {sidebarOpen && (
         <button
           type="button"
-          onClick={toggleSidebar}
-          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-zinc-400 hover:bg-white/[0.06] hover:text-white"
-          aria-label={sidebarOpen ? 'Collapse sidebar' : 'Expand sidebar'}
-        >
-          {sidebarOpen ? <ChevronLeft className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-        </button>
-      </div>
+          aria-label="Close navigation"
+          onClick={() => setSidebarOpen(false)}
+          className="fixed inset-0 z-30 bg-[#031a35]/45 backdrop-blur-[2px] lg:hidden"
+        />
+      )}
 
-      <nav className="flex-1 overflow-y-auto px-3 py-4">
-        {sections.map((section, sectionIndex) => (
-          <div key={`${section.title || 'main'}-${sectionIndex}`} className={cn(sectionIndex > 0 && 'mt-6')}>
-            {section.title && sidebarOpen && (
-              <h3 className="mb-2 px-3 text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
-                {section.title}
-              </h3>
-            )}
-            <div className="space-y-1">
-              {section.items.map((item) => {
-                const isActive = pathname === item.href || pathname?.startsWith(`${item.href}/`);
-                return (
-                  <Link
-                    key={`${item.label}-${item.href}`}
-                    href={item.href}
-                    title={!sidebarOpen ? item.label : undefined}
-                    className={cn(
-                      'flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all',
-                      isActive
-                        ? 'bg-brand-500/10 text-brand-400'
-                        : 'text-zinc-400 hover:bg-white/[0.04] hover:text-white',
-                      !sidebarOpen && 'justify-center'
-                    )}
-                  >
-                    <item.icon className="h-5 w-5 shrink-0" />
-                    {sidebarOpen && <span className="truncate">{item.label}</span>}
-                  </Link>
-                );
-              })}
-            </div>
-          </div>
-        ))}
-      </nav>
+      <aside
+        className={cn(
+          'fixed inset-y-0 left-0 z-40 flex flex-col border-r border-white/5 bg-[var(--ep-navy)] text-white shadow-[10px_0_32px_rgba(3,26,53,0.12)] transition-[width,transform] duration-200',
+          sidebarOpen ? 'w-[280px] translate-x-0' : '-translate-x-full w-[280px] lg:w-[72px] lg:translate-x-0',
+        )}
+      >
+        <div className="flex h-16 shrink-0 items-center px-3">
+          <button
+            type="button"
+            onClick={toggleSidebar}
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-white/70 transition hover:bg-white/10 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-white/30"
+            aria-label="Toggle navigation"
+          >
+            <PanelLeft className="h-4 w-4" />
+          </button>
 
-      <div className="border-t border-white/[0.06] p-3">
-        <div className={cn('flex items-center gap-3 rounded-lg p-2', !sidebarOpen && 'justify-center')}>
-          {user?.avatar ? (
-            <img src={user.avatar} alt={user.name} className="h-8 w-8 shrink-0 rounded-full object-cover" />
-          ) : (
-            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-brand-500/20 text-xs font-semibold text-brand-400">
-              {user?.name ? getInitials(user.name) : 'U'}
-            </div>
-          )}
           {sidebarOpen && (
-            <div className="flex-1 overflow-hidden">
-              <p className="truncate text-sm font-medium text-white">{user?.name}</p>
-              <p className="truncate text-xs text-zinc-500">{user?.email}</p>
-            </div>
-          )}
-          {sidebarOpen && (
-            <button
-              type="button"
-              onClick={logout}
-              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-zinc-400 hover:bg-white/[0.06] hover:text-red-400"
-              aria-label="Logout"
-            >
-              <LogOut className="h-4 w-4" />
-            </button>
+            <Link href="/dashboard" onClick={closeOnMobile} className="ml-3 flex min-w-0 items-center gap-2.5">
+              <img src={MARKETING_BRAND_LOGO_URL} alt={MARKETING_BRAND_NAME} className="h-10 w-auto max-w-[118px] shrink-0 object-contain" />
+              <div className="min-w-0 leading-tight">
+                <p className="truncate text-[15px] font-semibold tracking-tight text-white">{MARKETING_BRAND_NAME}</p>
+                <p className="truncate text-[10px] font-semibold uppercase tracking-[0.13em] text-white/45">Marketing workspace</p>
+              </div>
+            </Link>
           )}
         </div>
-      </div>
-    </aside>
+
+        <nav className="min-h-0 flex-1 overflow-y-auto px-2 py-1" aria-label="Marketing workspace">
+          {navigation.map((section, sectionIndex) => (
+            <div key={`${section.title || 'main'}-${sectionIndex}`} className={cn(sectionIndex > 0 && 'mt-4')}>
+              {section.title && sidebarOpen && (
+                <p className="mb-1 px-3 pt-1 text-[9px] font-bold uppercase tracking-[0.15em] text-white/38">{section.title}</p>
+              )}
+
+              <div className="space-y-1">
+                {section.items.map((item) => {
+                  const active = isActivePath(pathname, item.href);
+                  const Icon = item.icon;
+
+                  return (
+                    <Link
+                      key={item.href}
+                      href={item.href}
+                      onClick={closeOnMobile}
+                      title={!sidebarOpen ? item.label : undefined}
+                      aria-current={active ? 'page' : undefined}
+                      className={cn(
+                        'flex h-10 items-center gap-3 rounded-lg px-3 text-[13px] font-medium transition-colors',
+                        active
+                          ? 'bg-white/12 font-semibold text-white'
+                          : 'text-white/78 hover:bg-white/8 hover:text-white',
+                        !sidebarOpen && 'justify-center px-0',
+                      )}
+                    >
+                      <Icon className={cn('h-4 w-4 shrink-0', active ? 'text-white' : 'text-white/68')} />
+                      {sidebarOpen && <span className="truncate">{item.label}</span>}
+                    </Link>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+        </nav>
+
+        <div className="shrink-0 border-t border-white/10 p-3">
+          <div className={cn('flex items-center gap-3 rounded-lg px-1 py-1.5', !sidebarOpen && 'justify-center px-0')}>
+            {user?.avatar ? (
+              <img src={user.avatar} alt={user.name} className="h-9 w-9 shrink-0 rounded-full border border-white/15 object-cover" />
+            ) : (
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-white/15 bg-white/10 text-xs font-semibold text-white">
+                {user?.name ? getInitials(user.name) : 'U'}
+              </div>
+            )}
+
+            {sidebarOpen && (
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-medium leading-none text-white">{user?.name || 'Workspace owner'}</p>
+                <p className="mt-1.5 truncate text-[11px] text-white/55">{currentOrganization?.name || MARKETING_BRAND_NAME}</p>
+              </div>
+            )}
+
+            {sidebarOpen && (
+              <button
+                type="button"
+                onClick={() => void signOut()}
+                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-white/55 transition hover:bg-white/10 hover:text-white"
+                aria-label="Sign out"
+              >
+                <LogOut className="h-4 w-4" />
+              </button>
+            )}
+          </div>
+        </div>
+      </aside>
+    </>
   );
 }

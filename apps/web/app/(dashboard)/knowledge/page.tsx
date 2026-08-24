@@ -1,91 +1,48 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { AlertCircle, BookOpen, CheckCircle2, FileText, Globe, Loader2, Plus, RefreshCw, Search, Trash2, X } from 'lucide-react';
+import { AlertCircle, BookOpen, CheckCircle2, FileText, Globe2, Loader2, Plus, RefreshCw, Search, Trash2, X } from 'lucide-react';
 import { api } from '@/lib/api';
 import type { KnowledgeSource, ApiResponse } from '@/types';
 
-interface SearchResult { id: string; title: string | null; content: string; url?: string | null; score?: number; match_type?: string; }
-const types = ['website', 'api', 'rss', 'document', 'manual'];
+interface SearchResult { id:string; title:string|null; content:string; url?:string|null; score?:number; match_type?:string }
+const types=['website','api','rss','document','manual'];
+const inputClass='ep-input min-h-10 px-3 py-2 text-sm';
 
-export default function KnowledgePage() {
-  const [sources, setSources] = useState<KnowledgeSource[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [busyId, setBusyId] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [showCreate, setShowCreate] = useState(false);
-  const [form, setForm] = useState({ name: '', type: 'website', url: '', content: '', headers: '', max_pages: '10' });
-  const [queryText, setQueryText] = useState('');
-  const [searching, setSearching] = useState(false);
-  const [results, setResults] = useState<SearchResult[]>([]);
+export default function KnowledgePage(){
+  const [sources,setSources]=useState<KnowledgeSource[]>([]); const [loading,setLoading]=useState(true); const [busyId,setBusyId]=useState<string|null>(null); const [error,setError]=useState<string|null>(null);
+  const [showCreate,setShowCreate]=useState(false); const [form,setForm]=useState({name:'',type:'website',url:'',content:'',headers:'',max_pages:'10'}); const [queryText,setQueryText]=useState(''); const [searching,setSearching]=useState(false); const [results,setResults]=useState<SearchResult[]>([]);
+  const load=useCallback(async()=>{setLoading(true);setError(null);try{const response=await api.get<ApiResponse<KnowledgeSource[]>>('/knowledge');setSources(response.data||[]);}catch(caught){setError(caught instanceof Error?caught.message:'Knowledge sources could not be loaded.');}finally{setLoading(false);}},[]);
+  useEffect(()=>{void load();},[load]);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const response = await api.get<ApiResponse<KnowledgeSource[]>>('/knowledge');
-      setSources(response.data || []);
-    } catch (caught) { setError(caught instanceof Error ? caught.message : 'Failed to load knowledge sources.'); }
-    finally { setLoading(false); }
-  }, []);
+  const create=async()=>{if(!form.name.trim())return;setBusyId('create');setError(null);try{let headers:Record<string,string>={};if(form.headers.trim())headers=JSON.parse(form.headers) as Record<string,string>;await api.post('/knowledge',{body:{name:form.name.trim(),type:form.type,url:form.url.trim()||undefined,content:form.content.trim()||undefined,config:{headers,max_pages:Number(form.max_pages||10)},sync_now:true}});setForm({name:'',type:'website',url:'',content:'',headers:'',max_pages:'10'});setShowCreate(false);await load();}catch(caught){setError(caught instanceof Error?caught.message:'Source ingestion failed.');}finally{setBusyId(null);}};
+  const sync=async(id:string)=>{setBusyId(id);setError(null);try{await api.post(`/knowledge/${id}/sync`,{body:{}});await load();}catch(caught){setError(caught instanceof Error?caught.message:'Source sync failed.');}finally{setBusyId(null);}};
+  const remove=async(id:string)=>{if(!confirm('Delete this source and its indexed knowledge?'))return;setBusyId(id);try{await api.delete(`/knowledge/${id}`);await load();}catch(caught){setError(caught instanceof Error?caught.message:'The source could not be deleted.');}finally{setBusyId(null);}};
+  const search=async()=>{if(!queryText.trim())return;setSearching(true);setError(null);try{const response=await api.get<ApiResponse<SearchResult[]>>('/knowledge/search',{params:{q:queryText.trim(),limit:'20'}});setResults(response.data||[]);}catch(caught){setError(caught instanceof Error?caught.message:'Knowledge search failed.');}finally{setSearching(false);}};
 
-  useEffect(() => { void load(); }, [load]);
-
-  const create = async () => {
-    if (!form.name.trim()) return;
-    setBusyId('create');
-    setError(null);
-    try {
-      let headers: Record<string, string> = {};
-      if (form.headers.trim()) headers = JSON.parse(form.headers) as Record<string, string>;
-      await api.post('/knowledge', {
-        body: {
-          name: form.name.trim(), type: form.type, url: form.url.trim() || undefined,
-          content: form.content.trim() || undefined,
-          config: { headers, max_pages: Number(form.max_pages || 10) },
-          sync_now: true,
-        },
-      });
-      setForm({ name: '', type: 'website', url: '', content: '', headers: '', max_pages: '10' });
-      setShowCreate(false);
-      await load();
-    } catch (caught) { setError(caught instanceof Error ? caught.message : 'Source ingestion failed.'); }
-    finally { setBusyId(null); }
-  };
-
-  const sync = async (id: string) => {
-    setBusyId(id);
-    try { await api.post(`/knowledge/${id}/sync`, { body: {} }); await load(); }
-    catch (caught) { setError(caught instanceof Error ? caught.message : 'Sync failed.'); }
-    finally { setBusyId(null); }
-  };
-
-  const remove = async (id: string) => {
-    if (!confirm('Delete this source and all indexed content?')) return;
-    setBusyId(id);
-    try { await api.delete(`/knowledge/${id}`); await load(); }
-    catch (caught) { setError(caught instanceof Error ? caught.message : 'Delete failed.'); }
-    finally { setBusyId(null); }
-  };
-
-  const search = async () => {
-    if (!queryText.trim()) return;
-    setSearching(true);
-    setError(null);
-    try {
-      const response = await api.get<ApiResponse<SearchResult[]>>('/knowledge/search', { params: { q: queryText.trim(), limit: '20' } });
-      setResults(response.data || []);
-    } catch (caught) { setError(caught instanceof Error ? caught.message : 'Search failed.'); }
-    finally { setSearching(false); }
-  };
+  const totalChunks=sources.reduce((sum,source)=>sum+Number(source.item_count||0),0);
+  const activeSources=sources.filter((source)=>['active','completed'].includes(String(source.status).toLowerCase())).length;
 
   return <div className="space-y-6">
-    <header className="flex flex-wrap items-center justify-between gap-3"><div><h1 className="text-2xl font-bold text-white">Knowledge Base</h1><p className="mt-1 text-sm text-zinc-400">Crawl, ingest, embed and search organization knowledge used by AI agents.</p></div><button type="button" onClick={() => setShowCreate(true)} className="inline-flex items-center gap-2 rounded-lg bg-brand-500 px-4 py-2.5 text-sm font-semibold text-white"><Plus className="h-4 w-4" />Add source</button></header>
-    {error && <div className="flex items-center gap-3 rounded-lg border border-red-500/20 bg-red-500/5 px-4 py-3"><AlertCircle className="h-4 w-4 text-red-400" /><p className="text-sm text-red-300">{error}</p><button type="button" onClick={() => setError(null)} className="ml-auto text-red-400"><X className="h-4 w-4" /></button></div>}
+    <header className="ep-panel p-6 sm:p-8"><div className="flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between"><div className="max-w-3xl"><p className="ep-section-label">Business Brain · Knowledge Base</p><h1 className="ep-page-title mt-2">Keep the facts your marketing is allowed to know and use.</h1><p className="ep-page-copy mt-3 text-sm leading-6 sm:text-base">Crawl public websites, ingest trusted documents or feeds, add manual knowledge and search the organisation-scoped context used by planning and content generation.</p></div><button type="button" onClick={()=>setShowCreate(true)} className="ep-button-primary shrink-0 px-4 py-2.5 text-sm"><Plus className="h-4 w-4"/> Add source</button></div></header>
 
-    {showCreate && <section className="rounded-xl border border-white/[0.06] bg-surface-100 p-6"><h2 className="text-lg font-semibold text-white">Create and ingest source</h2><div className="mt-4 grid gap-4 md:grid-cols-2"><label className="space-y-1.5 text-sm text-zinc-300"><span>Name</span><input value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} className="h-10 w-full rounded-lg border border-white/10 bg-black/30 px-3 text-white" /></label><label className="space-y-1.5 text-sm text-zinc-300"><span>Type</span><select value={form.type} onChange={(event) => setForm({ ...form, type: event.target.value })} className="h-10 w-full rounded-lg border border-white/10 bg-black/30 px-3 text-white">{types.map((type) => <option key={type} value={type}>{type}</option>)}</select></label>{['website', 'api', 'rss'].includes(form.type) && <label className="space-y-1.5 text-sm text-zinc-300 md:col-span-2"><span>URL</span><input type="url" value={form.url} onChange={(event) => setForm({ ...form, url: event.target.value })} placeholder="https://example.com" className="h-10 w-full rounded-lg border border-white/10 bg-black/30 px-3 text-white" /></label>}{form.type === 'website' && <label className="space-y-1.5 text-sm text-zinc-300"><span>Maximum pages</span><input type="number" min="1" max="50" value={form.max_pages} onChange={(event) => setForm({ ...form, max_pages: event.target.value })} className="h-10 w-full rounded-lg border border-white/10 bg-black/30 px-3 text-white" /></label>}{form.type === 'api' && <label className="space-y-1.5 text-sm text-zinc-300"><span>Request headers JSON</span><textarea rows={4} value={form.headers} onChange={(event) => setForm({ ...form, headers: event.target.value })} placeholder='{"Authorization":"Bearer ..."}' className="w-full rounded-lg border border-white/10 bg-black/30 p-3 font-mono text-xs text-white" /></label>}{['manual', 'document'].includes(form.type) && <label className="space-y-1.5 text-sm text-zinc-300 md:col-span-2"><span>Content</span><textarea rows={10} value={form.content} onChange={(event) => setForm({ ...form, content: event.target.value })} placeholder="Paste the complete document or knowledge text." className="w-full rounded-lg border border-white/10 bg-black/30 p-3 text-white" /></label>}</div><div className="mt-4 flex gap-2"><button type="button" disabled={busyId === 'create' || !form.name.trim()} onClick={() => void create()} className="inline-flex items-center gap-2 rounded bg-brand-500 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">{busyId === 'create' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}Create and ingest</button><button type="button" onClick={() => setShowCreate(false)} className="px-4 py-2 text-sm text-zinc-400">Cancel</button></div></section>}
+    {error&&<div className="ep-status-danger flex items-start gap-3 rounded-xl border px-4 py-3 text-sm"><AlertCircle className="mt-0.5 h-4 w-4 shrink-0"/><span className="flex-1">{error}</span><button type="button" onClick={()=>setError(null)} aria-label="Dismiss"><X className="h-4 w-4"/></button></div>}
 
-    <section className="rounded-xl border border-white/[0.06] bg-surface-100 p-5"><div className="flex gap-2"><div className="relative flex-1"><Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500" /><input value={queryText} onChange={(event) => setQueryText(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') void search(); }} placeholder="Search indexed knowledge semantically and by keyword" className="h-10 w-full rounded-lg border border-white/10 bg-black/20 pl-10 pr-3 text-sm text-white" /></div><button type="button" onClick={() => void search()} disabled={searching || !queryText.trim()} className="rounded bg-brand-500 px-4 text-sm text-white disabled:opacity-50">{searching ? 'Searching…' : 'Search'}</button></div>{results.length > 0 && <div className="mt-4 divide-y divide-white/[0.06]">{results.map((result) => <article key={result.id} className="py-4"><div className="flex justify-between gap-3"><h3 className="text-sm font-medium text-white">{result.title || 'Untitled knowledge chunk'}</h3><span className="text-xs text-zinc-500">{result.match_type || 'match'}{result.score !== undefined ? ` · ${Number(result.score).toFixed(3)}` : ''}</span></div><p className="mt-2 line-clamp-4 whitespace-pre-wrap text-xs text-zinc-400">{result.content}</p>{result.url && <a href={result.url} target="_blank" rel="noreferrer" className="mt-2 inline-block text-xs text-brand-400">Open source</a>}</article>)}</div>}</section>
+    <section className="grid gap-4 sm:grid-cols-3"><article className="ep-card p-5"><p className="text-xs font-bold text-[var(--ep-text-muted)]">Sources</p><p className="mt-2 text-3xl font-extrabold text-[var(--ep-navy)]">{sources.length}</p></article><article className="ep-card p-5"><p className="text-xs font-bold text-[var(--ep-text-muted)]">Ready sources</p><p className="mt-2 text-3xl font-extrabold text-[var(--ep-navy)]">{activeSources}</p></article><article className="ep-card p-5"><p className="text-xs font-bold text-[var(--ep-text-muted)]">Knowledge chunks</p><p className="mt-2 text-3xl font-extrabold text-[var(--ep-navy)]">{totalChunks.toLocaleString()}</p></article></section>
 
-    {loading ? <div className="flex justify-center py-20"><Loader2 className="h-8 w-8 animate-spin text-brand-400" /></div> : sources.length === 0 ? <div className="rounded-xl border border-dashed border-white/10 py-16 text-center"><BookOpen className="mx-auto h-8 w-8 text-zinc-600" /><p className="mt-3 text-sm text-zinc-500">No knowledge sources yet.</p></div> : <div className="space-y-3">{sources.map((source) => <article key={source.id} className="rounded-xl border border-white/[0.06] bg-surface-100 p-5"><div className="flex items-start justify-between gap-4"><div className="flex gap-3">{source.type === 'website' || source.type === 'api' || source.type === 'rss' ? <Globe className="h-5 w-5 text-brand-400" /> : <FileText className="h-5 w-5 text-purple-400" />}<div><h3 className="text-sm font-semibold text-white">{source.name}</h3><p className="text-xs text-zinc-500">{source.type}{source.url ? ` · ${source.url}` : ''}</p><p className="mt-2 text-xs text-zinc-400">{source.item_count} chunks · {source.total_tokens.toLocaleString()} estimated tokens</p>{source.error_message && <p className="mt-2 text-xs text-red-400">{source.error_message}</p>}</div></div><div className="flex items-center gap-2"><span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs ${source.status === 'active' ? 'bg-emerald-500/10 text-emerald-400' : source.status === 'error' ? 'bg-red-500/10 text-red-400' : 'bg-blue-500/10 text-blue-400'}`}>{source.status === 'active' && <CheckCircle2 className="h-3 w-3" />}{source.status}</span><button type="button" onClick={() => void sync(source.id)} className="rounded p-1.5 text-zinc-400 hover:bg-white/5">{busyId === source.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}</button><button type="button" onClick={() => void remove(source.id)} className="rounded p-1.5 text-zinc-400 hover:text-red-400"><Trash2 className="h-4 w-4" /></button></div></div></article>)}</div>}
+    {showCreate&&<section className="ep-card p-5 sm:p-6"><div className="flex items-start justify-between gap-3"><div><p className="ep-section-label">New knowledge source</p><h2 className="mt-1 text-lg font-extrabold text-[var(--ep-navy)]">Create and ingest</h2></div><button type="button" onClick={()=>setShowCreate(false)} className="rounded-lg p-2 text-[var(--ep-text-soft)] hover:bg-[var(--ep-surface-subtle)]"><X className="h-4 w-4"/></button></div><div className="mt-5 grid gap-4 md:grid-cols-2"><Field label="Name"><input value={form.name} onChange={(event)=>setForm({...form,name:event.target.value})} placeholder="Website, document or knowledge source" className={inputClass}/></Field><Field label="Type"><select value={form.type} onChange={(event)=>setForm({...form,type:event.target.value})} className={inputClass}>{types.map((type)=><option key={type} value={type}>{type.charAt(0).toUpperCase()+type.slice(1)}</option>)}</select></Field>
+      {['website','api','rss'].includes(form.type)&&<div className="md:col-span-2"><Field label="URL"><input type="url" value={form.url} onChange={(event)=>setForm({...form,url:event.target.value})} placeholder="https://example.com" className={inputClass}/></Field></div>}
+      {form.type==='website'&&<Field label="Maximum pages"><input type="number" min="1" max="50" value={form.max_pages} onChange={(event)=>setForm({...form,max_pages:event.target.value})} className={inputClass}/></Field>}
+      {form.type==='api'&&<Field label="Request headers JSON"><textarea rows={4} value={form.headers} onChange={(event)=>setForm({...form,headers:event.target.value})} placeholder='{"Authorization":"Bearer …"}' className="ep-input p-3 font-mono text-xs"/></Field>}
+      {['manual','document'].includes(form.type)&&<div className="md:col-span-2"><Field label="Content"><textarea rows={10} value={form.content} onChange={(event)=>setForm({...form,content:event.target.value})} placeholder="Paste the trusted source text here." className="ep-input p-3 text-sm leading-6"/></Field></div>}
+      </div><div className="mt-5 flex flex-wrap gap-2"><button type="button" disabled={busyId==='create'||!form.name.trim()} onClick={()=>void create()} className="ep-button-primary px-4 py-2.5 text-sm">{busyId==='create'?<Loader2 className="h-4 w-4 animate-spin"/>:<Plus className="h-4 w-4"/>} Create & ingest</button><button type="button" onClick={()=>setShowCreate(false)} className="ep-button-secondary px-4 py-2.5 text-sm">Cancel</button></div></section>}
+
+    <section className="ep-card p-5 sm:p-6"><div><p className="ep-section-label">Search Business Brain</p><h2 className="mt-1 text-lg font-extrabold text-[var(--ep-navy)]">Find grounded knowledge</h2></div><div className="mt-4 flex flex-col gap-2 sm:flex-row"><div className="relative flex-1"><Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--ep-text-soft)]"/><input value={queryText} onChange={(event)=>setQueryText(event.target.value)} onKeyDown={(event)=>{if(event.key==='Enter')void search();}} placeholder="Search indexed knowledge" className="ep-input min-h-11 pl-10 pr-3 text-sm"/></div><button type="button" onClick={()=>void search()} disabled={searching||!queryText.trim()} className="ep-button-primary min-h-11 px-5 text-sm">{searching?<Loader2 className="h-4 w-4 animate-spin"/>:<Search className="h-4 w-4"/>} Search</button></div>{results.length>0&&<div className="mt-5 divide-y divide-[var(--ep-border)]">{results.map((result)=><article key={result.id} className="py-4"><div className="flex flex-wrap items-start justify-between gap-2"><h3 className="font-extrabold text-[var(--ep-navy)]">{result.title||'Untitled knowledge item'}</h3><span className="text-[11px] font-bold text-[var(--ep-text-soft)]">{result.match_type||'match'}{result.score!==undefined?` · ${Number(result.score).toFixed(3)}`:''}</span></div><p className="mt-2 line-clamp-4 whitespace-pre-wrap text-sm leading-6 text-[var(--ep-text-muted)]">{result.content}</p>{result.url&&<a href={result.url} target="_blank" rel="noreferrer" className="mt-2 inline-flex text-xs font-extrabold text-[var(--ep-blue)]">Open original source →</a>}</article>)}</div>}</section>
+
+    <section><div className="mb-3 flex items-center justify-between gap-3"><div><p className="ep-section-label">Sources</p><h2 className="mt-1 text-lg font-extrabold text-[var(--ep-navy)]">Connected knowledge</h2></div><button type="button" onClick={()=>void load()} className="ep-button-secondary px-3 py-2 text-xs"><RefreshCw className="h-3.5 w-3.5"/> Refresh</button></div>
+      {loading?<div className="ep-card flex justify-center py-16"><Loader2 className="h-8 w-8 animate-spin text-[var(--ep-blue)]"/></div>:sources.length===0?<div className="ep-card py-14 text-center"><BookOpen className="mx-auto h-8 w-8 text-[var(--ep-text-soft)]"/><p className="mt-3 text-sm font-semibold text-[var(--ep-text-muted)]">No knowledge sources yet.</p></div>:<div className="space-y-3">{sources.map((source)=>{const ready=['active','completed'].includes(String(source.status).toLowerCase());const failed=['error','failed'].includes(String(source.status).toLowerCase());return <article key={source.id} className="ep-card p-5"><div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between"><div className="flex min-w-0 gap-3"><span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[var(--ep-blue-soft)] text-[var(--ep-blue)]">{['website','api','rss'].includes(source.type)?<Globe2 className="h-5 w-5"/>:<FileText className="h-5 w-5"/>}</span><div className="min-w-0"><h3 className="truncate font-extrabold text-[var(--ep-navy)]">{source.name}</h3><p className="mt-1 break-all text-xs text-[var(--ep-text-muted)]">{source.type}{source.url?` · ${source.url}`:''}</p><p className="mt-2 text-xs text-[var(--ep-text-soft)]">{Number(source.item_count||0).toLocaleString()} chunks · {Number(source.total_tokens||0).toLocaleString()} estimated tokens</p>{source.error_message&&<p className="mt-2 text-xs font-bold text-[var(--ep-danger)]">{source.error_message}</p>}</div></div><div className="flex shrink-0 items-center gap-2"><span className={`${ready?'ep-status-success':failed?'ep-status-danger':'ep-status-warning'} inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[10px] font-extrabold uppercase`}>{ready&&<CheckCircle2 className="h-3 w-3"/>}{source.status}</span><button type="button" onClick={()=>void sync(source.id)} className="rounded-lg p-2 text-[var(--ep-text-muted)] hover:bg-[var(--ep-blue-soft)] hover:text-[var(--ep-blue)]" aria-label={`Sync ${source.name}`}>{busyId===source.id?<Loader2 className="h-4 w-4 animate-spin"/>:<RefreshCw className="h-4 w-4"/>}</button><button type="button" onClick={()=>void remove(source.id)} className="rounded-lg p-2 text-[var(--ep-text-soft)] hover:bg-[var(--ep-danger-soft)] hover:text-[var(--ep-danger)]" aria-label={`Delete ${source.name}`}><Trash2 className="h-4 w-4"/></button></div></div></article>;})}</div>}
+    </section>
   </div>;
 }
+
+function Field({label,children}:{label:string;children:React.ReactNode}){return <label className="block"><span className="mb-1.5 block text-xs font-extrabold text-[var(--ep-text-muted)]">{label}</span>{children}</label>;}

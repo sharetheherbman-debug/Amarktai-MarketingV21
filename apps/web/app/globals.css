@@ -3,14 +3,61 @@
 @tailwind utilities;
 
 :root {
-  --color-bg: #050505;
-  --color-surface: #0a0a0a;
-  --color-surface-2: #111111;
-  --color-border: rgba(255, 255, 255, 0.08);
-  --color-text: #ffffff;
-  --color-text-secondary: #a1a1aa;
-  --color-brand: #10b981;
-  --color-accent: #f59e0b;
+  color-scheme: light;
+
+  /* White-label customer theme. Primary and accent are overridden by reviewed build configuration. */
+  --ep-navy: #052b57;
+  --ep-navy-deep: #031a35;
+  --ep-blue: #167cc1;
+  --ep-blue-hover: #1069a7;
+  --ep-blue-soft: #eef7fd;
+
+  --ep-page: #f5f8fc;
+  --ep-surface: #ffffff;
+  --ep-surface-subtle: #eef3f8;
+  --ep-border: #d7e0ea;
+  --ep-border-strong: #bdcad7;
+  --ep-text: #10263b;
+  --ep-text-muted: #5f7184;
+  --ep-text-soft: #8190a0;
+
+  --ep-success: #18794e;
+  --ep-success-soft: #edf8f2;
+  --ep-warning: #9a6700;
+  --ep-warning-soft: #fff8e6;
+  --ep-danger: #b42318;
+  --ep-danger-soft: #fff2f0;
+
+  --ep-radius-sm: 10px;
+  --ep-radius-md: 14px;
+  --ep-radius-lg: 20px;
+  --ep-shadow-card: 0 1px 2px rgba(5, 43, 87, 0.04), 0 10px 30px rgba(5, 43, 87, 0.06);
+  --ep-shadow-float: 0 18px 50px rgba(5, 43, 87, 0.12);
+
+  /* Backwards-compatible variable names point at the ONE canonical theme. */
+  --color-bg: var(--ep-page);
+  --color-surface: var(--ep-surface);
+  --color-surface-2: var(--ep-surface-subtle);
+  --color-muted: var(--ep-surface-subtle);
+  --color-border: var(--ep-border);
+  --color-text: var(--ep-text);
+  --color-text-secondary: var(--ep-text-muted);
+  --color-brand: var(--ep-blue);
+  --color-brand-dark: var(--ep-navy);
+  --color-accent: var(--ep-blue);
+  --shadow-card: var(--ep-shadow-card);
+}
+
+/* Marketing launches with one deliberate light customer theme. */
+.dark {
+  color-scheme: light;
+  --color-bg: var(--ep-page);
+  --color-surface: var(--ep-surface);
+  --color-surface-2: var(--ep-surface-subtle);
+  --color-muted: var(--ep-surface-subtle);
+  --color-border: var(--ep-border);
+  --color-text: var(--ep-text);
+  --color-text-secondary: var(--ep-text-muted);
 }
 
 @layer base {
@@ -18,79 +65,130 @@
     scroll-behavior: smooth;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+    background: var(--ep-page);
   }
 
   body {
-    background-color: var(--color-bg);
-    color: var(--color-text);
     min-height: 100vh;
+    margin: 0;
+    overflow-x: hidden;
+    background: var(--ep-page);
+    color: var(--ep-text);
+    font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   }
 
   ::selection {
-    background-color: rgba(16, 185, 129, 0.3);
-    color: #ffffff;
-  }
-
-  ::-moz-selection {
-    background-color: rgba(16, 185, 129, 0.3);
-    color: #ffffff;
+    background: rgba(22, 124, 193, 0.18);
+    color: var(--ep-text);
   }
 
   * {
+    box-sizing: border-box;
     scrollbar-width: thin;
-    scrollbar-color: rgba(255, 255, 255, 0.1) transparent;
+    scrollbar-color: #b9c7d5 transparent;
   }
 
-  ::-webkit-scrollbar {
-    width: 6px;
-    height: 6px;
-  }
-
-  ::-webkit-scrollbar-track {
-    background: transparent;
-  }
-
-  ::-webkit-scrollbar-thumb {
-    background-color: rgba(255, 255, 255, 0.1);
-    border-radius: 3px;
-  }
-
-  ::-webkit-scrollbar-thumb:hover {
-    background-color: rgba(255, 255, 255, 0.2);
-  }
+  ::-webkit-scrollbar { width: 7px; height: 7px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #b9c7d5; border-radius: 999px; }
+  ::-webkit-scrollbar-thumb:hover { background: #94a7b9; }
 
   :focus-visible {
-    outline: 2px solid var(--color-brand);
+    outline: 3px solid rgba(22, 124, 193, 0.28);
     outline-offset: 2px;
-    border-radius: 4px;
+    border-radius: 6px;
   }
 
-  :focus:not(:focus-visible) {
-    outline: none;
-  }
+  :focus:not(:focus-visible) { outline: none; }
 }
 
 @layer utilities {
-  .glass {
-    background: rgba(255, 255, 255, 0.03);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
-    border: 1px solid rgba(255, 255, 255, 0.06);
+  .ep-page-title {
+    color: var(--ep-navy);
+    font-size: clamp(1.75rem, 3vw, 2.35rem);
+    line-height: 1.1;
+    font-weight: 750;
+    letter-spacing: -0.025em;
   }
 
-  .glass-hover:hover {
-    background: rgba(255, 255, 255, 0.06);
-    border-color: rgba(255, 255, 255, 0.1);
+  .ep-page-copy { color: var(--ep-text-muted); }
+  .ep-section-label {
+    color: var(--ep-blue);
+    font-size: 0.68rem;
+    line-height: 1rem;
+    font-weight: 800;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+  }
+}
+
+@layer components {
+  .ep-card {
+    min-width: 0;
+    border: 1px solid var(--ep-border);
+    border-radius: var(--ep-radius-md);
+    background: var(--ep-surface);
+    box-shadow: var(--ep-shadow-card);
   }
 
-  .text-gradient {
-    background: linear-gradient(135deg, #10b981 0%, #34d399 50%, #f59e0b 100%);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
+  .ep-panel {
+    min-width: 0;
+    border: 1px solid var(--ep-border);
+    border-radius: var(--ep-radius-lg);
+    background: var(--ep-surface);
   }
 
-  .animate-in {
-    animation: fadeIn 0.3s ease-in-out, slideUp 0.3s ease-out;
+  .ep-input {
+    width: 100%;
+    border: 1px solid var(--ep-border-strong);
+    border-radius: var(--ep-radius-sm);
+    background: var(--ep-surface);
+    color: var(--ep-text);
+    outline: none;
+    transition: border-color 120ms ease, box-shadow 120ms ease;
   }
+
+  .ep-input::placeholder { color: var(--ep-text-soft); }
+  .ep-input:focus {
+    border-color: var(--ep-blue);
+    box-shadow: 0 0 0 3px rgba(22, 124, 193, 0.12);
+  }
+
+  .ep-button-primary {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    border-radius: var(--ep-radius-sm);
+    background: var(--ep-blue);
+    color: #fff;
+    font-weight: 750;
+    transition: background 120ms ease, transform 120ms ease;
+  }
+
+  .ep-button-primary:hover { background: var(--ep-blue-hover); }
+  .ep-button-primary:active { transform: translateY(1px); }
+  .ep-button-primary:disabled { cursor: not-allowed; opacity: 0.48; }
+
+  .ep-button-secondary {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    border: 1px solid var(--ep-border-strong);
+    border-radius: var(--ep-radius-sm);
+    background: var(--ep-surface);
+    color: var(--ep-navy);
+    font-weight: 700;
+    transition: border-color 120ms ease, background 120ms ease;
+  }
+
+  .ep-button-secondary:hover {
+    border-color: #9eb2c5;
+    background: var(--ep-blue-soft);
+  }
+
+  .ep-status-success { border-color: #b8dec9; background: var(--ep-success-soft); color: var(--ep-success); }
+  .ep-status-warning { border-color: #ead7a2; background: var(--ep-warning-soft); color: var(--ep-warning); }
+  .ep-status-danger { border-color: #edc2bd; background: var(--ep-danger-soft); color: var(--ep-danger); }
 }

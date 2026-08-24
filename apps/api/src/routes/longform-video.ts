@@ -128,6 +128,14 @@ router.post('/scenes/:id/generate', async (req: AuthRequest, res: Response<ApiRe
   } catch (error) { next(error); }
 });
 
+router.post('/projects/:id/quote', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction) => {
+  try {
+    const auth = await resolveOrg(req, 'body');
+    if (auth.error) return fail(res, auth.status, auth.error);
+    res.json({ success: true, data: await generationService.quoteProjectGeneration(req.params.id, auth.orgId) });
+  } catch (error) { next(error); }
+});
+
 router.post('/projects/:id/generate', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction) => {
   try {
     const auth = await resolveOrg(req, 'body');

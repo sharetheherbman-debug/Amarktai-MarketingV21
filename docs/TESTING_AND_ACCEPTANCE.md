@@ -55,6 +55,8 @@ Production-applied migration files are checksum-immutable. A fresh database must
 
 Ordinary CI never calls paid providers. The documented live command requires explicit credentials, a named capability, and a maximum cost. It prints the quote and exits before submission unless the quote is complete, fresh, and within the supplied ceiling.
 
+Run `npm run acceptance:provider -- <check>` with `text`, `image`, `short-video`, `audio-voice`, `advert-30`, or `longform-60`. Supply `LIVE_API_URL`, `LIVE_ORGANIZATION_ID`, `LIVE_SESSION_COOKIE`, and `LIVE_MAX_CREDITS`. Generic checks also require `LIVE_MODEL_ID`, `LIVE_OPERATION`, `LIVE_QUANTITY`, and `LIVE_REQUEST_JSON`; long-form requires `LIVE_LONGFORM_PROJECT_ID`. Submission additionally requires the exact opt-in value `LIVE_PROVIDER_ACCEPTANCE=I_ACCEPT_PAID_PROVIDER_COSTS`. Keep the session cookie out of tracked files and shell history.
+
 Individually gated checks cover text, image, short video, audio/voice, a 30-second advert/reel, and a 60-second Smart/Hybrid long-form project. Results record provider/model, estimate, actual credits, assets, duration/probe, persistence, and ledger reconciliation without logging secrets.
 
 ## Acceptance truth

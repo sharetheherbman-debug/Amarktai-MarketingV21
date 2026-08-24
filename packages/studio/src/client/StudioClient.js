@@ -1,7 +1,12 @@
 "use client";
 
-const RAW_API_BASE = process.env.NEXT_PUBLIC_API_URL || '/api';
-const API_BASE = RAW_API_BASE.replace(/\/+$/, '').replace(/\/v1$/, '');
+function normalizeApiBaseUrl(value) {
+  const trimmed = String(value || '').trim().replace(/\/+$/, '');
+  if (!trimmed || trimmed === '/api') return '/api/v1';
+  return trimmed;
+}
+
+const API_BASE = normalizeApiBaseUrl(process.env.NEXT_PUBLIC_API_URL);
 
 function delay(ms, signal) {
   return new Promise((resolve, reject) => {
@@ -21,6 +26,7 @@ export class StudioClient {
   constructor({ organizationId, getToken } = {}) {
     this.organizationId = organizationId;
     this.getToken = getToken;
+    this.refreshPromise = null;
   }
 
   getHeaders(json = true) {
@@ -31,16 +37,40 @@ export class StudioClient {
     return headers;
   }
 
+  async refreshSession() {
+    if (this.refreshPromise) return this.refreshPromise;
+    this.refreshPromise = fetch(`${API_BASE}/auth/refresh`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    })
+      .then((response) => response.ok)
+      .catch(() => false)
+      .finally(() => {
+        this.refreshPromise = null;
+      });
+    return this.refreshPromise;
+  }
+
   async request(method, path, body) {
-    const response = await fetch(`${API_BASE}/v1${path}`, {
+    const perform = () => fetch(`${API_BASE}${path}`, {
       method,
       credentials: 'include',
       headers: this.getHeaders(true),
       body: body && method !== 'GET' ? JSON.stringify(body) : undefined,
     });
+    let response = await perform();
+    if (response.status === 401 && path !== '/auth/refresh' && await this.refreshSession()) {
+      response = await perform();
+    }
     if (!response.ok) {
       const error = await response.json().catch(() => ({ error: { message: response.statusText } }));
-      throw new Error(error.error?.message || error.message || `API error: ${response.status}`);
+      const requestError = new Error(error.error?.message || error.message || `API error: ${response.status}`);
+      requestError.status = response.status;
+      const retryAfter = Number(response.headers.get('Retry-After'));
+      requestError.retryAfterMs = Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : null;
+      throw requestError;
     }
     return response.json();
   }
@@ -114,7 +144,7 @@ export class StudioClient {
   }
 
   async waitForGeneration(generationId, options = {}) {
-    const { signal, pollIntervalMs = 3000, maxWaitMs = 300000, onProgress } = options;
+    const { signal, pollIntervalMs = 4000, maxWaitMs = 300000, onProgress } = options;
     const startedAt = Date.now();
     let transientFailures = 0;
 
@@ -130,7 +160,8 @@ export class StudioClient {
         }
         if (generation.status === 'failed') throw new Error(generation.error_message || 'Generation failed');
         if (generation.status === 'cancelled') throw new Error('Generation was cancelled');
-        await delay(pollIntervalMs, signal);
+        const hiddenDelay = typeof document !== 'undefined' && document.hidden ? 12000 : pollIntervalMs;
+        await delay(hiddenDelay + Math.floor(Math.random() * 500), signal);
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         if (
@@ -139,9 +170,13 @@ export class StudioClient {
           message === 'Generation failed' ||
           message.includes('completed without')
         ) throw error;
+        const rateLimited = error?.status === 429;
         transientFailures += 1;
-        if (transientFailures > 4) throw error;
-        await delay(Math.min(pollIntervalMs * 2 ** transientFailures, 15000), signal);
+        if (transientFailures > 6) throw error;
+        const retryDelay = rateLimited && error.retryAfterMs
+          ? error.retryAfterMs
+          : Math.min(pollIntervalMs * 2 ** transientFailures, 30000);
+        await delay(retryDelay + Math.floor(Math.random() * 750), signal);
       }
     }
     throw new Error('Generation polling timeout');
@@ -162,7 +197,7 @@ export class StudioClient {
     const formData = new FormData();
     formData.append('file', file);
     const response = await fetch(
-      `${API_BASE}/v1/studio/organizations/${encodeURIComponent(this.organizationId)}/uploads`,
+      `${API_BASE}/studio/organizations/${encodeURIComponent(this.organizationId)}/uploads`,
       { method: 'POST', credentials: 'include', headers: this.getHeaders(false), body: formData }
     );
     if (!response.ok) {
@@ -288,6 +323,13 @@ export class StudioClient {
 
   async generateProject(projectId) {
     const result = await this.request('POST', `/longform-video/projects/${encodeURIComponent(projectId)}/generate`, {
+      organization_id: this.organizationId,
+    });
+    return result.data;
+  }
+
+  async quoteProject(projectId) {
+    const result = await this.request('POST', `/longform-video/projects/${encodeURIComponent(projectId)}/quote`, {
       organization_id: this.organizationId,
     });
     return result.data;

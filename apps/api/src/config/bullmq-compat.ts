@@ -3,12 +3,16 @@ import { Job } from 'bullmq';
 declare module 'bullmq' {
   interface Job {
     isActive(): Promise<boolean>;
+    /**
+     * BullMQ runtime jobs expose `name`, but the installed package typings do
+     * not currently include it on Job. Keep this augmentation type-only: do
+     * not define or shadow Job.prototype.name at runtime.
+     */
     readonly name: string;
   }
 }
 
 type CompatibleJob = Job & {
-  data?: { kind?: string };
   getState(): Promise<string>;
 };
 
@@ -23,11 +27,7 @@ if (typeof prototype.isActive !== 'function') {
   });
 }
 
-if (!Object.getOwnPropertyDescriptor(prototype, 'name')) {
-  Object.defineProperty(prototype, 'name', {
-    configurable: true,
-    get(this: CompatibleJob): string {
-      return this.data?.kind || '';
-    },
-  });
-}
+// Do not polyfill Job.prototype.name. Modern BullMQ owns the Job name
+// lifecycle and may assign it during construction/hydration. A getter-only
+// compatibility property on the prototype makes those assignments throw at
+// runtime ("Cannot set property name ... which has only a getter").

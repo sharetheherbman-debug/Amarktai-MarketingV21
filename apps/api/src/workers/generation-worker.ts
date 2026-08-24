@@ -92,7 +92,7 @@ async function processStudio(job: Job): Promise<void> {
   const generationId = data.generationId as string;
   const workerId = `generation-${process.pid}`;
   const generation = await query(
-    `SELECT campaign_id, user_id, type, model, prompt, options, attempt_count,
+    `SELECT user_id, type, model, prompt, options, attempt_count,
             status, cancellation_requested_at
      FROM studio_generations WHERE id=$1 AND organization_id=$2`,
     [generationId, data.organizationId]
@@ -107,13 +107,16 @@ async function processStudio(job: Job): Promise<void> {
     return;
   }
   const generationOptions = asObject(generation.rows[0].options);
+  const campaignPlanId = typeof generationOptions.campaign_plan_id === 'string'
+    ? generationOptions.campaign_plan_id
+    : null;
 
   let governed: GovernedGeneration | null = null;
   try {
     governed = await beginGovernedGeneration({
       organizationId: data.organizationId,
       userId: data.userId,
-      campaignId: generation.rows[0].campaign_id || null,
+      campaignId: campaignPlanId,
       generationJobId: generationId,
       modelId: data.modelId,
       operation: data.type === 'cinema' ? 'text_to_video' : data.type,
@@ -124,7 +127,7 @@ async function processStudio(job: Job): Promise<void> {
       requestedBy: 'user',
       payload: {
         generation_id: generationId,
-        campaign_plan_id: generationOptions.campaign_plan_id || null,
+        campaign_plan_id: campaignPlanId,
         brief_id: generationOptions.brief_id || null,
         variant_number: generationOptions.variant_number || null,
       },
@@ -385,10 +388,13 @@ async function processLongformScene(job: Job): Promise<void> {
   if (sceneResult.rows.length === 0) throw new Error('Long-form scene not found');
   const scene = sceneResult.rows[0] as Record<string, any>;
   if (!scene.model_id) throw new Error('Long-form scene has no selected model');
+  if (String(scene.production_mode || '') !== 'ai_video') {
+    throw new Error('Generation worker rejected a long-form scene without persisted ai_video intent');
+  }
 
   let governed: GovernedGeneration | null = null;
   try {
-    const operation = scene.source_image_url ? 'image_to_video' : 'text_to_video';
+    const operation = String(scene.planned_operation || (scene.source_image_url ? 'image_to_video' : 'text_to_video'));
     governed = await beginGovernedGeneration({
       organizationId: data.organizationId,
       userId: scene.owner_id,
@@ -582,14 +588,6 @@ async function processCampaignText(job: Job): Promise<void> {
     [data.runId, data.organizationId]
   );
   const result = await contentEngine.generateContent(data.organizationId, data.request, data.userId);
-  if (data.request?.product_line) {
-    await query(
-      `UPDATE content_items
-       SET metadata=COALESCE(metadata, '{}'::jsonb) || $1::jsonb,updated_at=NOW()
-       WHERE id=$2 AND organization_id=$3`,
-      [JSON.stringify({ product_line: data.request.product_line }), result.content.id, data.organizationId]
-    );
-  }
   await query(
     `UPDATE campaign_asset_runs
      SET status='completed',content_id=$1,resolution_status='pending_review',

@@ -1,165 +1,124 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { AlertCircle, Download, Film, History, Image, Mic, Video, X } from 'lucide-react';
 import {
-  CinemaStudio,
-  ImageStudio,
-  LipSyncStudio,
-  LongFormStudio,
-  StudioClient,
-  VideoStudio,
-} from '@amarktai/studio';
+  AlertCircle, CheckCircle2, CircleDollarSign, CircleStop, Clapperboard, Download, FileAudio, FileImage,
+  Film, FolderKanban, History, Image as ImageIcon, Layers3, Loader2, Plus, RefreshCw,
+  RotateCcw, ShieldCheck, Sparkles, Upload, Video, WandSparkles,
+} from 'lucide-react';
+import { StudioClient } from '@amarktai/studio';
 import { useAuthStore } from '@/stores/auth.store';
-import { MARKETING_BRAND_NAME } from '@/lib/branding';
 
-const tabs = [
-  { id: 'image', label: 'Image Studio', icon: Image },
-  { id: 'video', label: 'Video Studio', icon: Video },
-  { id: 'lipsync', label: 'Lip Sync Studio', icon: Mic },
-  { id: 'cinema', label: 'Cinema Studio', icon: Film },
-  { id: 'longform', label: 'Long-Form', icon: Film },
-] as const;
+type StudioModel = { id:string; name:string; category?:string; operations?:string[]; inputs?:string[]; outputs?:string[]; parameters?:Record<string,any>; status?:string };
+type Generation = { id:string; type?:string; model?:string; prompt?:string; status?:string; progress?:number; primary_output_url?:string|null; output_urls?:string[]; url?:string|null; error_message?:string|null; created_at?:string; completed_at?:string|null };
+type Asset = { id?:string; url?:string; mime_type?:string; original_name?:string; filename?:string };
+type LongFormProject = { id:string; name:string; description?:string|null; target_duration_seconds?:number; aspect_ratio?:string; resolution?:string; frame_rate?:number; script?:string|null; status?:string; final_output_url?:string|null; updated_at?:string; production_strategy?:string; max_project_credits?:number|null; cost_quote?:ProjectQuote|null };
+type ProjectQuote = { strategy:string; scene_count:number; planned_duration_seconds:number; still_motion_scenes:number; ai_video_scenes:number; image_generation_credits:number; ai_video_credits:number; narration_credits:number; music_audio_credits:number; total_estimated_credits:number; approximate_billing_value:{currency:string;amount:number}; maximum_allowed_project_credits:number|null; within_budget:boolean };
+type Scene = { id:string; scene_number?:number; title?:string|null; narration?:string|null; visual_prompt?:string|null; model_id?:string|null; duration_seconds?:number; status?:string; generated_clip_url?:string|null; error_message?:string|null; production_mode?:'ai_video'|'still_motion'|null; estimated_credits?:number|null };
+type Render = { id:string; status?:string; progress?:number; output_url?:string|null; final_output_url?:string|null; error_message?:string|null; created_at?:string };
+type WorkspaceTab = 'create'|'longform'|'jobs';
+type SourceKind = 'image'|'audio'|'video';
 
-type TabId = typeof tabs[number]['id'];
+const operationPriority = ['text_to_image','image_to_image','image_edit','image_transform','text_to_video','image_to_video','reference_image_video','video_extend','text_to_speech','audio_generation','lip_sync'];
+const hiddenParameterKeys = new Set(['prompt','negative_prompt','image_url','audio_url','video_url','reference_image']);
 
-type HistoryItem = {
-  id: string;
-  url: string | null;
-  prompt?: string | null;
-  model?: string | null;
-  type?: string;
-  status?: string;
-  timestamp: string;
-};
+function operationLabel(operation:string) {
+  const labels:Record<string,string> = {
+    text_to_image:'Text to Image', image_to_image:'Image Transform', image_edit:'Image Edit', image_transform:'Image Transform',
+    text_to_video:'Text to Video', image_to_video:'Image to Video', reference_image_video:'Reference Image Video', video_extend:'Extend Video',
+    text_to_speech:'Voice / Speech', audio_generation:'Audio', lip_sync:'Lip Sync',
+  };
+  return labels[operation] || operation.replaceAll('_',' ').replace(/\b\w/g,(letter)=>letter.toUpperCase());
+}
+function operationIcon(operation:string) { if(operation.includes('image')&&!operation.includes('video')) return ImageIcon; if(operation.includes('audio')||operation.includes('speech')) return FileAudio; if(operation.includes('video')||operation==='lip_sync') return Video; return WandSparkles; }
+function outputUrl(item:Generation|Render|null|undefined):string|null { const value=item as any; return value?.url||value?.primary_output_url||value?.output_urls?.[0]||value?.output_url||value?.final_output_url||null; }
+function parameterProperties(model:StudioModel|undefined):Record<string,any> { const parameters=model?.parameters||{}; return parameters&&typeof parameters==='object'&&parameters.properties&&typeof parameters.properties==='object' ? parameters.properties as Record<string,any> : parameters; }
+function enumValues(schema:any):string[] { const values=Array.isArray(schema)?schema:Array.isArray(schema?.enum)?schema.enum:Array.isArray(schema?.options)?schema.options:Array.isArray(schema?.values)?schema.values:[]; return values.map(String).filter(Boolean); }
+function fieldLabel(value:string) { return value.replaceAll('_',' ').replace(/\b\w/g,(letter)=>letter.toUpperCase()); }
+function sourceRequirements(operation:string,model?:StudioModel):SourceKind[] { const inputs=(model?.inputs||[]).map((value)=>String(value).toLowerCase()); const required=new Set<SourceKind>(); if(operation.includes('image_to')||operation==='reference_image_video'||operation==='lip_sync'||inputs.some((input)=>input.includes('image'))) required.add('image'); if(operation==='lip_sync'||inputs.some((input)=>input.includes('audio'))) required.add('audio'); if(operation==='video_extend'||inputs.some((input)=>input.includes('video'))) required.add('video'); return [...required]; }
 
 export default function CreativeStudioPage() {
-  const [activeTab, setActiveTab] = useState<TabId>('image');
-  const [history, setHistory] = useState<HistoryItem[]>([]);
-  const [error, setError] = useState<string | null>(null);
-  const currentOrganization = useAuthStore((state) => state.currentOrganization);
-  const orgId = currentOrganization?.id || '';
+  const { currentOrganization }=useAuthStore();
+  const organizationId=currentOrganization?.id||'';
+  const client=useMemo(()=>new StudioClient({organizationId}),[organizationId]);
+  const [tab,setTab]=useState<WorkspaceTab>('create');
+  const [models,setModels]=useState<StudioModel[]>([]); const [operation,setOperation]=useState(''); const [modelId,setModelId]=useState('');
+  const [prompt,setPrompt]=useState(''); const [negativePrompt,setNegativePrompt]=useState(''); const [parameterValues,setParameterValues]=useState<Record<string,string>>({});
+  const [assets,setAssets]=useState<Partial<Record<SourceKind,Asset>>>({}); const [uploading,setUploading]=useState<SourceKind|null>(null);
+  const [history,setHistory]=useState<Generation[]>([]); const [result,setResult]=useState<Generation|null>(null); const [control,setControl]=useState<Record<string,any>>({});
+  const [loading,setLoading]=useState(true); const [generating,setGenerating]=useState(false); const [error,setError]=useState<string|null>(null);
+  const [projects,setProjects]=useState<LongFormProject[]>([]); const [selectedProjectId,setSelectedProjectId]=useState(''); const [scenes,setScenes]=useState<Scene[]>([]); const [renders,setRenders]=useState<Render[]>([]);
+  const [projectName,setProjectName]=useState(''); const [projectDescription,setProjectDescription]=useState(''); const [projectScript,setProjectScript]=useState(''); const [projectDuration,setProjectDuration]=useState('60'); const [projectAspect,setProjectAspect]=useState('16:9'); const [projectResolution,setProjectResolution]=useState('1920x1080'); const [projectStrategy,setProjectStrategy]=useState('smart'); const [projectBudget,setProjectBudget]=useState(''); const [projectQuote,setProjectQuote]=useState<ProjectQuote|null>(null); const [creatingProject,setCreatingProject]=useState(false);
+  const [sceneTitle,setSceneTitle]=useState(''); const [scenePrompt,setScenePrompt]=useState(''); const [sceneNarration,setSceneNarration]=useState(''); const [sceneDuration,setSceneDuration]=useState('5'); const [busyLongForm,setBusyLongForm]=useState<string|null>(null);
+  const executionAllowed=control?.emergency_stop===false;
 
-  const studioClient = useMemo(
-    () => new StudioClient({ organizationId: orgId }),
-    [orgId]
-  );
+  const operations=useMemo(()=>{ const unique=new Set<string>(); models.forEach((model)=>(model.operations||[]).forEach((item)=>unique.add(String(item)))); return [...unique].sort((a,b)=>{const ai=operationPriority.indexOf(a),bi=operationPriority.indexOf(b); if(ai===-1&&bi===-1)return a.localeCompare(b); if(ai===-1)return 1;if(bi===-1)return -1;return ai-bi;}); },[models]);
+  const operationModels=useMemo(()=>models.filter((model)=>(model.operations||[]).includes(operation)&&model.status!=='unavailable'),[models,operation]);
+  const selectedModel=operationModels.find((model)=>model.id===modelId)||operationModels[0];
+  const parameters=parameterProperties(selectedModel); const requirements=sourceRequirements(operation,selectedModel);
 
-  const upsertHistory = useCallback((generation: any) => {
-    if (!generation?.id) return;
-    const item: HistoryItem = {
-      id: generation.id,
-      url: generation.url || generation.primary_output_url || generation.output_urls?.[0] || null,
-      prompt: generation.prompt,
-      model: generation.model,
-      type: generation.type,
-      status: generation.status,
-      timestamp: generation.created_at || generation.timestamp || new Date().toISOString(),
-    };
-    setHistory((current) => [item, ...current.filter((existing) => existing.id !== item.id)]);
-  }, []);
+  const load=useCallback(async()=>{
+    if(!organizationId){setLoading(false);return;}
+    setLoading(true);setError(null);
+    const [modelResult,historyResult,controlResult,projectResult]=await Promise.allSettled([client.listModels(),client.listHistory(80),client.request('GET','/relaunch-control'),client.listLongFormProjects()]);
+    if(modelResult.status==='fulfilled')setModels((modelResult.value||[]) as StudioModel[]);
+    if(historyResult.status==='fulfilled')setHistory((historyResult.value||[]) as Generation[]);
+    if(controlResult.status==='fulfilled')setControl(controlResult.value?.data||{});
+    if(projectResult.status==='fulfilled'){const next=(projectResult.value||[]) as LongFormProject[];setProjects(next);setSelectedProjectId((current)=>current||next[0]?.id||'');}
+    if([modelResult,historyResult,controlResult,projectResult].some((entry)=>entry.status==='rejected'))setError('Some Studio capability information could not be refreshed. Unavailable tools are not being advertised as working.');
+    setLoading(false);
+  },[client,organizationId]);
+  useEffect(()=>{void load();},[load]);
+  useEffect(()=>{if(!operation&&operations.length)setOperation(operations[0]);else if(operation&&!operations.includes(operation)&&operations.length)setOperation(operations[0]);},[operation,operations]);
+  useEffect(()=>{const first=operationModels[0]?.id||'';if(!operationModels.some((model)=>model.id===modelId))setModelId(first);setParameterValues({});setAssets({});setResult(null);},[operation,operationModels,modelId]);
 
-  useEffect(() => {
-    if (!orgId) {
-      setError('No organization is available for Creative Studio.');
-      return;
-    }
-    let cancelled = false;
-    studioClient
-      .listHistory(100)
-      .then((items: any[]) => {
-        if (!cancelled) items.reverse().forEach(upsertHistory);
-      })
-      .then(() => studioClient.resumePendingGenerations(upsertHistory))
-      .catch((cause: Error) => {
-        if (!cancelled) setError(cause.message);
-      });
-    return () => { cancelled = true; };
-  }, [orgId, studioClient, upsertHistory]);
+  const loadProject=useCallback(async(projectId:string)=>{if(!projectId){setScenes([]);setRenders([]);setProjectQuote(null);return;}const [sceneResult,renderResult]=await Promise.allSettled([client.listScenes(projectId),client.listRenders(projectId)]);if(sceneResult.status==='fulfilled')setScenes((sceneResult.value||[]) as Scene[]);if(renderResult.status==='fulfilled')setRenders((renderResult.value||[]) as Render[]);if(sceneResult.status==='rejected'||renderResult.status==='rejected')setError('Long-form project details could not be fully refreshed.');},[client]);
+  useEffect(()=>{if(selectedProjectId)void loadProject(selectedProjectId);},[loadProject,selectedProjectId]);
 
-  const handleGenerationComplete = useCallback((result: any) => upsertHistory(result), [upsertHistory]);
+  const upload=async(kind:SourceKind,file:File|undefined)=>{if(!file)return;setUploading(kind);setError(null);try{const asset=await client.uploadAsset(file) as Asset;setAssets((current)=>({...current,[kind]:asset}));}catch(caught){setError(caught instanceof Error?caught.message:'The source asset could not be uploaded.');}finally{setUploading(null);}};
+  const canGenerate=Boolean(executionAllowed&&selectedModel&&(prompt.trim()||operation==='lip_sync')&&requirements.every((kind)=>Boolean(assets[kind]?.url))&&!generating);
+  const generate=async()=>{if(!canGenerate||!selectedModel)return;setGenerating(true);setError(null);try{const options:Record<string,unknown>={};Object.entries(parameterValues).forEach(([key,value])=>{const trimmed=value.trim();if(!trimmed)return;if(trimmed==='true'||trimmed==='false')options[key]=trimmed==='true';else if(/^-?\d+(\.\d+)?$/.test(trimmed))options[key]=Number(trimmed);else options[key]=trimmed;});if(assets.image?.url){options.image_url=assets.image.url;if(operation==='reference_image_video')options.reference_image=assets.image.url;}if(assets.audio?.url)options.audio_url=assets.audio.url;if(assets.video?.url)options.video_url=assets.video.url;const generation=await client.createGeneration({type:operation,model:selectedModel.id,prompt:prompt.trim()||undefined,negative_prompt:negativePrompt.trim()||undefined,options});const normalized=generation as Generation;setResult(normalized);setHistory((current)=>[normalized,...current.filter((item)=>item.id!==normalized.id)]);}catch(caught){setError(caught instanceof Error?caught.message:'Generation failed safely.');}finally{setGenerating(false);}};
+  const refreshJobs=async()=>{setError(null);try{setHistory((await client.listHistory(80)) as Generation[]);}catch(caught){setError(caught instanceof Error?caught.message:'Job history could not be refreshed.');}};
+  const cancelJob=async(id:string)=>{try{await client.cancelGeneration(id);await refreshJobs();}catch(caught){setError(caught instanceof Error?caught.message:'The generation could not be cancelled.');}};
+  const createProject=async()=>{if(!projectName.trim())return;setCreatingProject(true);setError(null);try{const project=await client.createLongFormProject({name:projectName.trim(),description:projectDescription.trim()||undefined,script:projectScript.trim()||undefined,target_duration_seconds:Math.max(10,Number(projectDuration)||60),aspect_ratio:projectAspect,resolution:projectResolution,frame_rate:24,production_strategy:projectStrategy,max_project_credits:Math.max(1,Number(projectBudget)||0)||undefined}) as LongFormProject;setProjects((current)=>[project,...current.filter((item)=>item.id!==project.id)]);setSelectedProjectId(project.id);setProjectName('');setProjectDescription('');setProjectScript('');setProjectBudget('');}catch(caught){setError(caught instanceof Error?caught.message:'The long-form project could not be created.');}finally{setCreatingProject(false);}};
+  const addScene=async()=>{if(!selectedProjectId||!scenePrompt.trim())return;setBusyLongForm('scene-add');setError(null);try{await client.addScene(selectedProjectId,{title:sceneTitle.trim()||undefined,narration:sceneNarration.trim()||undefined,visual_prompt:scenePrompt.trim(),duration_seconds:Math.max(1,Number(sceneDuration)||5),model_id:models.find((model)=>(model.operations||[]).includes('text_to_video')&&model.status!=='unavailable')?.id});setSceneTitle('');setScenePrompt('');setSceneNarration('');await loadProject(selectedProjectId);}catch(caught){setError(caught instanceof Error?caught.message:'The scene could not be added.');}finally{setBusyLongForm(null);}};
+  const runLongFormAction=async(key:string,action:()=>Promise<any>)=>{if(!executionAllowed)return;setBusyLongForm(key);setError(null);try{await action();if(selectedProjectId)await loadProject(selectedProjectId);await load();}catch(caught){setError(caught instanceof Error?caught.message:'The long-form action failed safely.');}finally{setBusyLongForm(null);}};
+  const quoteLongForm=async()=>{if(!selectedProject)return;setBusyLongForm('quote');setError(null);try{await client.updateLongFormProject(selectedProject.id,{production_strategy:projectStrategy,max_project_credits:Math.max(1,Number(projectBudget)||Number(selectedProject.max_project_credits)||0)||undefined});const quote=await client.quoteProject(selectedProject.id) as ProjectQuote;setProjectQuote(quote);setProjects((current)=>current.map((item)=>item.id===selectedProject.id?{...item,production_strategy:projectStrategy,max_project_credits:quote.maximum_allowed_project_credits,cost_quote:quote}:item));await loadProject(selectedProject.id);}catch(caught){setError(caught instanceof Error?caught.message:'The project could not be quoted.');}finally{setBusyLongForm(null);}};
 
-  const handleDownload = useCallback(async (url: string, filename: string) => {
-    const response = await fetch(url, { credentials: 'include' });
-    if (!response.ok) throw new Error(`Download failed: ${response.status}`);
-    const blobUrl = URL.createObjectURL(await response.blob());
-    const anchor = document.createElement('a');
-    anchor.href = blobUrl;
-    anchor.download = filename;
-    anchor.click();
-    URL.revokeObjectURL(blobUrl);
-  }, []);
+  const selectedProject=projects.find((project)=>project.id===selectedProjectId); const currentResultUrl=outputUrl(result);
+  if(loading)return <div className="flex min-h-[60vh] items-center justify-center"><Loader2 className="h-8 w-8 animate-spin text-[var(--ep-blue)]"/></div>;
 
-  const renderPreview = (item: HistoryItem) => {
-    if (!item.url) return <div className="h-32 p-3 text-xs text-zinc-500">{item.status}</div>;
-    if (item.type?.includes('video') || item.type === 'lip_sync' || item.type === 'cinema') {
-      return <video src={item.url} className="h-32 w-full object-cover" muted preload="metadata" />;
-    }
-    if (item.type?.includes('audio') || item.type === 'text_to_speech') {
-      return <div className="flex h-32 items-center p-3"><audio src={item.url} controls className="w-full" /></div>;
-    }
-    return <img src={item.url} alt={item.prompt || 'Generated content'} className="h-32 w-full object-cover" />;
-  };
+  return <div className="space-y-6">
+    <header className="ep-panel p-6 sm:p-8"><div className="flex flex-col gap-5 xl:flex-row xl:items-end xl:justify-between"><div className="max-w-3xl"><p className="ep-section-label">Creative Studio</p><h1 className="ep-page-title mt-2">Create campaign media, manage jobs and produce long-form video.</h1><p className="ep-page-copy mt-3 max-w-3xl text-sm leading-6 sm:text-base">Tools are discovered from the live runtime model catalogue. Unsupported operations stay hidden instead of being presented as fake capabilities.</p></div><button type="button" onClick={()=>void load()} className="ep-button-secondary px-4 py-2.5 text-sm"><RefreshCw className="h-4 w-4"/> Refresh capabilities</button></div></header>
+    {error&&<div className="ep-status-danger flex items-start gap-3 rounded-xl border px-4 py-3 text-sm"><AlertCircle className="mt-0.5 h-4 w-4 shrink-0"/><span>{error}</span></div>}
+    <section className={`${executionAllowed?'ep-status-success':'ep-status-warning'} rounded-xl border p-4`}><div className="flex items-start gap-3"><ShieldCheck className="mt-0.5 h-5 w-5 shrink-0"/><div><p className="font-extrabold">{executionAllowed?'Generation can run within workspace policy.':'Generation and rendering are currently paused.'}</p><p className="mt-1 text-xs leading-5 opacity-80">{executionAllowed?'Every paid request still requires the existing Control Centre and Generation Credit checks.':'You can inspect runtime capabilities, prepare prompts, upload source assets, build projects/scenes and review history. Paid/external execution remains blocked by Emergency Stop.'}</p></div></div></section>
+    <div className="flex gap-2 overflow-x-auto rounded-xl border border-[var(--ep-border)] bg-white p-1.5">{([{id:'create',label:'Create Assets',icon:WandSparkles},{id:'longform',label:'Long-form Production',icon:Clapperboard},{id:'jobs',label:'Assets & Jobs',icon:History}] as const).map(({id,label,icon:Icon})=><button key={id} type="button" onClick={()=>setTab(id)} className={tab===id?'flex shrink-0 items-center gap-2 rounded-lg bg-[var(--ep-navy)] px-4 py-2.5 text-sm font-bold text-white':'flex shrink-0 items-center gap-2 rounded-lg px-4 py-2.5 text-sm font-bold text-[var(--ep-text-muted)] hover:bg-[var(--ep-blue-soft)] hover:text-[var(--ep-navy)]'}><Icon className="h-4 w-4"/> {label}</button>)}</div>
 
-  return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-white">{MARKETING_BRAND_NAME} Creative Studio</h1>
-        <p className="mt-1 text-sm text-zinc-400">Generate images, video, audio and long-form projects through GenX.</p>
-      </div>
+    {tab==='create'&&<div className="grid min-w-0 gap-5 xl:grid-cols-[220px_minmax(0,430px)_minmax(0,1fr)]">
+      <aside className="ep-card h-fit p-3"><p className="px-2 pb-2 text-[10px] font-extrabold uppercase tracking-[0.14em] text-[var(--ep-text-soft)]">Runtime tools</p>{operations.length===0?<p className="px-2 py-6 text-sm text-[var(--ep-text-muted)]">No runtime-confirmed media operations are currently available.</p>:<div className="space-y-1">{operations.map((item)=>{const Icon=operationIcon(item);return <button key={item} type="button" onClick={()=>setOperation(item)} className={operation===item?'flex w-full items-center gap-2 rounded-lg bg-[var(--ep-blue-soft)] px-3 py-2.5 text-left text-sm font-extrabold text-[var(--ep-navy)]':'flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-left text-sm font-semibold text-[var(--ep-text-muted)] hover:bg-[var(--ep-surface-subtle)] hover:text-[var(--ep-navy)]'}><Icon className="h-4 w-4 shrink-0 text-[var(--ep-blue)]"/><span className="min-w-0 truncate">{operationLabel(item)}</span></button>;})}</div>}</aside>
+      <section className="ep-card min-w-0 p-5"><p className="ep-section-label">{operation?operationLabel(operation):'Create'}</p><h2 className="mt-1 text-lg font-extrabold text-[var(--ep-navy)]">Generation controls</h2>
+        <label className="mt-5 block text-xs font-extrabold uppercase tracking-wide text-[var(--ep-text-muted)]">Model</label><select value={selectedModel?.id||''} onChange={(event)=>setModelId(event.target.value)} className="ep-input mt-2 min-h-11 px-3 text-sm" disabled={!operationModels.length}>{!operationModels.length&&<option value="">No available model for this operation</option>}{operationModels.map((model)=><option key={model.id} value={model.id}>{model.name}</option>)}</select>
+        {requirements.length>0&&<div className="mt-5 space-y-3"><p className="text-xs font-extrabold uppercase tracking-wide text-[var(--ep-text-muted)]">Source assets</p>{requirements.map((kind)=><label key={kind} className="block rounded-xl border border-dashed border-[var(--ep-border-strong)] bg-[var(--ep-page)] p-4"><div className="flex items-center justify-between gap-3"><div className="flex items-center gap-2">{kind==='image'?<FileImage className="h-4 w-4 text-[var(--ep-blue)]"/>:kind==='audio'?<FileAudio className="h-4 w-4 text-[var(--ep-blue)]"/>:<Film className="h-4 w-4 text-[var(--ep-blue)]"/>}<div><p className="text-sm font-bold capitalize text-[var(--ep-navy)]">{kind} source</p><p className="mt-0.5 max-w-[220px] truncate text-xs text-[var(--ep-text-muted)]">{assets[kind]?.original_name||assets[kind]?.filename||'Choose a supported file'}</p></div></div><span className="ep-button-secondary cursor-pointer px-3 py-2 text-xs">{uploading===kind?<Loader2 className="h-3.5 w-3.5 animate-spin"/>:<Upload className="h-3.5 w-3.5"/>} Upload</span></div><input type="file" className="sr-only" accept={kind==='image'?'image/*':kind==='audio'?'audio/*':'video/*'} onChange={(event)=>void upload(kind,event.target.files?.[0])}/></label>)}</div>}
+        <label className="mt-5 block text-xs font-extrabold uppercase tracking-wide text-[var(--ep-text-muted)]">Prompt</label><textarea value={prompt} onChange={(event)=>setPrompt(event.target.value)} rows={6} maxLength={5000} placeholder="Describe the asset, scene, motion, subject, setting, composition and brand intent." className="ep-input mt-2 resize-y px-3 py-3 text-sm leading-6"/>
+        <label className="mt-4 block text-xs font-extrabold uppercase tracking-wide text-[var(--ep-text-muted)]">Negative prompt <span className="normal-case tracking-normal text-[var(--ep-text-soft)]">(if supported)</span></label><textarea value={negativePrompt} onChange={(event)=>setNegativePrompt(event.target.value)} rows={2} placeholder="What should be avoided?" className="ep-input mt-2 resize-y px-3 py-3 text-sm"/>
+        {Object.keys(parameters).filter((key)=>!hiddenParameterKeys.has(key)).length>0&&<div className="mt-5 grid gap-3 sm:grid-cols-2">{Object.entries(parameters).filter(([key])=>!hiddenParameterKeys.has(key)).map(([key,schema])=>{const values=enumValues(schema);const defaultValue=schema&&typeof schema==='object'&&schema.default!==undefined?String(schema.default):'';return <label key={key} className="text-xs font-extrabold text-[var(--ep-text-muted)]">{fieldLabel(key)}{values.length?<select value={parameterValues[key]??defaultValue} onChange={(event)=>setParameterValues((current)=>({...current,[key]:event.target.value}))} className="ep-input mt-2 min-h-10 px-3 text-sm font-normal"><option value="">Default</option>{values.map((value)=><option key={value} value={value}>{value}</option>)}</select>:<input value={parameterValues[key]??defaultValue} onChange={(event)=>setParameterValues((current)=>({...current,[key]:event.target.value}))} placeholder="Default" className="ep-input mt-2 min-h-10 px-3 text-sm font-normal"/>}</label>;})}</div>}
+        <button type="button" onClick={()=>void generate()} disabled={!canGenerate} className="ep-button-primary mt-6 w-full px-4 py-3 text-sm">{generating?<><Loader2 className="h-4 w-4 animate-spin"/> Creating…</>:<><Sparkles className="h-4 w-4"/> Create {operation?operationLabel(operation):'asset'}</>}</button>{!executionAllowed&&<p className="mt-2 text-center text-xs font-semibold text-[var(--ep-warning)]">Generate remains disabled while Emergency Stop is on.</p>}
+      </section>
+      <section className="ep-card min-w-0 overflow-hidden"><div className="border-b border-[var(--ep-border)] px-5 py-4"><p className="ep-section-label">Preview</p><h2 className="mt-1 text-lg font-extrabold text-[var(--ep-navy)]">Latest result</h2></div><div className="flex min-h-[520px] items-center justify-center bg-[var(--ep-page)] p-4 sm:p-7">{generating?<div className="text-center"><Loader2 className="mx-auto h-9 w-9 animate-spin text-[var(--ep-blue)]"/><p className="mt-3 text-sm font-bold text-[var(--ep-text-muted)]">Creating your asset…</p></div>:currentResultUrl?<div className="w-full">{String(result?.type||operation).includes('video')||String(result?.type)==='lip_sync'?<video src={currentResultUrl} controls playsInline className="max-h-[65vh] w-full rounded-xl bg-black object-contain"/>:String(selectedModel?.outputs||'').includes('audio')?<audio src={currentResultUrl} controls className="w-full"/>:<img src={currentResultUrl} alt={result?.prompt||'Generated asset'} className="max-h-[65vh] w-full rounded-xl bg-white object-contain"/>}<div className="mt-4 flex flex-wrap items-center justify-between gap-3"><span className="inline-flex items-center gap-2 text-sm font-bold text-[var(--ep-success)]"><CheckCircle2 className="h-4 w-4"/> Completed</span><a href={currentResultUrl} target="_blank" rel="noreferrer" className="ep-button-secondary px-3 py-2 text-xs"><Download className="h-3.5 w-3.5"/> Open output</a></div></div>:<div className="max-w-sm text-center"><div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-white text-[var(--ep-blue)] shadow-sm"><Layers3 className="h-7 w-7"/></div><p className="mt-4 font-extrabold text-[var(--ep-navy)]">Production canvas</p><p className="mt-2 text-sm leading-6 text-[var(--ep-text-muted)]">Choose any operation actually advertised by the live runtime catalogue. Model-specific parameters appear from its capability contract.</p></div>}</div></section>
+    </div>}
 
-      {error && (
-        <div className="flex items-center gap-3 rounded-lg border border-red-500/20 bg-red-500/5 px-4 py-3">
-          <AlertCircle className="h-4 w-4 text-red-400" />
-          <p className="text-sm text-red-300">{error}</p>
-          <button onClick={() => setError(null)} className="ml-auto text-red-400 hover:text-red-300"><X className="h-4 w-4" /></button>
-        </div>
-      )}
+    {tab==='longform'&&<div className="grid gap-5 xl:grid-cols-[350px_minmax(0,1fr)]">
+      <div className="space-y-5"><section className="ep-card p-5"><p className="ep-section-label">New production</p><h2 className="mt-1 text-lg font-extrabold text-[var(--ep-navy)]">Create long-form project</h2><div className="mt-4 space-y-3"><input value={projectName} onChange={(event)=>setProjectName(event.target.value)} placeholder="Project name" className="ep-input min-h-10 px-3 text-sm"/><textarea value={projectDescription} onChange={(event)=>setProjectDescription(event.target.value)} rows={2} placeholder="Purpose / creative direction" className="ep-input px-3 py-2.5 text-sm"/><textarea value={projectScript} onChange={(event)=>setProjectScript(event.target.value)} rows={5} placeholder="Script or long-form narrative (optional)" className="ep-input px-3 py-2.5 text-sm"/><div className="grid grid-cols-2 gap-2"><label className="text-xs font-bold text-[var(--ep-text-muted)]">Target seconds<input type="number" min="10" value={projectDuration} onChange={(event)=>setProjectDuration(event.target.value)} className="ep-input mt-1 min-h-10 px-3 text-sm font-normal"/></label><label className="text-xs font-bold text-[var(--ep-text-muted)]">Aspect<select value={projectAspect} onChange={(event)=>setProjectAspect(event.target.value)} className="ep-input mt-1 min-h-10 px-3 text-sm font-normal"><option>16:9</option><option>9:16</option><option>1:1</option></select></label></div><label className="text-xs font-bold text-[var(--ep-text-muted)]">Resolution<select value={projectResolution} onChange={(event)=>setProjectResolution(event.target.value)} className="ep-input mt-1 min-h-10 px-3 text-sm font-normal"><option>1920x1080</option><option>1080x1920</option><option>1080x1080</option></select></label></div><button type="button" onClick={()=>void createProject()} disabled={!projectName.trim()||creatingProject} className="ep-button-primary mt-4 w-full px-4 py-2.5 text-sm">{creatingProject?<Loader2 className="h-4 w-4 animate-spin"/>:<Plus className="h-4 w-4"/>} Create project</button></section>
+      <section className="ep-card overflow-hidden"><div className="border-b border-[var(--ep-border)] px-4 py-3"><p className="text-sm font-extrabold text-[var(--ep-navy)]">Projects</p></div>{projects.length===0?<p className="p-5 text-sm text-[var(--ep-text-muted)]">No long-form projects yet.</p>:<div className="divide-y divide-[var(--ep-border)]">{projects.map((project)=><button key={project.id} type="button" onClick={()=>{setSelectedProjectId(project.id);setProjectQuote(project.cost_quote||null);setProjectStrategy(project.production_strategy||'smart');setProjectBudget(project.max_project_credits?String(project.max_project_credits):'');}} className={selectedProjectId===project.id?'w-full bg-[var(--ep-blue-soft)] px-4 py-3 text-left':'w-full px-4 py-3 text-left hover:bg-[var(--ep-page)]'}><div className="flex items-center justify-between gap-2"><p className="truncate text-sm font-extrabold text-[var(--ep-navy)]">{project.name}</p><span className="text-[10px] font-bold uppercase text-[var(--ep-text-soft)]">{project.status||'draft'}</span></div><p className="mt-1 text-xs text-[var(--ep-text-muted)]">{project.target_duration_seconds||60}s · {project.aspect_ratio||'16:9'} · {project.resolution||'1920x1080'}</p></button>)}</div>}</section></div>
+      <div className="space-y-5">{!selectedProject?<div className="ep-card py-20 text-center"><FolderKanban className="mx-auto h-9 w-9 text-[var(--ep-text-soft)]"/><p className="mt-3 text-sm font-semibold text-[var(--ep-text-muted)]">Select or create a long-form project.</p></div>:<>
+        <section className="ep-card p-5 sm:p-6"><div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between"><div><p className="ep-section-label">Long-form project</p><h2 className="mt-1 text-2xl font-extrabold text-[var(--ep-navy)]">{selectedProject.name}</h2><p className="mt-2 text-sm leading-6 text-[var(--ep-text-muted)]">{selectedProject.description||'Build scenes, narration and visual prompts, then generate scene media and create the final local render when execution is enabled.'}</p></div><div className="flex flex-wrap gap-2"><button type="button" disabled={!executionAllowed||busyLongForm!==null||scenes.length===0} onClick={()=>void runLongFormAction('project-generate',()=>client.generateProject(selectedProject.id))} className="ep-button-primary px-3 py-2 text-xs"><Film className="h-3.5 w-3.5"/> Generate scenes</button><button type="button" disabled={!executionAllowed||busyLongForm!==null||scenes.length===0} onClick={()=>void runLongFormAction('render',()=>client.createRender(selectedProject.id))} className="ep-button-secondary px-3 py-2 text-xs"><Clapperboard className="h-3.5 w-3.5"/> Final render</button></div></div></section>
+        <section className="ep-card p-5"><div className="flex flex-col gap-4 lg:flex-row lg:items-end"><label className="flex-1 text-xs font-bold text-[var(--ep-text-muted)]">Production strategy<select value={projectStrategy} onChange={(event)=>{setProjectStrategy(event.target.value);setProjectQuote(null);}} className="ep-input mt-1 min-h-10 px-3 text-sm font-normal"><option value="economy">Economy — still-motion</option><option value="smart">Smart / Hybrid — default</option><option value="cinematic">Cinematic — more AI motion</option><option value="premium">Premium — maximum quality</option></select></label><label className="flex-1 text-xs font-bold text-[var(--ep-text-muted)]">Maximum project credits<input type="number" min="1" step="1" value={projectBudget} onChange={(event)=>{setProjectBudget(event.target.value);setProjectQuote(null);}} placeholder="Required" className="ep-input mt-1 min-h-10 px-3 text-sm font-normal"/></label><button type="button" disabled={busyLongForm!==null||scenes.length===0||Number(projectBudget)<1} onClick={()=>void quoteLongForm()} className="ep-button-secondary px-4 py-2.5 text-sm">{busyLongForm==='quote'?<Loader2 className="h-4 w-4 animate-spin"/>:<CircleDollarSign className="h-4 w-4"/>} Calculate project quote</button></div>{projectQuote&&<div className={`mt-4 rounded-xl border p-4 ${projectQuote.within_budget?'ep-status-success':'ep-status-danger'}`}><div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4"><div><p className="text-xs font-bold opacity-70">Scenes / duration</p><p className="mt-1 font-extrabold">{projectQuote.scene_count} / {projectQuote.planned_duration_seconds}s</p></div><div><p className="text-xs font-bold opacity-70">Still-motion / AI video</p><p className="mt-1 font-extrabold">{projectQuote.still_motion_scenes} / {projectQuote.ai_video_scenes}</p></div><div><p className="text-xs font-bold opacity-70">Visual credits</p><p className="mt-1 font-extrabold">{projectQuote.image_generation_credits} image + {projectQuote.ai_video_credits} video</p></div><div><p className="text-xs font-bold opacity-70">Total / ceiling</p><p className="mt-1 font-extrabold">{projectQuote.total_estimated_credits} / {projectQuote.maximum_allowed_project_credits??'not set'}</p></div></div><p className="mt-3 text-xs font-semibold">Narration {projectQuote.narration_credits} · music/audio {projectQuote.music_audio_credits} · approx. {projectQuote.approximate_billing_value.currency} {projectQuote.approximate_billing_value.amount.toFixed(2)}. {projectQuote.within_budget?'Approved ceiling covers this estimate.':'Generation is blocked until the estimate is within the explicit ceiling.'}</p></div>}</section>
+        <section className="ep-card p-5"><p className="ep-section-label">Add scene</p><div className="mt-4 grid gap-3 md:grid-cols-2"><input value={sceneTitle} onChange={(event)=>setSceneTitle(event.target.value)} placeholder="Scene title" className="ep-input min-h-10 px-3 text-sm"/><input type="number" min="1" value={sceneDuration} onChange={(event)=>setSceneDuration(event.target.value)} placeholder="Seconds" className="ep-input min-h-10 px-3 text-sm"/><textarea value={scenePrompt} onChange={(event)=>setScenePrompt(event.target.value)} rows={3} placeholder="Visual prompt / shot direction" className="ep-input px-3 py-2.5 text-sm md:col-span-2"/><textarea value={sceneNarration} onChange={(event)=>setSceneNarration(event.target.value)} rows={2} placeholder="Narration (optional)" className="ep-input px-3 py-2.5 text-sm md:col-span-2"/></div><button type="button" disabled={!scenePrompt.trim()||busyLongForm==='scene-add'} onClick={()=>void addScene()} className="ep-button-secondary mt-3 px-3 py-2 text-xs">{busyLongForm==='scene-add'?<Loader2 className="h-3.5 w-3.5 animate-spin"/>:<Plus className="h-3.5 w-3.5"/>} Add scene</button></section>
+        <section className="ep-card overflow-hidden"><div className="flex items-center justify-between border-b border-[var(--ep-border)] px-5 py-4"><div><p className="ep-section-label">Scene production</p><h3 className="mt-1 font-extrabold text-[var(--ep-navy)]">{scenes.length} scene{scenes.length===1?'':'s'}</h3></div><button type="button" disabled={!executionAllowed||busyLongForm!==null} onClick={()=>void runLongFormAction('retry',()=>client.retryFailedScenes(selectedProject.id))} className="ep-button-secondary px-3 py-2 text-xs"><RotateCcw className="h-3.5 w-3.5"/> Retry failed</button></div>{scenes.length===0?<p className="p-6 text-sm text-[var(--ep-text-muted)]">Add scenes to build this production.</p>:<div className="divide-y divide-[var(--ep-border)]">{scenes.map((scene)=><article key={scene.id} className="p-5"><div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between"><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><span className="text-xs font-extrabold text-[var(--ep-blue)]">Scene {scene.scene_number||'—'}</span><span className="rounded-full bg-[var(--ep-surface-subtle)] px-2 py-0.5 text-[10px] font-bold uppercase text-[var(--ep-text-muted)]">{scene.status||'draft'}</span></div><h4 className="mt-2 font-extrabold text-[var(--ep-navy)]">{scene.title||'Untitled scene'}</h4><p className="mt-1 text-sm leading-5 text-[var(--ep-text-muted)]">{scene.visual_prompt||'No visual prompt'}</p>{scene.narration&&<p className="mt-2 text-xs leading-5 text-[var(--ep-text-soft)]">Narration: {scene.narration}</p>}{scene.error_message&&<p className="mt-2 text-xs font-bold text-[var(--ep-danger)]">{scene.error_message}</p>}</div><button type="button" disabled={!executionAllowed||busyLongForm!==null||!scene.visual_prompt} onClick={()=>void runLongFormAction(`scene:${scene.id}`,()=>client.generateScene(scene.id))} className="ep-button-secondary shrink-0 px-3 py-2 text-xs">{busyLongForm===`scene:${scene.id}`?<Loader2 className="h-3.5 w-3.5 animate-spin"/>:<Sparkles className="h-3.5 w-3.5"/>} Generate</button></div>{scene.generated_clip_url&&<video src={scene.generated_clip_url} controls playsInline className="mt-4 max-h-72 w-full rounded-xl bg-black object-contain"/>}</article>)}</div>}</section>
+        <section className="ep-card overflow-hidden"><div className="border-b border-[var(--ep-border)] px-5 py-4"><p className="ep-section-label">Renders</p><h3 className="mt-1 font-extrabold text-[var(--ep-navy)]">Final production history</h3></div>{renders.length===0?<p className="p-6 text-sm text-[var(--ep-text-muted)]">No final renders yet.</p>:<div className="divide-y divide-[var(--ep-border)]">{renders.map((render)=>{const url=outputUrl(render);return <div key={render.id} className="flex flex-col gap-3 p-5 sm:flex-row sm:items-center sm:justify-between"><div><p className="text-sm font-extrabold text-[var(--ep-navy)]">Render {render.id.slice(0,8)}</p><p className="mt-1 text-xs text-[var(--ep-text-muted)]">{render.status||'queued'}{render.progress!==undefined?` · ${render.progress}%`:''}</p>{render.error_message&&<p className="mt-1 text-xs font-bold text-[var(--ep-danger)]">{render.error_message}</p>}</div>{url&&<a href={url} target="_blank" rel="noreferrer" className="ep-button-secondary px-3 py-2 text-xs"><Download className="h-3.5 w-3.5"/> Open render</a>}</div>;})}</div>}</section>
+      </>}</div>
+    </div>}
 
-      <div className="flex flex-wrap items-center gap-1 rounded-lg bg-white/[0.03] p-1">
-        {tabs.map((tab) => (
-          <button
-            key={tab.id}
-            onClick={() => setActiveTab(tab.id)}
-            className={`flex items-center gap-2 rounded-md px-4 py-2 text-sm font-medium transition-colors ${activeTab === tab.id ? 'bg-brand-500/10 text-brand-400' : 'text-zinc-400 hover:text-white'}`}
-          >
-            <tab.icon className="h-4 w-4" />
-            {tab.label}
-          </button>
-        ))}
-      </div>
-
-      <div className="min-h-[600px]">
-        {activeTab === 'image' && <ImageStudio studioClient={studioClient} onGenerationComplete={handleGenerationComplete} historyItems={history.filter((item) => item.type?.includes('image'))} />}
-        {activeTab === 'video' && <VideoStudio studioClient={studioClient} onGenerationComplete={handleGenerationComplete} historyItems={history.filter((item) => item.type?.includes('video'))} />}
-        {activeTab === 'lipsync' && <LipSyncStudio studioClient={studioClient} onGenerationComplete={handleGenerationComplete} historyItems={history.filter((item) => item.type === 'lip_sync')} />}
-        {activeTab === 'cinema' && <CinemaStudio studioClient={studioClient} onGenerationComplete={handleGenerationComplete} historyItems={history.filter((item) => item.type === 'cinema')} />}
-        {activeTab === 'longform' && <LongFormStudio studioClient={studioClient} />}
-      </div>
-
-      {history.length > 0 && activeTab !== 'longform' && (
-        <div className="rounded-xl border border-white/[0.06] bg-surface-100 p-6">
-          <h2 className="mb-4 flex items-center gap-2 text-lg font-semibold text-white"><History className="h-5 w-5 text-brand-400" />Server History</h2>
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            {history.slice(0, 12).map((item) => (
-              <div key={item.id} className="group overflow-hidden rounded-lg border border-white/[0.06] bg-white/[0.02]">
-                {renderPreview(item)}
-                <div className="p-3">
-                  <p className="truncate text-xs text-zinc-400">{item.prompt || item.type || 'Generation'}</p>
-                  <div className="mt-1 flex items-center justify-between">
-                    <span className="text-[10px] text-zinc-500">{item.status} · {new Date(item.timestamp).toLocaleTimeString()}</span>
-                    {item.url && (
-                      <button aria-label="Download generated asset" onClick={() => handleDownload(item.url!, `generated-${item.id}`)} className="rounded p-1 text-zinc-400 opacity-0 transition-opacity hover:text-white focus:opacity-100 group-hover:opacity-100">
-                        <Download className="h-3.5 w-3.5" />
-                      </button>
-                    )}
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
-  );
+    {tab==='jobs'&&<section className="ep-card overflow-hidden"><div className="flex flex-col gap-3 border-b border-[var(--ep-border)] px-5 py-4 sm:flex-row sm:items-center sm:justify-between"><div><p className="ep-section-label">Assets & Jobs</p><h2 className="mt-1 text-lg font-extrabold text-[var(--ep-navy)]">Generation history</h2></div><button type="button" onClick={()=>void refreshJobs()} className="ep-button-secondary px-3 py-2 text-xs"><RefreshCw className="h-3.5 w-3.5"/> Refresh</button></div>{history.length===0?<div className="py-16 text-center"><History className="mx-auto h-8 w-8 text-[var(--ep-text-soft)]"/><p className="mt-3 text-sm font-semibold text-[var(--ep-text-muted)]">No media jobs yet.</p></div>:<div className="divide-y divide-[var(--ep-border)]">{history.map((item)=>{const url=outputUrl(item);const pending=['pending','queued','processing'].includes(String(item.status));return <article key={item.id} className="grid gap-4 p-5 md:grid-cols-[minmax(0,1fr)_auto] md:items-center"><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><p className="font-extrabold text-[var(--ep-navy)]">{operationLabel(String(item.type||'generation'))}</p><span className="rounded-full bg-[var(--ep-surface-subtle)] px-2.5 py-1 text-[10px] font-extrabold uppercase text-[var(--ep-text-muted)]">{item.status||'unknown'}{item.progress?` · ${item.progress}%`:''}</span></div><p className="mt-1 line-clamp-2 text-sm text-[var(--ep-text-muted)]">{item.prompt||'Media generation'}</p>{item.error_message&&<p className="mt-2 text-xs font-bold text-[var(--ep-danger)]">{item.error_message}</p>}<p className="mt-2 text-[11px] text-[var(--ep-text-soft)]">{item.created_at?new Date(item.created_at).toLocaleString():item.id}</p></div><div className="flex gap-2">{url&&<a href={url} target="_blank" rel="noreferrer" className="ep-button-secondary px-3 py-2 text-xs"><Download className="h-3.5 w-3.5"/> Output</a>}{pending&&<button type="button" onClick={()=>void cancelJob(item.id)} className="inline-flex items-center gap-1.5 rounded-[var(--ep-radius-sm)] border border-[#e5b9b4] px-3 py-2 text-xs font-bold text-[var(--ep-danger)] hover:bg-[var(--ep-danger-soft)]"><CircleStop className="h-3.5 w-3.5"/> Cancel</button>}</div></article>;})}</div>}</section>}
+  </div>;
 }

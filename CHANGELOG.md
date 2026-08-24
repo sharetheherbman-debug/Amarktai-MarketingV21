@@ -5,6 +5,9 @@
 - Consolidated active product, architecture, Studio, autonomy, connector, deployment, operations, testing, and handover documentation into one canonical set.
 - Removed superseded phase boards, rescue snapshots, duplicate VPS/backup/admin runbooks, and obsolete product-specific connector instructions from the active branch; Git history retains them.
 - Reconciliation work continues on the controlled `rescue/client-handover-marketing-2026-08-24` branch and will be frozen only after full acceptance.
+- Restored the intended client UX while retaining the reusable connector, secure HttpOnly-cookie authentication, generic product scopes, and white-label configuration.
+- Added forward-only migration `036_longform_cost_governor.sql`, durable scene production intent, quote/budget/wallet/safety enforcement, and still-motion retry asset reuse.
+- Normalized API bases to `/api/v1`, added cookie refresh/retry and rate-limit-aware polling, and added quote-first opt-in provider acceptance.
 
 All notable changes to AmarktAI Marketing are documented in this file.
 

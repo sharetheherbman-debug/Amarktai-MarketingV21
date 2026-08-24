@@ -6,7 +6,7 @@ Monitor API/web health, PostgreSQL, Redis authentication/connectivity, queue dep
 
 ## Workers
 
-The production stack defines generation, long-form still-motion, and render workers. Each worker must use the configured authenticated Redis endpoint, canonical queue names, bounded concurrency, safe retry classification, cancellation, deterministic idempotency, durable storage, credit reversal, heartbeat, and graceful shutdown.
+The production stack defines `generation-worker`, `longform-still-worker`, and `render-worker`. Each worker must use the configured authenticated Redis endpoint, canonical queue names, bounded concurrency, safe retry classification, cancellation, deterministic idempotency, durable storage, credit reversal, heartbeat, and graceful shutdown.
 
 Workers are activated separately during deployment. Do not start production workers merely because images build.
 

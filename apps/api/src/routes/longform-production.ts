@@ -22,6 +22,8 @@ const PROJECT_COLUMNS = new Map<string, { column: string; json?: boolean }>([
   ['caption_settings', { column: 'caption_settings', json: true }],
   ['metadata', { column: 'metadata', json: true }],
   ['status', { column: 'status' }],
+  ['production_strategy', { column: 'production_strategy' }],
+  ['max_project_credits', { column: 'max_project_credits' }],
 ]);
 
 async function resolveOrganization(req: AuthRequest, source: 'body' | 'query' = 'body') {

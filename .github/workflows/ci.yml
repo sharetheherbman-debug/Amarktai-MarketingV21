@@ -2,9 +2,9 @@ name: CI/CD Pipeline
 
 on:
   push:
-    branches: [master, development, phase-1/small-medium-completion]
+    branches: [master, development, phase-1/small-medium-completion, rescue/client-handover-marketing-2026-08-24, release-candidate/marketing-client-handover-2026-08-24]
   pull_request:
-    branches: [master, development, phase-1/small-medium-completion]
+    branches: [master, development, phase-1/small-medium-completion, rescue/client-handover-marketing-2026-08-24, release-candidate/marketing-client-handover-2026-08-24]
 
 permissions:
   contents: write
@@ -150,10 +150,11 @@ jobs:
         run: mkdir -p apps/api/dist/db && cp -R apps/api/src/db/migrations apps/api/dist/db/migrations
       - name: Execute every migration in filename order
         run: node apps/api/dist/db/migrate.js
-      - name: Verify latest GBP credit migration was applied
+      - name: Verify production history and long-form governor migration were applied
         run: |
           applied=$(psql "$DATABASE_URL" -Atc "SELECT COUNT(*) FROM schema_migrations WHERE filename='023_genx_gbp_credit_wallet.sql'")
           test "$applied" = "1"
+          test "$(psql "$DATABASE_URL" -Atc "SELECT COUNT(*) FROM schema_migrations WHERE filename='036_longform_cost_governor.sql'")" = "1"
           psql "$DATABASE_URL" -Atc "SELECT filename FROM schema_migrations ORDER BY filename"
 
   docker:
@@ -206,6 +207,10 @@ jobs:
           nginx:1.27-alpine nginx -t
       - name: Build API Docker image
         run: docker build -f apps/api/Dockerfile -t amarktai-api:test .
+      - name: Build generation worker Docker image
+        run: docker build -f apps/api/Dockerfile -t amarktai-generation-worker:test .
+      - name: Build long-form still worker Docker image
+        run: docker build -f apps/api/Dockerfile -t amarktai-longform-still-worker:test .
       - name: Build render worker Docker image
         run: docker build -f apps/api/Dockerfile.render -t amarktai-render-worker:test .
       - name: Build Web Docker image

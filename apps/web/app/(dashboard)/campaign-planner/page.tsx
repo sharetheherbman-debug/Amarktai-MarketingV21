@@ -3,12 +3,15 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Megaphone,
+  Plus,
   Loader2,
   AlertCircle,
   X,
   Sparkles,
+  Calendar,
   DollarSign,
   Target,
+  BarChart3,
   CheckCircle2,
   ChevronDown,
   ChevronUp,
@@ -23,7 +26,6 @@ import type { ApiResponse } from '@/types';
 
 interface CampaignPlan {
   id: string; name: string; goal: string | null; status: string; budget_cents: number;
-  product_line: string | null; product_lines: string[];
   ai_generated: boolean; created_at: string; strategy: Record<string, any>; channels: Record<string, any>;
   brief: Record<string, any>; creative_concept: Record<string, any>; messaging_plan: Record<string, any>;
   content_calendar: Array<Record<string, any>>; asset_requirements: Array<Record<string, any>>;
@@ -34,15 +36,12 @@ interface AssetRun { id: string; brief_id: string; variant_number: number; gener
 
 const initialForm = {
   name: '', goal: '', objective_stage: 'conversion', target_audience: '', budget_cents: 0,
-  product_scopes: '', products: '', location: '', duration_weeks: 4, offer: '', value_proposition: '',
+  products: '', location: '', duration_weeks: 4, offer: '', value_proposition: '',
+  product_lines: '',
   proof_points: '', calls_to_action: '', channels: ['social', 'email', 'content'],
   brand_restrictions: '', prohibited_claims: '', success_criteria: '',
   generation_credit_limit: 0, language: 'en-GB',
 };
-
-function parseProductScopes(value: string): string[] {
-  return [...new Set(value.split(',').map(item => item.trim().toLowerCase()).filter(Boolean))];
-}
 
 export default function CampaignPlannerPage() {
   const [plans, setPlans] = useState<CampaignPlan[]>([]);
@@ -80,10 +79,9 @@ export default function CampaignPlannerPage() {
     if (!form.name || !form.goal || !orgId) return;
     try {
       setGenerating(true);
-      const { product_scopes, ...baseForm } = form;
-      const payload = {
-        ...baseForm,
-        product_lines: parseProductScopes(product_scopes),
+          const payload = {
+            ...form,
+            product_lines: form.product_lines.split(',').map(value => value.trim().toLowerCase()).filter(Boolean),
         proof_points: form.proof_points.split('\n').map(value => value.trim()).filter(Boolean),
         calls_to_action: form.calls_to_action.split('\n').map(value => value.trim()).filter(Boolean),
         brand_restrictions: form.brand_restrictions.split('\n').map(value => value.trim()).filter(Boolean),
@@ -160,7 +158,7 @@ export default function CampaignPlannerPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-white">Campaign Planner</h1>
-          <p className="mt-1 text-sm text-zinc-400">Turn grounded business facts into one coordinated, owner-approved campaign for one or several products/services.</p>
+          <p className="mt-1 text-sm text-zinc-400">Turn a grounded business brief into one coordinated, owner-approved campaign.</p>
         </div>
         <button onClick={() => setShowGenerate(true)}
           className="inline-flex items-center gap-2 rounded-lg bg-brand-500 px-4 py-2.5 text-sm font-semibold text-white hover:bg-brand-400">
@@ -194,20 +192,19 @@ export default function CampaignPlannerPage() {
                 className="h-10 w-full rounded-lg border border-white/[0.06] bg-surface-200 px-4 text-sm text-white outline-none focus:border-brand-500/50">
                 {['awareness','consideration','conversion','retention','reactivation'].map(stage => <option key={stage} value={stage}>{stage[0].toUpperCase()+stage.slice(1)}</option>)}
               </select></div>
-            <div><label className="block text-sm font-medium text-zinc-300 mb-1.5">Product / service scopes</label>
-              <input type="text" value={form.product_scopes} onChange={e => setForm({ ...form, product_scopes: e.target.value })}
-                placeholder="crm-pro, consulting — comma separated"
-                className="h-10 w-full rounded-lg border border-white/[0.06] bg-white/[0.03] px-4 text-sm text-white placeholder-zinc-500 outline-none focus:border-brand-500/50" />
-              <p className="mt-1 text-[11px] text-zinc-500">Use the lowercase keys declared by the connected application. Multiple scopes create one combined campaign.</p></div>
             <div><label className="block text-sm font-medium text-zinc-300 mb-1.5">Target Audience</label>
               <input type="text" value={form.target_audience} onChange={e => setForm({ ...form, target_audience: e.target.value })} placeholder="Who they are, what they need and what may stop them"
                 className="h-10 w-full rounded-lg border border-white/[0.06] bg-white/[0.03] px-4 text-sm text-white placeholder-zinc-500 outline-none focus:border-brand-500/50" /></div>
             <div><label className="block text-sm font-medium text-zinc-300 mb-1.5">Advertising budget (GBP)</label>
               <input type="number" min="0" value={form.budget_cents / 100} onChange={e => setForm({ ...form, budget_cents: Math.round(Number(e.target.value || 0) * 100) })} placeholder="500"
                 className="h-10 w-full rounded-lg border border-white/[0.06] bg-white/[0.03] px-4 text-sm text-white placeholder-zinc-500 outline-none focus:border-brand-500/50" /></div>
-            <div><label className="block text-sm font-medium text-zinc-300 mb-1.5">Products/Services</label>
+                <div><label className="block text-sm font-medium text-zinc-300 mb-1.5">Products/Services</label>
               <input type="text" value={form.products} onChange={e => setForm({ ...form, products: e.target.value })} placeholder="Use exact approved product or service facts"
-                className="h-10 w-full rounded-lg border border-white/[0.06] bg-white/[0.03] px-4 text-sm text-white placeholder-zinc-500 outline-none focus:border-brand-500/50" /></div>
+                    className="h-10 w-full rounded-lg border border-white/[0.06] bg-white/[0.03] px-4 text-sm text-white placeholder-zinc-500 outline-none focus:border-brand-500/50" /></div>
+                <div><label className="block text-sm font-medium text-zinc-300 mb-1.5">Product / service scopes</label>
+                  <input type="text" value={form.product_lines} onChange={e => setForm({ ...form, product_lines: e.target.value })} placeholder="crm-pro, consulting" aria-describedby="product-scope-help"
+                    className="h-10 w-full rounded-lg border border-white/[0.06] bg-white/[0.03] px-4 text-sm text-white placeholder-zinc-500 outline-none focus:border-brand-500/50" />
+                  <p id="product-scope-help" className="mt-1 text-xs text-zinc-500">Use the lowercase keys declared by the connected application, separated by commas.</p></div>
             <div><label className="block text-sm font-medium text-zinc-300 mb-1.5">Location</label>
               <input type="text" value={form.location} onChange={e => setForm({ ...form, location: e.target.value })} placeholder="Global"
                 className="h-10 w-full rounded-lg border border-white/[0.06] bg-white/[0.03] px-4 text-sm text-white placeholder-zinc-500 outline-none focus:border-brand-500/50" /></div>
@@ -261,18 +258,16 @@ export default function CampaignPlannerPage() {
           {plans.map(plan => {
             const expanded = expandedId === plan.id;
             const missing = Array.isArray(plan.constraints?.missing_information) ? plan.constraints.missing_information : [];
-            const scopes = Array.isArray(plan.product_lines) && plan.product_lines.length ? plan.product_lines : plan.product_line ? [plan.product_line] : [];
             return (
             <div key={plan.id} className="rounded-xl border border-white/[0.06] bg-surface-100 p-5 transition-all hover:border-brand-500/20">
               <div className="flex items-start justify-between">
                 <div>
                   <h3 className="text-sm font-semibold text-white">{plan.name}</h3>
                   {plan.goal && <p className="mt-0.5 text-xs text-zinc-500">{plan.goal}</p>}
-                  <div className="mt-2 flex flex-wrap items-center gap-4 text-xs text-zinc-400">
+                  <div className="mt-2 flex items-center gap-4 text-xs text-zinc-400">
                     {plan.budget_cents > 0 && <span className="flex items-center gap-1"><DollarSign className="h-3 w-3" />£{(plan.budget_cents / 100).toLocaleString()}</span>}
                     <span>{new Date(plan.created_at).toLocaleDateString()}</span>
                     <span>Version {plan.version}</span>
-                    {scopes.length > 0 && <span className="rounded-full bg-brand-500/10 px-2 py-0.5 font-semibold text-brand-300">{scopes.join(' + ')}</span>}
                     <span>{plan.asset_requirements?.length || 0} asset briefs</span>
                   </div>
                 </div>

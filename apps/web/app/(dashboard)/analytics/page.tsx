@@ -1,90 +1,28 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { AlertCircle, BarChart3, Loader2, RefreshCw, TrendingUp, Users, Zap } from 'lucide-react';
+import Link from 'next/link';
+import { AlertCircle, BarChart3, Loader2, Plug, RefreshCw, TrendingUp, Users, Zap } from 'lucide-react';
 import { api } from '@/lib/api';
 import type { ApiResponse } from '@/types';
 
-interface AnalyticsSource {
-  id: string;
-  connection_id: string;
-  connection_name: string;
-  provider_name: string;
-  period_start: string;
-  period_end: string;
-  metrics: Record<string, number> | string;
-  collected_at: string;
-}
+type AnalyticsSource={id:string;connection_id:string;connection_name:string;provider_name:string;period_start:string;period_end:string;metrics:Record<string,number>|string;collected_at:string};
+type AnalyticsSummary={totals:Record<string,number>;sources:AnalyticsSource[]};
+type Connection={id:string;name:string;provider_name:string;health_status:string;last_sync_at:string|null};
+function metrics(value:Record<string,number>|string):Record<string,number>{if(typeof value==='string'){try{return JSON.parse(value) as Record<string,number>;}catch{return {};}}return value||{};}
 
-interface AnalyticsSummary {
-  totals: Record<string, number>;
-  sources: AnalyticsSource[];
-}
+export default function AnalyticsPage(){
+  const [summary,setSummary]=useState<AnalyticsSummary>({totals:{},sources:[]});const [connections,setConnections]=useState<Connection[]>([]);const [loading,setLoading]=useState(true);const [busyId,setBusyId]=useState<string|null>(null);const [error,setError]=useState<string|null>(null);
+  const load=useCallback(async()=>{setLoading(true);setError(null);try{const [summaryResponse,connectionResponse]=await Promise.all([api.get<ApiResponse<AnalyticsSummary>>('/integrations/analytics/summary'),api.get<ApiResponse<Connection[]>>('/integrations/connections',{params:{category:'analytics'}})]);setSummary(summaryResponse.data||{totals:{},sources:[]});setConnections(connectionResponse.data||[]);}catch(caught){setError(caught instanceof Error?caught.message:'Analytics could not be loaded.');}finally{setLoading(false);}},[]);
+  useEffect(()=>{void load();},[load]);
+  const sync=async(id:string)=>{setBusyId(id);setError(null);try{await api.post(`/integrations/analytics/connections/${id}/sync`,{body:{}});await load();}catch(caught){setError(caught instanceof Error?caught.message:'Analytics sync failed.');}finally{setBusyId(null);}};
+  const cards=[{label:'Users / visitors',value:summary.totals.users??summary.totals.visitors??0,icon:Users},{label:'Sessions',value:summary.totals.sessions??0,icon:TrendingUp},{label:'Pageviews',value:summary.totals.pageviews??0,icon:BarChart3},{label:'Conversions',value:summary.totals.conversions??0,icon:Zap}];
 
-interface Connection {
-  id: string;
-  name: string;
-  provider_name: string;
-  health_status: string;
-  last_sync_at: string | null;
-}
-
-function metrics(value: Record<string, number> | string): Record<string, number> {
-  if (typeof value === 'string') {
-    try { return JSON.parse(value) as Record<string, number>; } catch { return {}; }
-  }
-  return value || {};
-}
-
-export default function AnalyticsPage() {
-  const [summary, setSummary] = useState<AnalyticsSummary>({ totals: {}, sources: [] });
-  const [connections, setConnections] = useState<Connection[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [busyId, setBusyId] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const [summaryResponse, connectionResponse] = await Promise.all([
-        api.get<ApiResponse<AnalyticsSummary>>('/integrations/analytics/summary'),
-        api.get<ApiResponse<Connection[]>>('/integrations/connections', { params: { category: 'analytics' } }),
-      ]);
-      setSummary(summaryResponse.data || { totals: {}, sources: [] });
-      setConnections(connectionResponse.data || []);
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'Failed to load analytics.');
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => { void load(); }, [load]);
-
-  const sync = async (id: string) => {
-    setBusyId(id);
-    setError(null);
-    try { await api.post(`/integrations/analytics/connections/${id}/sync`, { body: {} }); await load(); }
-    catch (caught) { setError(caught instanceof Error ? caught.message : 'Analytics sync failed.'); }
-    finally { setBusyId(null); }
-  };
-
-  const cards = [
-    { label: 'Users / Visitors', value: summary.totals.users ?? summary.totals.visitors ?? 0, icon: Users },
-    { label: 'Sessions', value: summary.totals.sessions ?? 0, icon: TrendingUp },
-    { label: 'Pageviews', value: summary.totals.pageviews ?? 0, icon: BarChart3 },
-    { label: 'Conversions', value: summary.totals.conversions ?? 0, icon: Zap },
-  ];
-
-  return (
-    <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-3"><div><h1 className="text-2xl font-bold text-white">External Analytics</h1><p className="mt-1 text-sm text-zinc-400">Synchronized GA4, Plausible and authenticated JSON metrics.</p></div><button type="button" onClick={() => void load()} className="inline-flex items-center gap-2 rounded-lg border border-white/10 px-4 py-2 text-sm text-white"><RefreshCw className="h-4 w-4" />Refresh</button></div>
-      {error && <div className="flex items-center gap-2 rounded-lg border border-red-500/20 bg-red-500/5 p-3 text-sm text-red-300"><AlertCircle className="h-4 w-4" />{error}</div>}
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">{cards.map((card) => <article key={card.label} className="rounded-xl border border-white/[0.06] bg-surface-100 p-5"><div className="flex items-center justify-between"><p className="text-sm text-zinc-400">{card.label}</p><card.icon className="h-4 w-4 text-brand-400" /></div><p className="mt-3 text-3xl font-bold text-white">{Number(card.value).toLocaleString()}</p></article>)}</div>
-
-      <section><h2 className="mb-3 text-sm font-semibold text-white">Analytics connections</h2><div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">{connections.map((connection) => <article key={connection.id} className="rounded-xl border border-white/[0.06] bg-surface-100 p-5"><h3 className="text-sm font-semibold text-white">{connection.name}</h3><p className="text-xs text-zinc-500">{connection.provider_name} · {connection.health_status}</p><p className="mt-2 text-xs text-zinc-500">{connection.last_sync_at ? `Last sync ${new Date(connection.last_sync_at).toLocaleString()}` : 'Never synchronized'}</p><button type="button" onClick={() => void sync(connection.id)} className="mt-4 inline-flex items-center gap-2 rounded bg-brand-500 px-3 py-1.5 text-xs text-white">{busyId === connection.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}Sync 30 days</button></article>)}</div>{connections.length === 0 && <p className="rounded-xl border border-dashed border-white/10 p-8 text-center text-sm text-zinc-500">Add an analytics provider from Integrations.</p>}</section>
-
-      <section className="overflow-hidden rounded-xl border border-white/[0.06] bg-surface-100"><div className="border-b border-white/[0.06] px-6 py-4"><h2 className="text-sm font-semibold text-white">Latest source snapshots</h2></div>{loading ? <div className="flex justify-center py-16"><Loader2 className="h-6 w-6 animate-spin text-brand-400" /></div> : summary.sources.length === 0 ? <div className="py-16 text-center text-sm text-zinc-500">No analytics snapshots yet.</div> : <div className="divide-y divide-white/[0.06]">{summary.sources.map((source) => { const sourceMetrics = metrics(source.metrics); return <article key={source.id} className="px-6 py-4"><div className="flex flex-wrap items-center justify-between gap-3"><div><h3 className="text-sm font-medium text-white">{source.connection_name}</h3><p className="text-xs text-zinc-500">{source.provider_name} · {source.period_start} to {source.period_end}</p></div><p className="text-xs text-zinc-500">Collected {new Date(source.collected_at).toLocaleString()}</p></div><div className="mt-3 flex flex-wrap gap-2">{Object.entries(sourceMetrics).map(([name, value]) => <span key={name} className="rounded bg-white/5 px-2.5 py-1 text-xs text-zinc-300">{name.replaceAll('_', ' ')}: {Number(value).toLocaleString()}</span>)}</div></article>; })}</div>}</section>
-    </div>
-  );
+  return <div className="space-y-6">
+    <header className="ep-panel p-6 sm:p-8"><div className="flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between"><div className="max-w-3xl"><p className="ep-section-label">Analytics & Optimisation</p><h1 className="ep-page-title mt-2">Measure what happened and use it to improve the next decision.</h1><p className="ep-page-copy mt-3 text-sm leading-6 sm:text-base">Synchronized analytics are shown as collected facts. Recommendations may use this evidence, but the system does not invent performance or silently change an approved campaign.</p></div><button type="button" onClick={()=>void load()} className="ep-button-secondary px-4 py-2.5 text-sm"><RefreshCw className="h-4 w-4"/> Refresh</button></div></header>
+    {error&&<div className="ep-status-danger flex items-center gap-3 rounded-xl border px-4 py-3 text-sm"><AlertCircle className="h-4 w-4"/><span className="flex-1">{error}</span></div>}
+    <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">{cards.map((card)=><article key={card.label} className="ep-card p-5"><div className="flex items-center justify-between"><p className="text-sm font-bold text-[var(--ep-text-muted)]">{card.label}</p><card.icon className="h-5 w-5 text-[var(--ep-blue)]"/></div><p className="mt-4 text-3xl font-extrabold text-[var(--ep-navy)]">{Number(card.value).toLocaleString()}</p></article>)}</section>
+    <section><div className="mb-3 flex items-center justify-between gap-3"><div><p className="ep-section-label">Measurement sources</p><h2 className="mt-1 text-lg font-extrabold text-[var(--ep-navy)]">Analytics connections</h2></div><Link href="/connections" className="inline-flex items-center gap-1.5 text-xs font-extrabold text-[var(--ep-blue)]"><Plug className="h-3.5 w-3.5"/> Manage connections</Link></div>{connections.length===0?<div className="ep-card p-10 text-center"><Plug className="mx-auto h-8 w-8 text-[var(--ep-text-soft)]"/><p className="mt-3 text-sm font-semibold text-[var(--ep-text-muted)]">No analytics connection is available yet.</p><Link href="/connections" className="ep-button-primary mt-4 px-4 py-2.5 text-sm">Connect analytics</Link></div>:<div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">{connections.map((connection)=><article key={connection.id} className="ep-card p-5"><h3 className="font-extrabold text-[var(--ep-navy)]">{connection.name}</h3><p className="mt-1 text-xs text-[var(--ep-text-muted)]">{connection.provider_name} · {connection.health_status}</p><p className="mt-3 text-xs text-[var(--ep-text-soft)]">{connection.last_sync_at?`Last sync ${new Date(connection.last_sync_at).toLocaleString()}`:'Never synchronized'}</p><button type="button" onClick={()=>void sync(connection.id)} disabled={busyId===connection.id} className="ep-button-primary mt-4 px-3 py-2 text-xs">{busyId===connection.id?<Loader2 className="h-3.5 w-3.5 animate-spin"/>:<RefreshCw className="h-3.5 w-3.5"/>} Sync 30 days</button></article>)}</div>}</section>
+    <section className="ep-card overflow-hidden"><div className="border-b border-[var(--ep-border)] px-5 py-4"><p className="ep-section-label">Evidence</p><h2 className="mt-1 text-lg font-extrabold text-[var(--ep-navy)]">Latest source snapshots</h2></div>{loading?<div className="flex justify-center py-16"><Loader2 className="h-7 w-7 animate-spin text-[var(--ep-blue)]"/></div>:summary.sources.length===0?<div className="py-16 text-center text-sm text-[var(--ep-text-muted)]">No analytics snapshots yet.</div>:<div className="divide-y divide-[var(--ep-border)]">{summary.sources.map((source)=>{const sourceMetrics=metrics(source.metrics);return <article key={source.id} className="p-5"><div className="flex flex-wrap items-start justify-between gap-3"><div><h3 className="text-sm font-extrabold text-[var(--ep-navy)]">{source.connection_name}</h3><p className="mt-1 text-xs text-[var(--ep-text-muted)]">{source.provider_name} · {source.period_start} to {source.period_end}</p></div><p className="text-xs text-[var(--ep-text-soft)]">Collected {new Date(source.collected_at).toLocaleString()}</p></div><div className="mt-3 flex flex-wrap gap-2">{Object.entries(sourceMetrics).map(([name,value])=><span key={name} className="rounded-full bg-[var(--ep-surface-subtle)] px-2.5 py-1 text-xs font-semibold text-[var(--ep-text-muted)]">{name.replaceAll('_',' ')}: {Number(value).toLocaleString()}</span>)}</div></article>;})}</div>}</section>
+  </div>;
 }

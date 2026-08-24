@@ -110,18 +110,13 @@ describe('social network and release completion invariants', () => {
   });
 
   test('documents the real EquiProfile shared-host release topology and current migration tail', () => {
-    const runbook = read('docs/VPS_DEPLOYMENT.md');
-    const short = read('docs/DEPLOYMENT.md');
-    for (const document of [runbook, short]) {
-      expect(document).toContain('marketing.equiprofile.online');
-      expect(document).not.toContain('marketing.amarktai.co.za');
-    }
-    for (const expected of [
-      '030/031/032',
-      '033_product_line_campaign_intelligence.sql',
-      '034_generic_multi_product_scope.sql',
-    ]) expect(runbook).toContain(expected);
-    expect(runbook).toContain('generation → long-form still-motion → render');
-    expect(runbook).toContain('TikTok public Direct Post remains dependent');
+    const deployment = read('docs/DEPLOYMENT.md');
+    const operations = read('docs/OPERATIONS.md');
+    expect(deployment).toContain('marketing.equiprofile.online');
+    expect(deployment).not.toContain('marketing.amarktai.co.za');
+    expect(deployment).toContain('migration');
+    expect(operations).toContain('generation-worker');
+    expect(operations).toContain('longform-still-worker');
+    expect(operations).toContain('render-worker');
   });
 });

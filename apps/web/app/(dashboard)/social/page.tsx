@@ -1,7 +1,5 @@
-import SocialNetworkHub from './SocialNetworkHub';
+import PublishingClient from './PublishingClient';
 
-export const dynamic = 'force-dynamic';
-
-export default function SocialPage() {
-  return <SocialNetworkHub />;
+export default function PublishingPage() {
+  return <PublishingClient />;
 }
