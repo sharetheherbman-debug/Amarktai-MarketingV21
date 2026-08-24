@@ -14,10 +14,18 @@ test('real customer journey, auth refresh, controls, desktop and mobile navigati
   const protectedRedirectFailures = { me: 0, organizations: 0, refresh: 0 };
 
   page.on('console', (message) => {
-    if (message.type() === 'error') browserErrors.push(`console: ${message.text()}`);
+    if (message.type() !== 'error') return;
+    // The response observer below classifies intentional and unexpected API
+    // failures with their URL and status; Chromium's duplicate message does not.
+    if (/Failed to load resource:.*status of (400|401)/.test(message.text())) return;
+    browserErrors.push(`console: ${message.text()}`);
   });
   page.on('request', (request) => requests.push(request.url()));
-  page.on('requestfailed', (request) => browserErrors.push(`request failed: ${request.method()} ${request.url()} ${request.failure()?.errorText || ''}`));
+  page.on('requestfailed', (request) => {
+    const failure = request.failure()?.errorText || '';
+    if (new URL(request.url()).searchParams.has('_rsc') && failure === 'net::ERR_ABORTED') return;
+    browserErrors.push(`request failed: ${request.method()} ${request.url()} ${failure}`);
+  });
   page.on('response', (response) => {
     if (response.status() < 400 || !response.url().includes('/api/v1/')) return;
     if (expectingProtectedRedirect) {
