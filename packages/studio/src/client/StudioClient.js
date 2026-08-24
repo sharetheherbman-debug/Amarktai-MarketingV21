@@ -32,6 +32,7 @@ export class StudioClient {
   getHeaders(json = true) {
     const headers = {};
     if (json) headers['Content-Type'] = 'application/json';
+    if (this.organizationId) headers['X-Organization-Id'] = this.organizationId;
     const token = this.getToken?.();
     if (token) headers.Authorization = `Bearer ${token}`;
     return headers;

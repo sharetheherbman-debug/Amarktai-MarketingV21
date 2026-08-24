@@ -54,6 +54,12 @@ describe('pre-deployment runtime regressions', () => {
     }
   });
 
+  test('the shared Studio client scopes every request to the selected organization', () => {
+    const studioClient = read('packages/studio/src/client/StudioClient.js');
+
+    expect(studioClient).toContain("headers['X-Organization-Id'] = this.organizationId");
+  });
+
   test('Stripe webhook is raw-body verified before the JSON parser', () => {
     const server = read('apps/api/src/server.ts');
     const webhookIndex = server.indexOf("app.post('/api/v1/stripe/webhook'");
