@@ -5,7 +5,6 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import {
   BarChart3,
-  BrainCircuit,
   CalendarRange,
   LayoutDashboard,
   LogOut,
@@ -23,11 +22,10 @@ type NavItem = { label: string; href: string; icon: ComponentType<{ className?: 
 
 const navigation: NavItem[] = [
   { label: 'Home', href: '/dashboard', icon: LayoutDashboard },
-  { label: 'Create', href: '/create', icon: Sparkles },
   { label: 'Campaigns', href: '/campaigns', icon: Megaphone },
+  { label: 'Create', href: '/create', icon: Sparkles },
   { label: 'Calendar', href: '/content-studio/calendar', icon: CalendarRange },
-  { label: 'Analytics', href: '/analytics', icon: BarChart3 },
-  { label: 'Growth Director', href: '/marketing-team', icon: BrainCircuit },
+  { label: 'Results', href: '/analytics', icon: BarChart3 },
   { label: 'Settings', href: '/settings', icon: Settings },
 ];
 
@@ -38,7 +36,6 @@ function isActivePath(pathname: string, href: string): boolean {
       || pathname.startsWith('/content-studio/generate')
       || pathname.startsWith('/creative-studio');
   }
-  if (href === '/marketing-team') return pathname === '/marketing-team';
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 

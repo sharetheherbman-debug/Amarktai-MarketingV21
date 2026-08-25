@@ -18,19 +18,27 @@ const primaryActions = [
     recommended: true,
   },
   {
-    title: 'Create Social Content',
-    description: 'Create governed written marketing content using the existing Content Studio workflow.',
-    href: '/content-studio/generate',
-    cta: 'Create Social Post',
-    icon: FileText,
+    title: 'Simple Image',
+    description: 'Create an on-brand image for a campaign, offer or social post using an available workspace capability.',
+    href: '/creative-studio?flow=image',
+    cta: 'Create image',
+    icon: ImageIcon,
     recommended: false,
   },
   {
-    title: 'Create Campaign Content',
-    description: 'Start with campaign strategy, audience and objectives, then prepare content around it.',
-    href: '/campaigns/new',
-    cta: 'Start Campaign Content',
-    icon: Sparkles,
+    title: 'Short Video',
+    description: 'Describe a short, platform-ready video concept and prepare it within the workspace generation policy.',
+    href: '/creative-studio?flow=short-video',
+    cta: 'Create short video',
+    icon: Video,
+    recommended: false,
+  },
+  {
+    title: 'Social Content',
+    description: 'Create governed written marketing content using the existing Content Studio workflow.',
+    href: '/content-studio/generate',
+    cta: 'Create social post',
+    icon: FileText,
     recommended: false,
   },
 ];
@@ -48,7 +56,7 @@ export default function CreatePage() {
         </div>
       </header>
 
-      <section className="grid gap-5 lg:grid-cols-3">
+      <section className="grid gap-5 lg:grid-cols-2 xl:grid-cols-4">
         {primaryActions.map(({ title, description, href, cta, icon: Icon, recommended }) => (
           <Link
             key={href}
@@ -80,7 +88,7 @@ export default function CreatePage() {
             <p className="ep-section-label">Advanced creative tools</p>
             <h2 className="mt-1 text-lg font-extrabold text-[var(--ep-navy)]">Image and video tools are still being simplified.</h2>
             <p className="mt-2 text-sm leading-6 text-[var(--ep-text-muted)]">
-              The existing Creative Studio remains available to administrators, but raw model and long-form controls are deliberately not presented as the normal client workflow. A simple low-cost Short Video flow is the next acceptance target after Create Ad is browser-proven.
+              The advanced Creative Studio remains available by direct route for specialist work. These normal entrypoints select only capabilities advertised as available for the workspace; a paused or unavailable service is shown honestly rather than producing a mock asset.
             </p>
           </div>
           <div className="flex flex-wrap gap-2">

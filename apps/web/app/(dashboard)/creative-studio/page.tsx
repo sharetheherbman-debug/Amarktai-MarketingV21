@@ -7,6 +7,7 @@ import {
   RotateCcw, ShieldCheck, Sparkles, Upload, Video, WandSparkles,
 } from 'lucide-react';
 import { StudioClient } from '@amarktai/studio';
+import { useSearchParams } from 'next/navigation';
 import { useAuthStore } from '@/stores/auth.store';
 
 type StudioModel = { id:string; name:string; category?:string; operations?:string[]; inputs?:string[]; outputs?:string[]; parameters?:Record<string,any>; status?:string };
@@ -38,6 +39,9 @@ function fieldLabel(value:string) { return value.replaceAll('_',' ').replace(/\b
 function sourceRequirements(operation:string,model?:StudioModel):SourceKind[] { const inputs=(model?.inputs||[]).map((value)=>String(value).toLowerCase()); const required=new Set<SourceKind>(); if(operation.includes('image_to')||operation==='reference_image_video'||operation==='lip_sync'||inputs.some((input)=>input.includes('image'))) required.add('image'); if(operation==='lip_sync'||inputs.some((input)=>input.includes('audio'))) required.add('audio'); if(operation==='video_extend'||inputs.some((input)=>input.includes('video'))) required.add('video'); return [...required]; }
 
 export default function CreativeStudioPage() {
+  const searchParams=useSearchParams();
+  const requestedFlow=searchParams.get('flow');
+  const quickStartLabel=requestedFlow==='image'?'Simple Image':requestedFlow==='short-video'?'Short Video':null;
   const { currentOrganization }=useAuthStore();
   const organizationId=currentOrganization?.id||'';
   const client=useMemo(()=>new StudioClient({organizationId}),[organizationId]);
@@ -70,6 +74,13 @@ export default function CreativeStudioPage() {
   },[client,organizationId]);
   useEffect(()=>{void load();},[load]);
   useEffect(()=>{if(!operation&&operations.length)setOperation(operations[0]);else if(operation&&!operations.includes(operation)&&operations.length)setOperation(operations[0]);},[operation,operations]);
+  useEffect(()=>{
+    if(!requestedFlow||!operations.length)return;
+    const preferred=requestedFlow==='image'
+      ? operations.find((item)=>item==='text_to_image')||operations.find((item)=>item.includes('image')&&!item.includes('video'))
+      : operations.find((item)=>item==='text_to_video')||operations.find((item)=>item.includes('video'));
+    if(preferred&&preferred!==operation)setOperation(preferred);
+  },[operation,operations,requestedFlow]);
   useEffect(()=>{const first=operationModels[0]?.id||'';if(!operationModels.some((model)=>model.id===modelId))setModelId(first);setParameterValues({});setAssets({});setResult(null);},[operation,operationModels,modelId]);
 
   const loadProject=useCallback(async(projectId:string)=>{if(!projectId){setScenes([]);setRenders([]);setProjectQuote(null);return;}const [sceneResult,renderResult]=await Promise.allSettled([client.listScenes(projectId),client.listRenders(projectId)]);if(sceneResult.status==='fulfilled')setScenes((sceneResult.value||[]) as Scene[]);if(renderResult.status==='fulfilled')setRenders((renderResult.value||[]) as Render[]);if(sceneResult.status==='rejected'||renderResult.status==='rejected')setError('Long-form project details could not be fully refreshed.');},[client]);
@@ -91,6 +102,7 @@ export default function CreativeStudioPage() {
   return <div className="space-y-6">
     <header className="ep-panel p-6 sm:p-8"><div className="flex flex-col gap-5 xl:flex-row xl:items-end xl:justify-between"><div className="max-w-3xl"><p className="ep-section-label">Creative Studio</p><h1 className="ep-page-title mt-2">Create campaign media, manage jobs and produce long-form video.</h1><p className="ep-page-copy mt-3 max-w-3xl text-sm leading-6 sm:text-base">Tools are discovered from the live runtime model catalogue. Unsupported operations stay hidden instead of being presented as fake capabilities.</p></div><button type="button" onClick={()=>void load()} className="ep-button-secondary px-4 py-2.5 text-sm"><RefreshCw className="h-4 w-4"/> Refresh capabilities</button></div></header>
     {error&&<div className="ep-status-danger flex items-start gap-3 rounded-xl border px-4 py-3 text-sm"><AlertCircle className="mt-0.5 h-4 w-4 shrink-0"/><span>{error}</span></div>}
+    {quickStartLabel&&<section className="ep-panel p-4 sm:p-5"><p className="ep-section-label">{quickStartLabel}</p><h2 className="mt-1 text-lg font-extrabold text-[var(--ep-navy)]">Start with your message and creative direction.</h2><p className="mt-2 text-sm leading-6 text-[var(--ep-text-muted)]">Marketing selected the closest available workspace capability. The current policy, budget controls and result status stay visible; no placeholder media is created if generation is unavailable.</p></section>}
     <section className={`${executionAllowed?'ep-status-success':'ep-status-warning'} rounded-xl border p-4`}><div className="flex items-start gap-3"><ShieldCheck className="mt-0.5 h-5 w-5 shrink-0"/><div><p className="font-extrabold">{executionAllowed?'Generation can run within workspace policy.':'Generation and rendering are currently paused.'}</p><p className="mt-1 text-xs leading-5 opacity-80">{executionAllowed?'Every paid request still requires the existing Control Centre and Generation Credit checks.':'You can inspect runtime capabilities, prepare prompts, upload source assets, build projects/scenes and review history. Paid/external execution remains blocked by Emergency Stop.'}</p></div></div></section>
     <div className="flex gap-2 overflow-x-auto rounded-xl border border-[var(--ep-border)] bg-white p-1.5">{([{id:'create',label:'Create Assets',icon:WandSparkles},{id:'longform',label:'Long-form Production',icon:Clapperboard},{id:'jobs',label:'Assets & Jobs',icon:History}] as const).map(({id,label,icon:Icon})=><button key={id} type="button" onClick={()=>setTab(id)} className={tab===id?'flex shrink-0 items-center gap-2 rounded-lg bg-[var(--ep-navy)] px-4 py-2.5 text-sm font-bold text-white':'flex shrink-0 items-center gap-2 rounded-lg px-4 py-2.5 text-sm font-bold text-[var(--ep-text-muted)] hover:bg-[var(--ep-blue-soft)] hover:text-[var(--ep-navy)]'}><Icon className="h-4 w-4"/> {label}</button>)}</div>
 

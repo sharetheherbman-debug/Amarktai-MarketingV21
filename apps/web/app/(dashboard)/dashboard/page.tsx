@@ -72,6 +72,9 @@ export default function DashboardPage() {
   const [summary, setSummary] = useState<Summary>(emptySummary);
   const [loading, setLoading] = useState(true);
   const [partial, setPartial] = useState(false);
+  const [directorCommand, setDirectorCommand] = useState('');
+  const [directorSubmitting, setDirectorSubmitting] = useState(false);
+  const [directorMessage, setDirectorMessage] = useState<string | null>(null);
 
   useEffect(() => {
     const orgId = currentOrganization?.id;
@@ -147,6 +150,35 @@ export default function DashboardPage() {
     'Ready to coordinate'
   );
 
+  const startDirectorCycle = async () => {
+    const objective = directorCommand.trim();
+    if (objective.length < 10) {
+      setDirectorMessage('Tell Marketing a little more about the outcome you want to achieve.');
+      return;
+    }
+
+    setDirectorSubmitting(true);
+    setDirectorMessage(null);
+    try {
+      const idempotencyKey = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+        ? crypto.randomUUID()
+        : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      await api.post<ApiResponse<Row>>('/growth-director/cycles', {
+        body: {
+          objective,
+          idempotency_key: idempotencyKey,
+          generation_credit_ceiling: Math.max(1, Number(availableCredits) || 1),
+        },
+      });
+      setDirectorCommand('');
+      setDirectorMessage('Marketing Director is preparing a campaign plan. Review the strategy and cost estimate before any paid material generation or publishing.');
+    } catch (error) {
+      setDirectorMessage(error instanceof Error ? error.message : 'Marketing Director could not start this planning cycle. No marketing material was generated.');
+    } finally {
+      setDirectorSubmitting(false);
+    }
+  };
+
   const quickActions = [
     { href: '/business-brain', title: 'Analyse website', description: 'Build or refresh the Business Brain.', icon: BrainCircuit },
     { href: '/campaigns/new', title: 'Plan campaign', description: 'Start with strategy, audience and objectives.', icon: Megaphone },
@@ -179,6 +211,34 @@ export default function DashboardPage() {
         <Link href="/campaigns" className="ep-card group p-5"><div className="flex items-center justify-between"><span className="text-sm font-bold text-[var(--ep-text-muted)]">Campaigns</span><Megaphone className="h-5 w-5 text-[var(--ep-blue)]" /></div><p className="mt-4 text-3xl font-extrabold text-[var(--ep-navy)]">{metrics.activeCampaigns}</p><p className="mt-1 text-xs text-[var(--ep-text-soft)]">Active · {metrics.draftCampaigns} planning/draft</p></Link>
         <Link href="/approvals" className="ep-card group p-5"><div className="flex items-center justify-between"><span className="text-sm font-bold text-[var(--ep-text-muted)]">Owner approvals</span><FileCheck2 className="h-5 w-5 text-[var(--ep-blue)]" /></div><p className="mt-4 text-3xl font-extrabold text-[var(--ep-navy)]">{metrics.approvals}</p><p className="mt-1 text-xs text-[var(--ep-text-soft)]">Exact content versions waiting</p></Link>
         <Link href="/usage-safety" className="ep-card group p-5"><div className="flex items-center justify-between"><span className="text-sm font-bold text-[var(--ep-text-muted)]">Generation Credits</span><CircleDollarSign className="h-5 w-5 text-[var(--ep-blue)]" /></div><p className="mt-4 text-3xl font-extrabold text-[var(--ep-navy)]">{number(availableCredits)}</p><p className="mt-1 text-xs text-[var(--ep-text-soft)]">Available balance</p></Link>
+      </section>
+
+      <section className="ep-card p-5 sm:p-6">
+        <div className="max-w-4xl">
+          <p className="ep-section-label">Marketing Director</p>
+          <h2 className="mt-1 text-lg font-extrabold text-[var(--ep-navy)]">What would you like Marketing to achieve?</h2>
+          <p className="mt-2 text-sm leading-6 text-[var(--ep-text-muted)]">Describe the business outcome in your own words. Marketing will prepare a structured campaign plan using confirmed business knowledge, owner restrictions and the available budget.</p>
+          <div className="mt-4 flex flex-col gap-3 sm:flex-row">
+            <input
+              value={directorCommand}
+              onChange={(event) => setDirectorCommand(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' && !event.shiftKey) {
+                  event.preventDefault();
+                  void startDirectorCycle();
+                }
+              }}
+              placeholder="For example: Promote our main service this month and generate more qualified leads."
+              aria-label="Marketing Director command"
+              className="min-h-12 flex-1 rounded-xl border border-[var(--ep-border)] bg-white px-4 text-sm text-[var(--ep-navy)] outline-none transition focus:border-[var(--ep-blue)] focus:ring-2 focus:ring-[var(--ep-blue-soft)]"
+            />
+            <button type="button" onClick={() => void startDirectorCycle()} disabled={directorSubmitting} className="ep-button-primary min-h-12 shrink-0 px-4 text-sm disabled:cursor-not-allowed disabled:opacity-60">
+              {directorSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <BrainCircuit className="h-4 w-4" />}
+              {directorSubmitting ? 'Planning…' : 'Create plan'}
+            </button>
+          </div>
+          {directorMessage && <p role="status" className="mt-3 text-sm leading-6 text-[var(--ep-text-muted)]">{directorMessage}</p>}
+        </div>
       </section>
 
       <section className="grid gap-5 xl:grid-cols-[1.3fr_.7fr]">

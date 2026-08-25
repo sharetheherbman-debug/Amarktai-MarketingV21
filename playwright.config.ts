@@ -1,6 +1,9 @@
+import { existsSync } from 'node:fs';
 import { defineConfig, devices } from '@playwright/test';
 
 const apiUrl = process.env.E2E_API_URL || 'http://127.0.0.1:4000';
+const systemChromiumPath = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || '/usr/bin/chromium';
+const launchOptions = existsSync(systemChromiumPath) ? { executablePath: systemChromiumPath } : undefined;
 
 export default defineConfig({
   testDir: './tests/e2e',
@@ -18,7 +21,7 @@ export default defineConfig({
     screenshot: 'only-on-failure',
     video: 'retain-on-failure',
   },
-  projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
+  projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'], launchOptions } }],
   webServer: [
     {
       command: 'node scripts/e2e-provider-stub.mjs',
