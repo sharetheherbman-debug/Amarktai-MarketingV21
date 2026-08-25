@@ -4,7 +4,7 @@ import type { ComponentType } from 'react';
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { BookOpenCheck, CalendarRange, LayoutDashboard, Megaphone, MoreHorizontal } from 'lucide-react';
+import { CalendarRange, LayoutDashboard, Megaphone, MoreHorizontal, Sparkles } from 'lucide-react';
 import { useAuthStore } from '@/stores/auth.store';
 import { useUIStore } from '@/stores/ui.store';
 import { DashboardSidebar } from '@/components/dashboard/DashboardSidebar';
@@ -15,8 +15,8 @@ type MobileNavItem = { label: string; href: string; icon: ComponentType<{ classN
 
 const mobileNav: MobileNavItem[] = [
   { label: 'Home', href: '/dashboard', icon: LayoutDashboard },
+  { label: 'Create', href: '/create', icon: Sparkles },
   { label: 'Campaigns', href: '/campaigns', icon: Megaphone },
-  { label: 'Content', href: '/content-studio', icon: BookOpenCheck },
   { label: 'Calendar', href: '/content-studio/calendar', icon: CalendarRange },
 ];
 
