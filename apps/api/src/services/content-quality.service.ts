@@ -226,7 +226,7 @@ async function checkCta(contentId: string, orgId: string, text: string): Promise
   const suggestions: string[] = [];
 
   const ctaPatterns = [
-    /\b(sign up|subscribe|learn more|get started|try|buy|order|download|contact|call|visit|click|join|register|book|schedule)\b/gi,
+    /\b(sign up|subscribe|learn more|get started|try|buy|order|download|contact|call|visit|click|join|register|book|schedule|explore|enquire)\b/gi,
     /\b(today|now|free|limited|exclusive|special)\b/gi,
   ];
 

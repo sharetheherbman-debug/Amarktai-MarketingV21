@@ -14,6 +14,8 @@ import {
   type GovernedGeneration,
 } from '../services/governed-generation.service';
 import * as contentEngine from '../services/content-engine.service';
+import * as studioService from '../services/studio.service';
+import { composeCampaignMaterial, composeCampaignVideoMaterial } from '../services/marketing-material-compositor.service';
 import { safeFetch } from '../utils/safe-fetch';
 
 const connection = {
@@ -215,16 +217,49 @@ async function processStudio(job: Job): Promise<void> {
       generationId,
     ]
   );
+    // Persist provider output through the canonical Studio asset path before it
+    // can be used as a campaign ingredient. Provider URLs are never a finished
+    // Marketing material.
+    await studioService.getGeneration(generationId, data.organizationId);
     await completeGovernedGeneration(governed, providerJob.id, {
       usage: finalState.usage || null,
       generation_id: generationId,
     });
-    await query(
-      `UPDATE campaign_asset_runs SET status='completed',resolution_status='pending_review',
-           completed_at=NOW(),updated_at=NOW()
-       WHERE studio_generation_id=$1`,
-      [generationId]
+    const campaignRuns = await query(
+      `SELECT id FROM campaign_asset_runs
+        WHERE studio_generation_id=$1 AND organization_id=$2`,
+      [generationId, data.organizationId]
     );
+    const compositionMode = String(data.options?.composition_mode || '');
+    if (compositionMode === 'branded_static' || compositionMode === 'branded_video') {
+      for (const campaignRun of campaignRuns.rows) {
+        await query(
+          `UPDATE campaign_asset_runs
+              SET status='processing',material_status='ingredient_validating',updated_at=NOW()
+            WHERE id=$1 AND organization_id=$2`,
+          [campaignRun.id, data.organizationId]
+        );
+        try {
+          if (compositionMode === 'branded_video') {
+            await composeCampaignVideoMaterial(String(campaignRun.id), data.organizationId, data.userId);
+          } else {
+            await composeCampaignMaterial(String(campaignRun.id), data.organizationId, data.userId);
+          }
+        } catch (materialError) {
+          // The run records its own bounded failure state. The paid generation
+          // itself was completed and must not be replayed solely because final
+          // material QA rejected the ingredient or composition.
+          logger.error(`Campaign material composition failed for run ${campaignRun.id}: ${materialError}`);
+        }
+      }
+    } else {
+      await query(
+        `UPDATE campaign_asset_runs SET status='completed',resolution_status='pending_review',
+             completed_at=NOW(),updated_at=NOW()
+         WHERE studio_generation_id=$1`,
+        [generationId]
+      );
+    }
     await query(
     `UPDATE genx_models SET verification_status = 'runtime_confirmed', last_verified = NOW()
      WHERE id = $1`,

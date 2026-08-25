@@ -5,6 +5,11 @@ import { NotFoundError, AppError } from '../middleware/errorHandler';
 import { contextEngine } from './context-engine.service';
 import { generateGovernedText } from './governed-text-generation.service';
 import { legacyProductLine, normalizeProductScopes } from '../utils/product-scope';
+import {
+  getDeliverableRoute,
+  isOwnerDeliverableKind,
+  type OwnerDeliverableKind,
+} from './marketing-deliverable-registry.service';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -51,7 +56,7 @@ export interface CalendarEntry {
 }
 
 export interface RequestedDeliverable {
-  kind: 'campaign' | 'weekly_marketing' | 'social_ad' | 'image_ad' | 'video_ad' | 'social_post' | 'promotional_graphic' | 'website_banner' | 'email_campaign' | 'landing_page' | 'article' | 'offer_promotion' | 'retargeting_material';
+  kind: OwnerDeliverableKind;
   count: number;
   platforms?: string[];
   format?: string;
@@ -110,22 +115,22 @@ const REQUIRED_PLAN_KEYS = [
 ] as const;
 
 export function normalizeRequestedDeliverables(value: CampaignPlanInput['requested_deliverables']): RequestedDeliverable[] {
-  const supported = new Set<RequestedDeliverable['kind']>([
-    'campaign','weekly_marketing','social_ad','image_ad','video_ad','social_post','promotional_graphic','website_banner','email_campaign','landing_page','article','offer_promotion','retargeting_material',
-  ]);
   return (Array.isArray(value) ? value : []).slice(0, 12).flatMap((item) => {
-    const kind = String(item?.kind || '') as RequestedDeliverable['kind'];
-    if (!supported.has(kind)) return [];
+    const kind = String(item?.kind || '');
+    if (!isOwnerDeliverableKind(kind)) return [];
+    const route = getDeliverableRoute(kind);
     const count = Math.max(1, Math.min(12, Math.floor(Number(item?.count || 1))));
     const platforms = Array.isArray(item?.platforms) ? item.platforms.map(String).filter(Boolean).slice(0, 6) : [];
-    return [{ kind, count, platforms, format: String(item?.format || '').slice(0, 80) || undefined, duration_seconds: kind === 'video_ad' ? (Math.max(5, Math.min(15, Math.floor(Number(item?.duration_seconds || 15)))) || 15) : undefined }];
+    return [{
+      kind,
+      count,
+      platforms,
+      format: String(item?.format || '').slice(0, 80) || route.label,
+      duration_seconds: route.maxDurationSeconds
+        ? (Math.max(5, Math.min(route.maxDurationSeconds, Math.floor(Number(item?.duration_seconds || route.maxDurationSeconds)))) || route.maxDurationSeconds)
+        : undefined,
+    }];
   });
-}
-
-function deliverableFormat(kind: RequestedDeliverable['kind']): string {
-  return ({
-    campaign: 'campaign marketing set', weekly_marketing: 'weekly marketing set', social_ad: 'social ad', image_ad: 'image ad', video_ad: 'short video ad', social_post: 'social post', promotional_graphic: 'promotional graphic', website_banner: 'website banner', email_campaign: 'email campaign', landing_page: 'landing page', article: 'article', offer_promotion: 'offer promotion', retargeting_material: 'retargeting creative',
-  } as Record<RequestedDeliverable['kind'], string>)[kind];
 }
 
 export function applyRequestedDeliverables(plan: Record<string, any>, requested: RequestedDeliverable[]): Record<string, any> {
@@ -134,11 +139,13 @@ export function applyRequestedDeliverables(plan: Record<string, any>, requested:
   const creative = plan.creative_concept && typeof plan.creative_concept === 'object' ? plan.creative_concept : {};
   const messaging = plan.messaging_plan && typeof plan.messaging_plan === 'object' ? plan.messaging_plan : {};
   const cta = Array.isArray(brief.calls_to_action) ? String(brief.calls_to_action[0] || '') : '';
-  const requirements = requested.map((deliverable, index) => ({
+  const requirements = requested.map((deliverable, index) => {
+    const route = getDeliverableRoute(deliverable.kind);
+    return {
     brief_id: `owner-deliverable-${index + 1}-${deliverable.kind}`,
-    platform: deliverable.platforms?.[0] || (deliverable.kind === 'email_campaign' ? 'email' : deliverable.kind === 'website_banner' || deliverable.kind === 'landing_page' ? 'website' : deliverable.kind === 'article' ? 'blog' : 'social'),
-    format: deliverable.format || deliverableFormat(deliverable.kind),
-    purpose: `${deliverable.count} ${deliverableFormat(deliverable.kind)}${deliverable.count === 1 ? '' : 's'} for the owner-requested campaign outcome`,
+    platform: deliverable.platforms?.[0] || route.primaryChannel,
+    format: deliverable.format || route.label,
+    purpose: `${deliverable.count} ${route.label}${deliverable.count === 1 ? '' : 's'} for the owner-requested campaign outcome`,
     hook: String(creative.hook || creative.central_idea || ''),
     message: String(messaging.primary_message || brief.objective || ''),
     cta,
@@ -146,8 +153,16 @@ export function applyRequestedDeliverables(plan: Record<string, any>, requested:
     duration_seconds: deliverable.duration_seconds,
     accessibility_requirements: ['Use legible text, brand-safe contrast and accurate alt text where applicable.'],
     variations: deliverable.count,
-    production_mode: deliverable.kind === 'video_ad' ? 'economical_short_form_video' : 'branded_marketing_asset',
-  }));
+    governed_owner_deliverable: true,
+    deliverable_kind: deliverable.kind,
+    production_mode: route.composition === 'branded_video' ? 'economical_short_form_video' : 'branded_marketing_asset',
+    material_type: route.materialType,
+    default_dimensions: route.defaultDimensions,
+    ingredient_operation: route.ingredientOperation,
+    composition_mode: route.composition,
+    requires_owner_approval: route.requiresOwnerApproval,
+  };
+  });
   return {
     ...plan,
     strategy: {
@@ -365,12 +380,13 @@ export async function updatePlanStatus(id: string, orgId: string, status: string
       throw new AppError(409, 'Campaign strategy requires a creative concept and asset plan', 'PLAN_INCOMPLETE');
     }
   }
+  const approving = status === 'approved';
   await query(
     `UPDATE campaign_plans SET status=$1,
-       approved_at=CASE WHEN $1='approved' THEN NOW() ELSE approved_at END,
-       approved_by=CASE WHEN $1='approved' THEN $4 ELSE approved_by END,
-       updated_at=NOW() WHERE id=$2 AND organization_id=$3`,
-    [status, id, orgId, userId]
+       approved_at=CASE WHEN $2::boolean THEN NOW() ELSE approved_at END,
+       approved_by=CASE WHEN $2::boolean THEN $5 ELSE approved_by END,
+       updated_at=NOW() WHERE id=$3 AND organization_id=$4`,
+    [status, approving, id, orgId, userId]
   );
 }
 

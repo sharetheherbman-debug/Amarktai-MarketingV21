@@ -46,6 +46,9 @@ interface StudioModel {
   status?: string;
 }
 
+interface WhiteLabelBrand { brand_name?: string | null; brand_logo?: string | null; brand_colors?: Record<string, unknown>; brand_font?: string | null; }
+interface BrandDnaView { companyName?: string; logoUrl?: string; primaryColor?: string; secondaryColor?: string; accentColor?: string; preferredCtas?: string[]; }
+
 type QualityTier = 'economy' | 'smart' | 'premium';
 type AdFormat = 'square' | 'landscape' | 'portrait';
 
@@ -136,7 +139,7 @@ async function loadImageWithCredentials(url: string): Promise<HTMLImageElement> 
 export default function AdvertisingPage() {
   const { currentOrganization } = useAuthStore();
   const organizationId = currentOrganization?.id || '';
-  const organizationName = currentOrganization?.name || 'EquiProfile';
+  const organizationName = currentOrganization?.name || '';
   const studio = useMemo(() => new StudioClient({ organizationId }), [organizationId]);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
@@ -150,10 +153,15 @@ export default function AdvertisingPage() {
   const [tier, setTier] = useState<QualityTier>('smart');
   const [format, setFormat] = useState<AdFormat>('square');
   const [visualPrompt, setVisualPrompt] = useState('Premium British equestrian lifestyle scene at a contemporary stable, elegant bay warmblood, confident professional rider and modern digital-first atmosphere, natural morning light, aspirational but authentic, clean composition with generous negative space for advertising copy.');
-  const [headline, setHeadline] = useState('Everything equestrian. One intelligent home.');
-  const [body, setBody] = useState('Manage horses, teams, records and your business in one connected platform.');
-  const [cta, setCta] = useState('Discover EquiProfile');
+  const [headline, setHeadline] = useState('A clearer next step for your customers.');
+  const [body, setBody] = useState('Bring your approved offer, service and customer value into one compelling campaign material.');
+  const [cta, setCta] = useState('');
   const [brandName, setBrandName] = useState(organizationName);
+  const [brandLogo, setBrandLogo] = useState('');
+  const [brandPrimary, setBrandPrimary] = useState('');
+  const [brandSecondary, setBrandSecondary] = useState('');
+  const [brandAccent, setBrandAccent] = useState('');
+  const [brandFont, setBrandFont] = useState('sans-serif');
   const [generating, setGenerating] = useState(false);
   const [visualUrl, setVisualUrl] = useState<string | null>(null);
   const [generationId, setGenerationId] = useState<string | null>(null);
@@ -168,15 +176,27 @@ export default function AdvertisingPage() {
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
-    const [connectionsResult, campaignsResult, modelsResult] = await Promise.allSettled([
+    const [connectionsResult, campaignsResult, modelsResult, whiteLabelResult, brandDnaResult] = await Promise.allSettled([
       api.get<ApiResponse<Connection[]>>('/integrations/connections', { params: { category: 'advertising' } }),
       api.get<ApiResponse<Campaign[]>>('/integrations/advertising/campaigns'),
       studio.listModels('text_to_image'),
+      api.get<ApiResponse<WhiteLabelBrand>>('/white-label/config', { params: { organization_id: organizationId } }),
+      api.get<ApiResponse<BrandDnaView | null>>('/brand-dna', { params: { organization_id: organizationId } }),
     ]);
 
     if (connectionsResult.status === 'fulfilled') setConnections(connectionsResult.value.data || []);
     if (campaignsResult.status === 'fulfilled') setCampaigns(campaignsResult.value.data || []);
     if (modelsResult.status === 'fulfilled') setImageModels((modelsResult.value || []) as StudioModel[]);
+    const whiteLabel = whiteLabelResult.status === 'fulfilled' ? whiteLabelResult.value.data : null;
+    const dna = brandDnaResult.status === 'fulfilled' ? brandDnaResult.value.data : null;
+    const colors = whiteLabel?.brand_colors || {};
+    const configuredName = String(whiteLabel?.brand_name || dna?.companyName || organizationName || '').trim();
+    const configuredLogo = String(whiteLabel?.brand_logo || dna?.logoUrl || '').trim();
+    const primary = String(colors.primary || colors.primary_color || dna?.primaryColor || '').trim();
+    const secondary = String(colors.secondary || colors.text || dna?.secondaryColor || '').trim();
+    const accent = String(colors.accent || colors.accent_color || dna?.accentColor || primary || '').trim();
+    setBrandName(configuredName); setBrandLogo(configuredLogo); setBrandPrimary(primary); setBrandSecondary(secondary); setBrandAccent(accent); setBrandFont(String(whiteLabel?.brand_font || 'sans-serif'));
+    if (dna?.preferredCtas?.[0] && !cta.trim()) setCta(String(dna.preferredCtas[0]));
 
     if (modelsResult.status === 'rejected') {
       setError(modelsResult.reason instanceof Error ? modelsResult.reason.message : 'Image generation models could not be loaded.');
@@ -209,6 +229,9 @@ export default function AdvertisingPage() {
       setCanvasReady(false);
       return;
     }
+    if (!brandName.trim() || !brandLogo || !brandPrimary) {
+      throw new Error('Complete tenant Branding settings (name, logo and primary colour) before composing a final advertising material.');
+    }
 
     const preset = FORMAT_PRESETS[format];
     canvas.width = preset.width;
@@ -216,7 +239,7 @@ export default function AdvertisingPage() {
     const ctx = canvas.getContext('2d');
     if (!ctx) throw new Error('Browser canvas is unavailable');
 
-    const visual = await loadImageWithCredentials(visualUrl);
+    const [visual, logo] = await Promise.all([loadImageWithCredentials(visualUrl), loadImageWithCredentials(brandLogo)]);
     drawCover(ctx, visual, preset.width, preset.height);
 
     const width = preset.width;
@@ -224,59 +247,67 @@ export default function AdvertisingPage() {
     const padding = Math.round(width * 0.065);
     const textWidth = Math.round(width * 0.78);
     const gradient = ctx.createLinearGradient(0, height * 0.25, 0, height);
-    gradient.addColorStop(0, 'rgba(5,15,32,0.02)');
-    gradient.addColorStop(0.48, 'rgba(5,15,32,0.52)');
-    gradient.addColorStop(1, 'rgba(5,15,32,0.94)');
+    gradient.addColorStop(0, 'rgba(0,0,0,0.02)');
+    gradient.addColorStop(0.48, 'rgba(0,0,0,0.52)');
+    gradient.addColorStop(1, 'rgba(0,0,0,0.94)');
     ctx.fillStyle = gradient;
     ctx.fillRect(0, 0, width, height);
 
-    const brandFont = Math.max(28, Math.round(width * 0.03));
-    ctx.fillStyle = '#ffffff';
-    ctx.font = `700 ${brandFont}px Arial, sans-serif`;
+    const brandFontSize = Math.max(28, Math.round(width * 0.03));
+    const foreground = brandSecondary || '#ffffff';
+    const brandTypeface = `${brandFont}, sans-serif`;
+    const logoHeight = Math.max(42, Math.round(height * 0.06));
+    const logoWidth = Math.max(80, Math.round(logoHeight * (logo.naturalWidth / Math.max(1, logo.naturalHeight))));
+    ctx.drawImage(logo, padding, padding, logoWidth, logoHeight);
+    ctx.fillStyle = foreground;
+    ctx.font = `700 ${brandFontSize}px ${brandTypeface}`;
     ctx.textBaseline = 'top';
-    ctx.fillText(brandName.trim() || 'EquiProfile', padding, padding);
+    ctx.fillText(brandName.trim(), padding + logoWidth + 16, padding + Math.max(0, Math.round((logoHeight - brandFontSize) / 2)));
 
     const headlineFont = Math.max(46, Math.round(width * 0.065));
-    ctx.font = `800 ${headlineFont}px Arial, sans-serif`;
+    ctx.font = `800 ${headlineFont}px ${brandTypeface}`;
     const headlineLines = splitWords(ctx, headline, textWidth).slice(0, 3);
     const headlineLineHeight = Math.round(headlineFont * 1.04);
 
     const bodyFont = Math.max(24, Math.round(width * 0.028));
     const bodyLineHeight = Math.round(bodyFont * 1.35);
-    ctx.font = `500 ${bodyFont}px Arial, sans-serif`;
+    ctx.font = `500 ${bodyFont}px ${brandTypeface}`;
     const bodyLines = splitWords(ctx, body, textWidth).slice(0, 3);
 
     const buttonHeight = Math.max(58, Math.round(height * 0.075));
     const blockHeight = headlineLines.length * headlineLineHeight + 24 + bodyLines.length * bodyLineHeight + 34 + buttonHeight;
     let y = height - padding - blockHeight;
 
-    ctx.fillStyle = '#ffffff';
-    ctx.font = `800 ${headlineFont}px Arial, sans-serif`;
+    ctx.fillStyle = foreground;
+    ctx.font = `800 ${headlineFont}px ${brandTypeface}`;
     for (const line of headlineLines) {
       ctx.fillText(line, padding, y);
       y += headlineLineHeight;
     }
 
     y += 24;
-    ctx.fillStyle = 'rgba(255,255,255,0.90)';
-    ctx.font = `500 ${bodyFont}px Arial, sans-serif`;
+    ctx.fillStyle = foreground;
+    ctx.globalAlpha = 0.9;
+    ctx.font = `500 ${bodyFont}px ${brandTypeface}`;
     for (const line of bodyLines) {
       ctx.fillText(line, padding, y);
       y += bodyLineHeight;
     }
 
+    ctx.globalAlpha = 1;
     y += 34;
     const ctaFont = Math.max(23, Math.round(width * 0.025));
-    ctx.font = `800 ${ctaFont}px Arial, sans-serif`;
-    const buttonWidth = Math.min(textWidth, Math.max(Math.round(width * 0.28), ctx.measureText(cta || 'Learn more').width + 64));
-    ctx.fillStyle = '#ffffff';
+    ctx.font = `800 ${ctaFont}px ${brandTypeface}`;
+    const ctaLabel = cta.trim() || 'Learn more';
+    const buttonWidth = Math.min(textWidth, Math.max(Math.round(width * 0.28), ctx.measureText(ctaLabel).width + 64));
+    ctx.fillStyle = brandPrimary;
     ctx.fillRect(padding, y, buttonWidth, buttonHeight);
-    ctx.fillStyle = '#071a33';
+    ctx.fillStyle = brandSecondary || '#ffffff';
     ctx.textBaseline = 'middle';
-    ctx.fillText(cta.trim() || 'Learn more', padding + 28, y + buttonHeight / 2);
+    ctx.fillText(ctaLabel, padding + 28, y + buttonHeight / 2);
 
     setCanvasReady(true);
-  }, [visualUrl, format, headline, body, cta, brandName]);
+  }, [visualUrl, format, headline, body, cta, brandName, brandLogo, brandPrimary, brandSecondary, brandAccent, brandFont]);
 
   useEffect(() => {
     let cancelled = false;

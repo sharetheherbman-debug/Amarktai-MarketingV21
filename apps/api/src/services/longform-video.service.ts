@@ -2,7 +2,6 @@ import { query } from '../config/database';
 import { logger } from '../utils/logger';
 import { NotFoundError, AppError } from '../middleware/errorHandler';
 import { genxMultimodalProvider } from '../providers/genx-multimodal.provider';
-import * as genxRegistry from './genx-model-registry.service';
 
 // Types
 export interface VideoProject {
@@ -253,14 +252,15 @@ export async function generateScene(sceneId: string, orgId: string): Promise<Vid
 
 async function executeSceneGeneration(sceneId: string, orgId: string, scene: VideoScene): Promise<void> {
   try {
-    // Find appropriate model
-    let modelId = scene.model_id;
+    // Scene models are selected and cost-locked by the deterministic project
+    // quote before execution. Catalogue order is never a valid customer route.
+    const modelId = scene.model_id;
     if (!modelId) {
-      const models = await genxRegistry.getAvailableModels('text_to_video');
-      if (models.length === 0) {
-        throw new AppError(400, 'No video generation model available', 'NO_MODEL');
-      }
-      modelId = models[0].id;
+      throw new AppError(
+        409,
+        'Quote and lock the video project before generating a scene',
+        'SCENE_MODEL_NOT_QUOTED'
+      );
     }
 
     // Build GenX parameters

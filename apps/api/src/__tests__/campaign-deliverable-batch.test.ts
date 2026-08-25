@@ -1,4 +1,6 @@
 import { applyRequestedDeliverables, normalizeRequestedDeliverables } from '../services/campaign-planner.service';
+import { buildCampaignRunSpecs } from '../services/campaign-production.service';
+import { OWNER_DELIVERABLE_KINDS, getDeliverableRoute } from '../services/marketing-deliverable-registry.service';
 
 describe('campaign deliverable batch contract', () => {
   const basePlan = {
@@ -17,8 +19,8 @@ describe('campaign deliverable batch contract', () => {
     ]);
 
     expect(normalized).toEqual([
-      { kind: 'video_ad', count: 1, platforms: [], format: undefined, duration_seconds: 15 },
-      { kind: 'image_ad', count: 5, platforms: [], format: undefined, duration_seconds: undefined },
+      { kind: 'video_ad', count: 1, platforms: [], format: 'Short video ad', duration_seconds: 15 },
+      { kind: 'image_ad', count: 5, platforms: [], format: 'Image ad', duration_seconds: undefined },
     ]);
   });
 
@@ -35,7 +37,58 @@ describe('campaign deliverable batch contract', () => {
     expect(batch.total_requested_assets).toBe(6);
     expect(batch.video_policy).toContain('up to 15 seconds');
     expect(requirements).toHaveLength(2);
-    expect(requirements[0]).toMatchObject({ format: 'short video ad', variations: 1, duration_seconds: 15, production_mode: 'economical_short_form_video', cta: 'Explore the Academy' });
-    expect(requirements[1]).toMatchObject({ format: 'image ad', variations: 5, production_mode: 'branded_marketing_asset', message: 'Practical learning for responsible horse owners' });
+    expect(requirements[0]).toMatchObject({ format: 'Short video ad', variations: 1, duration_seconds: 15, production_mode: 'economical_short_form_video', cta: 'Explore the Academy' });
+    expect(requirements[1]).toMatchObject({ format: 'Image ad', variations: 5, production_mode: 'branded_marketing_asset', message: 'Practical learning for responsible horse owners' });
+  });
+
+  it('expands 1 Video Ad plus 5 Image Ads into exactly six unique durable run keys and preserves them on retry', () => {
+    const plan = applyRequestedDeliverables(basePlan, normalizeRequestedDeliverables([
+      { kind: 'video_ad', count: 1, duration_seconds: 10 },
+      { kind: 'image_ad', count: 5 },
+    ]));
+    const first = buildCampaignRunSpecs(plan.asset_requirements as unknown[]);
+    const second = buildCampaignRunSpecs(plan.asset_requirements as unknown[]);
+    const firstKeys = first.map((run) => `${run.briefId}:${run.variant}`);
+
+    expect(first).toHaveLength(6);
+    expect(new Set(firstKeys).size).toBe(6);
+    expect(second.map((run) => `${run.briefId}:${run.variant}`)).toEqual(firstKeys);
+    expect(first.filter((run) => run.canonicalRoute?.kind === 'video_ad')).toHaveLength(1);
+    expect(first.filter((run) => run.canonicalRoute?.kind === 'image_ad')).toHaveLength(5);
+    expect(first[0]).toMatchObject({ operation: 'text_to_image', canonicalRoute: { composition: 'branded_video', maxDurationSeconds: 15 } });
+    expect(first.slice(1).every((run) => run.operation === 'text_to_image' && run.canonicalRoute?.composition === 'branded_static')).toBe(true);
+  });
+
+  it('keeps legacy or untrusted briefs at the stricter three-variation bound', () => {
+    const runs = buildCampaignRunSpecs([{ brief_id: 'legacy', format: 'image', variations: 12 }]);
+    expect(runs).toHaveLength(3);
+    expect(runs.map((run) => run.variant)).toEqual([1, 2, 3]);
+  });
+
+  it('maps every owner-visible deliverable explicitly with owner review and no blog fallback', () => {
+    const expected = {
+      campaign: ['campaign_bundle', 'text_generation'],
+      weekly_marketing: ['weekly_bundle', 'text_generation'],
+      social_ad: ['branded_static', 'text_to_image'],
+      image_ad: ['branded_static', 'text_to_image'],
+      video_ad: ['branded_video', 'text_to_image'],
+      social_post: ['branded_static', 'text_to_image'],
+      promotional_graphic: ['branded_static', 'text_to_image'],
+      website_banner: ['branded_static', 'text_to_image'],
+      email_campaign: ['branded_html', 'text_generation'],
+      landing_page: ['branded_html', 'text_generation'],
+      article: ['branded_copy', 'text_generation'],
+      offer_promotion: ['branded_static', 'text_to_image'],
+      retargeting_material: ['branded_static', 'text_to_image'],
+    } as const;
+
+    expect(OWNER_DELIVERABLE_KINDS).toHaveLength(13);
+    for (const kind of OWNER_DELIVERABLE_KINDS) {
+      const route = getDeliverableRoute(kind);
+      expect(route.requiresOwnerApproval).toBe(true);
+      expect([route.composition, route.ingredientOperation]).toEqual(expected[kind]);
+      expect(route.materialType).not.toBe('blog');
+    }
+    expect(() => getDeliverableRoute('free-form blog')).toThrow('Unsupported owner deliverable kind');
   });
 });

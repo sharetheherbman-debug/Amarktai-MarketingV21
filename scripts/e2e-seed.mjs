@@ -2,6 +2,8 @@
 import crypto from 'node:crypto';
 import bcrypt from 'bcryptjs';
 import pg from 'pg';
+import path from 'node:path';
+import { stat } from 'node:fs/promises';
 
 const { Client } = pg;
 const databaseUrl = String(process.env.DATABASE_URL || '').trim();
@@ -11,22 +13,31 @@ export const E2E = {
   userId: '10000000-0000-4000-8000-000000000001',
   organizationId: '10000000-0000-4000-8000-000000000002',
   contentId: '10000000-0000-4000-8000-000000000003',
+  brandLogoAssetId: '10000000-0000-4000-8000-000000000004',
   email: 'owner.e2e@example.test',
   password: 'E2e-owner-password-24!',
   recoveryCode: 'E2E-OWNER-RECOVERY-24',
 };
 
+const E2E_MODEL_IDS = ['gpt-5.6-luna', 'e2e-image-model', 'e2e-video-model'];
 const jwtSecret = String(process.env.JWT_SECRET || 'test-jwt-secret-that-is-long-enough');
 const recoveryHash = crypto.createHmac('sha256', jwtSecret)
   .update(E2E.recoveryCode.replace(/\s/g, '').toUpperCase()).digest('hex');
 const passwordHash = await bcrypt.hash(E2E.password, 12);
+const brandLogoPath = path.resolve(process.cwd(), 'tests/e2e/fixtures/acceptance-brand-logo.svg');
+const brandLogoStat = await stat(brandLogoPath);
 const client = new Client({ connectionString: databaseUrl });
 await client.connect();
 
 try {
   await client.query('BEGIN');
+  // Clear the isolated organization first so its governed-generation reservations
+  // release their price-snapshot foreign keys. The named catalogue fixtures are
+  // global, so only remove them after that candidate-owned history has cascaded.
   await client.query('DELETE FROM organizations WHERE id=$1', [E2E.organizationId]);
   await client.query('DELETE FROM users WHERE id=$1 OR email=$2', [E2E.userId, E2E.email]);
+  await client.query('DELETE FROM genx_price_snapshots WHERE model_id = ANY($1::text[])', [E2E_MODEL_IDS]);
+  await client.query('DELETE FROM genx_models WHERE id = ANY($1::text[])', [E2E_MODEL_IDS]);
   await client.query(
     `INSERT INTO organizations (id,name,slug,plan,status,settings)
      VALUES ($1,'Acceptance Workspace','acceptance-workspace','enterprise','active','{}')`,
@@ -60,6 +71,12 @@ try {
     [E2E.organizationId]
   );
   await client.query(
+    `INSERT INTO studio_assets
+       (id,organization_id,user_id,filename,original_name,mime_type,size_bytes,storage_path,url,metadata)
+     VALUES ($1,$2,$3,'acceptance-brand-logo.svg','acceptance-brand-logo.svg','image/svg+xml',$4,$5,$6,$7)`,
+    [E2E.brandLogoAssetId, E2E.organizationId, E2E.userId, brandLogoStat.size, brandLogoPath, `/api/v1/studio/assets/${E2E.brandLogoAssetId}`, JSON.stringify({ role: 'tenant_brand_logo', candidate_fixture: true })]
+  );
+  await client.query(
     `INSERT INTO brand_dna
        (organization_id,company_name,industry,brand_voice,target_audience,goals,keywords,
         writing_style,prohibited_phrases,preferred_ctas,colors,company_description,
@@ -67,7 +84,7 @@ try {
      VALUES ($1,'Acceptance Equine','Equestrian education','Clear, warm and evidence-led',$2,$3,$4,
        'Plain English with useful specifics',$5,$6,$7,
        'Practical equestrian learning and responsible products.','https://example.test',$8,
-       'professional',$9,'','{}','[]')`,
+       'professional',$9,$10,'{}','[]')`,
     [
       E2E.organizationId,
       JSON.stringify({ demographics: 'UK horse owners and riders', psychographics: 'Safety-conscious lifelong learners' }),
@@ -78,6 +95,7 @@ try {
       JSON.stringify({ primary: '#123456', secondary: '#ffffff', accent: '#abcdef' }),
       JSON.stringify(['Academy','Shop']),
       JSON.stringify(['Use verified claims only']),
+      `/api/v1/studio/assets/${E2E.brandLogoAssetId}`,
     ]
   );
   await client.query(

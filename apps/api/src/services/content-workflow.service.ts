@@ -54,11 +54,11 @@ async function markCampaignAssetDecision(
   });
   const runs = await client.query(
     `UPDATE campaign_asset_runs SET resolution_status=$1,owner_feedback=$2,
-       resolved_content_version=$3,resolution_reason=$4,
-       resolved_at=CASE WHEN $1='approved' THEN NOW() ELSE NULL END,updated_at=NOW()
-     WHERE organization_id=$5 AND content_id=$6
+       resolved_content_version=$4,resolution_reason=$5,
+       resolved_at=CASE WHEN $3::boolean THEN NOW() ELSE NULL END,updated_at=NOW()
+     WHERE organization_id=$6 AND content_id=$7
      RETURNING id,campaign_plan_id`,
-    [resolution, feedback, Number(content.version || 1), comments || null, orgId, content.id]
+    [resolution, feedback, decision === 'approved', Number(content.version || 1), comments || null, orgId, content.id]
   );
   if (decision !== 'approved') return;
   for (const run of runs.rows) {

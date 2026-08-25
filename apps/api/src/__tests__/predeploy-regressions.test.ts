@@ -166,6 +166,38 @@ describe('pre-deployment runtime regressions', () => {
     expect(page).toContain('Daily advertising budget');
   });
 
+  test('Marketing production remains explicitly routed, composed, quality-gated and rotation-safe', () => {
+    const production = read('apps/api/src/services/campaign-production.service.ts');
+    const studio = read('apps/api/src/services/studio.service.ts');
+    const router = read('apps/api/src/services/marketing-generation-policy.service.ts');
+    const compositor = read('apps/api/src/services/marketing-material-compositor.service.ts');
+    const ffmpeg = read('apps/api/src/services/ffmpeg.service.ts');
+    const videoPolicy = read('apps/api/src/services/economical-video-policy.service.ts');
+    const rotation = read('apps/api/src/services/campaign-creative-rotation.service.ts');
+    const rotationMigration = read('apps/api/src/db/migrations/038_campaign_creative_rotation.sql');
+
+    expect(production).toContain('buildCampaignRunSpecs(requirements)');
+    expect(production).toContain('model: modelRoute.modelId');
+    expect(production).toContain('routeMarketingGeneration');
+    expect(production).toContain('buildEconomicalVideoCostPlan');
+    expect(production).toContain('ON CONFLICT (campaign_plan_id,brief_id,variant_number)');
+    expect(studio).not.toContain('models[0].id');
+    expect(router).toContain("verification_status !== 'runtime_confirmed'");
+    expect(router).toContain('MARKETING_MODEL_ROUTE_UNAVAILABLE');
+    expect(router).toContain('MARKETING_PREMIUM_NOT_PERMITTED');
+    expect(compositor).toContain('resolveBrandIdentity');
+    expect(compositor).toContain("material_status='ready_for_review'");
+    expect(compositor).toContain("'ingredient_technical'");
+    expect(compositor).toContain('composeCampaignVideoMaterial');
+    expect(ffmpeg).toContain('composeEconomicalMarketingVideo');
+    expect(videoPolicy).toContain('raw_text_to_video: false');
+    expect(videoPolicy).toContain("scene_strategy: 'still_heavy'");
+    expect(rotation).toContain("status='scheduling'");
+    expect(rotation).toContain('schedulePostThroughControlCentre');
+    expect(rotationMigration).toContain('UNIQUE (organization_id,idempotency_key)');
+    expect(rotationMigration).toContain('UNIQUE (campaign_plan_id,campaign_asset_run_id,connection_id,scheduled_at)');
+  });
+
   test('external content ingestion uses the public-network fetch guard', () => {
     for (const service of [
       'apps/api/src/services/knowledge-ingestion.service.ts',

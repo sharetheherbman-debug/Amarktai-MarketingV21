@@ -395,3 +395,72 @@ export async function composeFinalVideo(
     };
   }
 }
+
+export interface EconomicalMarketingVideoOptions {
+  stillPath: string;
+  endCardPath: string;
+  outputPath: string;
+  durationSeconds: number;
+  subtitlePath?: string;
+  captionColor?: string;
+}
+
+/**
+ * Creates a bounded short-form marketing video from one governed still plus a
+ * deterministic branded end-card. It deliberately uses no raw text-to-video
+ * request: the only generated ingredient is the already-quoted still image.
+ */
+export async function composeEconomicalMarketingVideo(
+  options: EconomicalMarketingVideoOptions
+): Promise<FFmpegResult> {
+  const duration = Math.max(5, Math.min(15, Math.floor(options.durationSeconds || 15)));
+  const endCardDuration = Math.min(3, Math.max(2, Math.floor(duration / 3)));
+  const sceneDuration = Math.max(3, duration - endCardDuration);
+  const workPath = `${options.outputPath}.scene.mp4`;
+  const sceneFrames = sceneDuration * 30;
+  const videoFilter = [
+    `[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,zoompan=z='min(zoom+0.0006,1.12)':d=${sceneFrames}:s=1080x1920:fps=30,trim=duration=${sceneDuration},setpts=PTS-STARTPTS[scene]`,
+    `[1:v]scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih):color=black,trim=duration=${endCardDuration},setpts=PTS-STARTPTS[endcard]`,
+    '[scene][endcard]concat=n=2:v=1:a=0[videoout]',
+  ].join(';');
+  try {
+    await ffmpeg([
+      '-y',
+      '-loop', '1', '-t', String(sceneDuration), '-i', options.stillPath,
+      '-loop', '1', '-t', String(endCardDuration), '-i', options.endCardPath,
+      '-f', 'lavfi', '-t', String(duration), '-i', 'anullsrc=channel_layout=stereo:sample_rate=48000',
+      '-filter_complex', videoFilter,
+      '-map', '[videoout]', '-map', '2:a:0',
+      '-t', String(duration),
+      '-c:v', 'libx264', '-preset', 'medium', '-crf', '21', '-pix_fmt', 'yuv420p',
+      '-c:a', 'aac', '-b:a', '128k', '-ar', '48000', '-ac', '2',
+      '-movflags', '+faststart', workPath,
+    ]);
+    const finalResult = await composeFinalVideo(workPath, options.outputPath, {
+      durationSeconds: duration,
+      subtitlePath: options.subtitlePath,
+      captionColor: options.captionColor || '#FFFFFF',
+      captionPosition: 'bottom',
+      captionFontSize: 42,
+      originalAudioVolume: 0,
+    });
+    if (!finalResult.success) return finalResult;
+    if (Math.abs(finalResult.duration - duration) > 0.8) {
+      return { ...finalResult, success: false, error: `Expected a ${duration}-second promotional video, received ${finalResult.duration.toFixed(2)} seconds` };
+    }
+    return finalResult;
+  } catch (error) {
+    return {
+      success: false,
+      outputPath: options.outputPath,
+      duration: 0,
+      fileSize: 0,
+      videoCodec: '',
+      audioCodec: '',
+      resolution: '1080x1920',
+      error: error instanceof Error ? error.message : String(error),
+    };
+  } finally {
+    await fs.unlink(workPath).catch(() => undefined);
+  }
+}

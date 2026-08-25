@@ -4,6 +4,10 @@ import type { ContentPlatform, ContentType, GenerateContentRequest } from '../ty
 import { generationQueue } from './studio.service';
 import * as studioService from './studio.service';
 import { legacyProductLine, normalizeProductScopes } from '../utils/product-scope';
+import { getDeliverableRoute, type MarketingGenerationOperation } from './marketing-deliverable-registry.service';
+import { routeMarketingGeneration } from './marketing-generation-policy.service';
+import { composeCampaignMaterial, composeCampaignVideoMaterial } from './marketing-material-compositor.service';
+import { buildEconomicalVideoCostPlan } from './economical-video-policy.service';
 
 function asObject(value: unknown): Record<string, any> {
   if (value && typeof value === 'object') return value as Record<string, any>;
@@ -33,6 +37,33 @@ function planScopes(plan: Record<string, any>): string[] {
     ? (() => { try { return JSON.parse(plan.product_lines); } catch { return []; } })()
     : plan.product_lines;
   return normalizeProductScopes(Array.isArray(raw) && raw.length > 0 ? raw : plan.product_line);
+}
+
+export type CampaignRunSpec = {
+  brief: Record<string, any>;
+  briefId: string;
+  variant: number;
+  canonicalRoute: ReturnType<typeof getDeliverableRoute> | null;
+  operation: string | null;
+};
+
+/** The sole run-expansion path used before durable campaign_asset_runs upserts. */
+export function buildCampaignRunSpecs(requirements: unknown[]): CampaignRunSpec[] {
+  const specs: CampaignRunSpec[] = [];
+  requirements.forEach((requirement, index) => {
+    const brief = asObject(requirement);
+    const briefId = String(brief.brief_id || `brief-${index + 1}`).slice(0, 255);
+    const variationLimit = brief.governed_owner_deliverable === true ? 12 : 3;
+    const variants = Math.max(1, Math.min(Number(brief.variations || 1), variationLimit));
+    const canonicalRoute = brief.governed_owner_deliverable === true
+      ? getDeliverableRoute(brief.deliverable_kind)
+      : null;
+    const operation = canonicalRoute?.ingredientOperation || mediaOperation(String(brief.format || brief.content_type || ''));
+    for (let variant = 1; variant <= variants; variant += 1) {
+      specs.push({ brief, briefId, variant, canonicalRoute, operation });
+    }
+  });
+  return specs;
 }
 
 function assetPrompt(plan: Record<string, any>, brief: Record<string, any>, variant: number): string {
@@ -68,12 +99,7 @@ export async function queueCampaignProduction(planId: string, orgId: string, use
     ? plan.asset_requirements : JSON.parse(String(plan.asset_requirements || '[]'));
   if (requirements.length === 0) throw new AppError(409, 'The campaign has no asset briefs', 'CAMPAIGN_ASSETS_MISSING');
 
-  for (let index = 0; index < requirements.length; index += 1) {
-    const brief = asObject(requirements[index]);
-    const briefId = String(brief.brief_id || `brief-${index + 1}`).slice(0, 255);
-    const variants = Math.max(1, Math.min(Number(brief.variations || 1), 3));
-    for (let variant = 1; variant <= variants; variant += 1) {
-      const operation = mediaOperation(String(brief.format || brief.content_type || ''));
+  for (const { brief, briefId, variant, canonicalRoute, operation } of buildCampaignRunSpecs(requirements)) {
       const inserted = await query(
         `INSERT INTO campaign_asset_runs
            (organization_id,campaign_plan_id,brief_id,variant_number,product_line,product_lines,generation_kind,status,created_by)
@@ -105,10 +131,36 @@ export async function queueCampaignProduction(planId: string, orgId: string, use
           const boundedVideoDuration = operation === 'text_to_video'
             ? Math.max(5, Math.min(15, requestedDuration || 15))
             : undefined;
+          const premiumPermitted = brief.premium_permitted === true
+            && asObject(plan.constraints).premium_generation_approved === true;
+          const modelRoute = await routeMarketingGeneration({
+            organizationId: orgId,
+            operation: operation as MarketingGenerationOperation,
+            tier: brief.generation_tier || brief.production_tier || 'recommended',
+            quantity: 1,
+            campaignCreditLimit: Number(plan.generation_credit_limit || 0),
+            premiumPermitted,
+            requiredFormat: canonicalRoute?.defaultDimensions || String(brief.default_dimensions || brief.dimensions_or_length || ''),
+          });
+          const economicalVideoCostPlan = canonicalRoute?.composition === 'branded_video'
+            ? buildEconomicalVideoCostPlan(boundedVideoDuration || brief.duration_seconds, modelRoute)
+            : null;
+          const existingGeneration = run.studio_generation_id
+            ? await studioService.getGeneration(String(run.studio_generation_id), orgId)
+            : null;
+          if (existingGeneration?.status === 'completed' && (canonicalRoute?.composition === 'branded_static' || canonicalRoute?.composition === 'branded_video')) {
+            if (canonicalRoute.composition === 'branded_video') {
+              await composeCampaignVideoMaterial(String(run.id), orgId, userId);
+            } else {
+              await composeCampaignMaterial(String(run.id), orgId, userId);
+            }
+            continue;
+          }
           const generation = run.studio_generation_id
             ? await studioService.retryGeneration(String(run.studio_generation_id), orgId, userId)
             : await studioService.createGeneration(orgId, userId, {
               type: operation,
+              model: modelRoute.modelId,
               prompt,
               options: {
                 campaign_plan_id: planId,
@@ -123,6 +175,11 @@ export async function queueCampaignProduction(planId: string, orgId: string, use
                 duration_seconds: boundedVideoDuration,
                 production_mode: brief.production_mode || (operation === 'text_to_video' ? 'economical_short_form_video' : 'branded_marketing_asset'),
                 accessibility_text: brief.accessibility_requirements || [],
+                deliverable_kind: canonicalRoute?.kind || null,
+                material_type: canonicalRoute?.materialType || null,
+                composition_mode: canonicalRoute?.composition || null,
+                model_routing: modelRoute,
+                economical_video_cost_plan: economicalVideoCostPlan,
               },
             });
           await query(
@@ -166,7 +223,6 @@ export async function queueCampaignProduction(planId: string, orgId: string, use
           [error instanceof Error ? error.message.slice(0, 2000) : 'Asset could not be queued', run.id]
         );
       }
-    }
   }
   return listCampaignProduction(planId, orgId);
 }

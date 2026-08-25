@@ -8,6 +8,7 @@ import { checkMonitor } from './trend.service';
 import { refreshDueSources } from './knowledge.service';
 import { runGrowthDirector } from './growth-director.service';
 import { syncPublishedSocialPerformance } from './social-performance.service';
+import { syncCampaignCreativeRotationResults } from './campaign-creative-rotation.service';
 import * as genxRegistry from './genx-model-registry.service';
 import * as genxPricing from './genx-pricing.service';
 
@@ -96,6 +97,8 @@ class SchedulerService {
       if (result.attempted > 0) {
         logger.info(`Organic social performance: ${result.synced} synced, ${result.pending} pending, ${result.unsupported} unsupported, ${result.failed} failed`);
       }
+      const rotations = await syncCampaignCreativeRotationResults(100);
+      if (rotations > 0) logger.info(`Refreshed ${rotations} campaign creative rotation result snapshot(s)`);
     });
 
     this.scheduleTask('check-trend-monitors', 15 * 60 * 1000, async () => {

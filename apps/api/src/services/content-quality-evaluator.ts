@@ -88,7 +88,7 @@ export function evaluateContentQuality(input: QualityEvaluationInput): QualityDi
   });
 
   const approvedCtas = asStringArray(brief.calls_to_action);
-  const hasCta = approvedCtas.some((cta) => includesNormalised(text, cta)) || /\b(book|contact|discover|download|get started|join|learn more|register|shop|subscribe|try|visit)\b/i.test(text);
+  const hasCta = approvedCtas.some((cta) => includesNormalised(text, cta)) || /\b(book|contact|discover|download|enquire|explore|get started|join|learn more|register|shop|subscribe|try|visit)\b/i.test(text);
   dimensions.push({
     type: 'cta', score: hasCta ? 100 : 35, passed: hasCta,
     issues: hasCta ? [] : [{ type: 'missing_cta', message: 'No clear call to action was found.', severity: 'warning' }],

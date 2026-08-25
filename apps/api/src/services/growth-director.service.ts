@@ -316,6 +316,7 @@ async function submitQualityPassedAssets(campaignPlanId: string, organizationId:
        ON content.id=run.content_id AND content.organization_id=run.organization_id
      WHERE run.organization_id=$1 AND run.campaign_plan_id=$2
        AND run.status='completed'
+       AND (run.generation_kind='text' OR run.material_status='ready_for_review')
        AND run.resolution_status IN ('pending_generation','pending_review')`,
     [organizationId, campaignPlanId]
   );

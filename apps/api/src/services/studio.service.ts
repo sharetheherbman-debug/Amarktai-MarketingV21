@@ -455,11 +455,14 @@ export async function createGeneration(
       throw new AppError(400, `Selected model does not support ${operation}`, 'MODEL_OPERATION_UNSUPPORTED');
     }
   } else {
-    const models = await ensureAvailableModels(operation);
-    if (models.length === 0) {
-      throw new AppError(400, `No Amarktai Network model is currently available for ${operation}`, 'NO_MODEL_AVAILABLE');
-    }
-    modelId = models[0].id;
+    // Catalogue ordering is not a routing policy. Every caller must carry an
+    // explicit model chosen by its governed domain router (or an authenticated
+    // advanced Studio selection); this boundary fails closed by design.
+    throw new AppError(
+      400,
+      `An explicit approved model is required for ${operation}`,
+      'MODEL_SELECTION_REQUIRED'
+    );
   }
 
   const idempotencyKey =

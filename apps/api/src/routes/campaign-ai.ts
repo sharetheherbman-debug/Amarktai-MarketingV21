@@ -4,6 +4,7 @@ import { ApiResponse } from '../types';
 import * as plannerService from '../services/campaign-planner.service';
 import * as optimizationService from '../services/campaign-optimization.service';
 import * as productionService from '../services/campaign-production.service';
+import * as creativeRotationService from '../services/campaign-creative-rotation.service';
 import { normalizeProductScopes } from '../utils/product-scope';
 
 const router = Router();
@@ -93,6 +94,37 @@ router.get('/plans/:id/production', async (req: AuthRequest, res: Response<ApiRe
     const organizationId = String(req.query.organization_id || '');
     if (!organizationId) { res.status(400).json({ success: false, error: { message: 'organization_id required', code: 'BAD_REQUEST' } }); return; }
     res.json({ success: true, data: await productionService.listCampaignProduction(req.params.id, organizationId) });
+  } catch (error) { next(error); }
+});
+
+router.post('/plans/:id/rotation', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
+  try {
+    const organizationId = String(req.body.organization_id || '');
+    const connectionId = String(req.body.connection_id || '');
+    const startAt = String(req.body.start_at || '');
+    if (!organizationId || !connectionId || !startAt) {
+      res.status(400).json({ success: false, error: { message: 'organization_id, connection_id and start_at required', code: 'BAD_REQUEST' } }); return;
+    }
+    const rotations = await creativeRotationService.planCampaignCreativeRotation({
+      organizationId,
+      campaignPlanId: req.params.id,
+      connectionId,
+      startAt,
+      spacingHours: req.body.spacing_hours,
+      fatigueWindowHours: req.body.fatigue_window_hours,
+      maxSlots: req.body.max_slots,
+      userId: req.user!.userId,
+      requestedBy: 'user',
+    });
+    res.status(202).json({ success: true, data: rotations });
+  } catch (error) { next(error); }
+});
+
+router.get('/plans/:id/rotation', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
+  try {
+    const organizationId = String(req.query.organization_id || '');
+    if (!organizationId) { res.status(400).json({ success: false, error: { message: 'organization_id required', code: 'BAD_REQUEST' } }); return; }
+    res.json({ success: true, data: await creativeRotationService.listCampaignCreativeRotations(req.params.id, organizationId) });
   } catch (error) { next(error); }
 });
 
