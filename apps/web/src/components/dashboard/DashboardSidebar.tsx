@@ -4,9 +4,15 @@ import type { ComponentType } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import {
-  BarChart3, BookOpenCheck, BrainCircuit, CalendarRange, FileCheck2, FlaskConical,
-  LayoutDashboard, LogOut, Megaphone, Palette, PanelLeft, Plug, Send, Settings,
-  ShieldCheck, Sparkles, UsersRound,
+  BarChart3,
+  BrainCircuit,
+  CalendarRange,
+  LayoutDashboard,
+  LogOut,
+  Megaphone,
+  PanelLeft,
+  Settings,
+  Sparkles,
 } from 'lucide-react';
 import { useAuthStore } from '@/stores/auth.store';
 import { useUIStore } from '@/stores/ui.store';
@@ -14,35 +20,25 @@ import { cn, getInitials } from '@/lib/utils';
 import { MARKETING_BRAND_LOGO_URL, MARKETING_BRAND_NAME } from '@/lib/branding';
 
 type NavItem = { label: string; href: string; icon: ComponentType<{ className?: string }> };
-type NavSection = { title?: string; items: NavItem[] };
 
-const navigation: NavSection[] = [
-  { items: [
-    { label: 'Command Centre', href: '/dashboard', icon: LayoutDashboard },
-    { label: 'Business Brain', href: '/business-brain', icon: BrainCircuit },
-    { label: 'Research & Intelligence', href: '/intelligence', icon: FlaskConical },
-  ] },
-  { title: 'Plan & create', items: [
-    { label: 'Strategy & Campaigns', href: '/campaigns', icon: Megaphone },
-    { label: 'Content Studio', href: '/content-studio', icon: BookOpenCheck },
-    { label: 'Creative Studio', href: '/creative-studio', icon: Palette },
-    { label: 'Calendar & Production', href: '/content-studio/calendar', icon: CalendarRange },
-  ] },
-  { title: 'Reach & grow', items: [
-    { label: 'Publish & Channels', href: '/social', icon: Send },
-    { label: 'CRM', href: '/crm', icon: UsersRound },
-    { label: 'Analytics & Optimisation', href: '/analytics', icon: BarChart3 },
-  ] },
-  { title: 'Team & operations', items: [
-    { label: 'Marketing Team', href: '/marketing-team', icon: Sparkles },
-    { label: 'Workflows & Approvals', href: '/approvals', icon: FileCheck2 },
-    { label: 'Connections', href: '/connections', icon: Plug },
-    { label: 'Usage & Safety', href: '/usage-safety', icon: ShieldCheck },
-    { label: 'Settings', href: '/settings', icon: Settings },
-  ] },
+const navigation: NavItem[] = [
+  { label: 'Home', href: '/dashboard', icon: LayoutDashboard },
+  { label: 'Create', href: '/create', icon: Sparkles },
+  { label: 'Campaigns', href: '/campaigns', icon: Megaphone },
+  { label: 'Calendar', href: '/content-studio/calendar', icon: CalendarRange },
+  { label: 'Analytics', href: '/analytics', icon: BarChart3 },
+  { label: 'Growth Director', href: '/marketing-team', icon: BrainCircuit },
+  { label: 'Settings', href: '/settings', icon: Settings },
 ];
 
 function isActivePath(pathname: string, href: string): boolean {
+  if (href === '/create') {
+    return pathname === '/create'
+      || pathname === '/advertising'
+      || pathname.startsWith('/content-studio/generate')
+      || pathname.startsWith('/creative-studio');
+  }
+  if (href === '/marketing-team') return pathname === '/marketing-team';
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 
@@ -99,41 +95,48 @@ export function DashboardSidebar() {
           )}
         </div>
 
-        <nav className="min-h-0 flex-1 overflow-y-auto px-2 py-1" aria-label="Marketing workspace">
-          {navigation.map((section, sectionIndex) => (
-            <div key={`${section.title || 'main'}-${sectionIndex}`} className={cn(sectionIndex > 0 && 'mt-4')}>
-              {section.title && sidebarOpen && (
-                <p className="mb-1 px-3 pt-1 text-[9px] font-bold uppercase tracking-[0.15em] text-white/38">{section.title}</p>
-              )}
-
-              <div className="space-y-1">
-                {section.items.map((item) => {
-                  const active = isActivePath(pathname, item.href);
-                  const Icon = item.icon;
-
-                  return (
-                    <Link
-                      key={item.href}
-                      href={item.href}
-                      onClick={closeOnMobile}
-                      title={!sidebarOpen ? item.label : undefined}
-                      aria-current={active ? 'page' : undefined}
-                      className={cn(
-                        'flex h-10 items-center gap-3 rounded-lg px-3 text-[13px] font-medium transition-colors',
-                        active
-                          ? 'bg-white/12 font-semibold text-white'
-                          : 'text-white/78 hover:bg-white/8 hover:text-white',
-                        !sidebarOpen && 'justify-center px-0',
-                      )}
-                    >
-                      <Icon className={cn('h-4 w-4 shrink-0', active ? 'text-white' : 'text-white/68')} />
-                      {sidebarOpen && <span className="truncate">{item.label}</span>}
-                    </Link>
-                  );
-                })}
-              </div>
+        <nav className="min-h-0 flex-1 overflow-y-auto px-2 py-3" aria-label="Marketing workspace">
+          {sidebarOpen && (
+            <div className="mb-3 rounded-xl bg-white/8 px-3 py-3">
+              <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-white/45">What do you want to do?</p>
+              <p className="mt-1 text-xs leading-5 text-white/72">Create marketing, run campaigns and see results.</p>
             </div>
-          ))}
+          )}
+
+          <div className="space-y-1">
+            {navigation.map((item) => {
+              const active = isActivePath(pathname, item.href);
+              const Icon = item.icon;
+
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  onClick={closeOnMobile}
+                  title={!sidebarOpen ? item.label : undefined}
+                  aria-current={active ? 'page' : undefined}
+                  className={cn(
+                    'flex h-11 items-center gap-3 rounded-lg px-3 text-[13px] font-medium transition-colors',
+                    active
+                      ? 'bg-white/12 font-semibold text-white'
+                      : 'text-white/78 hover:bg-white/8 hover:text-white',
+                    !sidebarOpen && 'justify-center px-0',
+                  )}
+                >
+                  <Icon className={cn('h-4 w-4 shrink-0', active ? 'text-white' : 'text-white/68')} />
+                  {sidebarOpen && <span className="truncate">{item.label}</span>}
+                </Link>
+              );
+            })}
+          </div>
+
+          {sidebarOpen && (
+            <div className="mt-5 border-t border-white/10 px-3 pt-4">
+              <p className="text-[10px] leading-5 text-white/45">
+                Advanced studios, provider tools and operational controls remain available by direct route for administrators, but are intentionally hidden from the everyday client navigation.
+              </p>
+            </div>
+          )}
         </nav>
 
         <div className="shrink-0 border-t border-white/10 p-3">
