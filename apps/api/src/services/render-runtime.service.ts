@@ -10,6 +10,49 @@ const connection = {
 
 const renderQueue = new Queue('video-renders', { connection });
 
+async function ensureRenderQueued(
+  render: Record<string, any>,
+  projectId: string,
+  orgId: string
+) {
+  if (!['pending', 'queued'].includes(String(render.status || ''))) return render;
+
+  const jobId = String(render.queue_job_id || `render-${render.id}`);
+  let job = await renderQueue.getJob(jobId);
+  let created = false;
+
+  if (!job) {
+    job = await renderQueue.add(
+      'render',
+      { renderId: render.id, projectId, organizationId: orgId },
+      {
+        jobId,
+        attempts: 2,
+        backoff: { type: 'exponential', delay: 15000 },
+        removeOnComplete: { age: 86400 },
+        removeOnFail: { age: 604800 },
+      }
+    );
+    created = true;
+  }
+
+  const updated = await query(
+    `UPDATE video_renders SET status = 'queued', queue_job_id = $1, updated_at = NOW()
+     WHERE id = $2 RETURNING *`,
+    [String(job.id), render.id]
+  );
+
+  if (created) {
+    await query(
+      `INSERT INTO video_render_events (render_id, event_type, message)
+       VALUES ($1, 'render_queued', 'Render queued')`,
+      [render.id]
+    );
+  }
+
+  return updated.rows[0];
+}
+
 export async function createRender(projectId: string, orgId: string, requestedIdempotencyKey?: string) {
   const project = await query(
     'SELECT id FROM video_projects WHERE id = $1 AND organization_id = $2',
@@ -28,7 +71,7 @@ export async function createRender(projectId: string, orgId: string, requestedId
      LIMIT 1`,
     [projectId, orgId, idempotencyKey]
   );
-  if (replay.rows.length > 0) return replay.rows[0];
+  if (replay.rows.length > 0) return ensureRenderQueued(replay.rows[0], projectId, orgId);
 
   const active = await query(
     `SELECT * FROM video_renders
@@ -36,7 +79,7 @@ export async function createRender(projectId: string, orgId: string, requestedId
      ORDER BY created_at DESC LIMIT 1`,
     [projectId, orgId]
   );
-  if (active.rows.length > 0) return active.rows[0];
+  if (active.rows.length > 0) return ensureRenderQueued(active.rows[0], projectId, orgId);
 
   const result = await query(
     `INSERT INTO video_renders (project_id, organization_id, status, progress, idempotency_key)
@@ -47,30 +90,7 @@ export async function createRender(projectId: string, orgId: string, requestedId
      RETURNING *,(xmax=0) AS inserted`,
     [projectId, orgId, idempotencyKey]
   );
-  const render = result.rows[0];
-  if (render.inserted === false) return render;
-  const job = await renderQueue.add(
-    'render',
-    { renderId: render.id, projectId, organizationId: orgId },
-    {
-      jobId: `render:${render.id}`,
-      attempts: 2,
-      backoff: { type: 'exponential', delay: 15000 },
-      removeOnComplete: { age: 86400 },
-      removeOnFail: { age: 604800 },
-    }
-  );
-  const updated = await query(
-    `UPDATE video_renders SET status = 'queued', queue_job_id = $1, updated_at = NOW()
-     WHERE id = $2 RETURNING *`,
-    [String(job.id), render.id]
-  );
-  await query(
-    `INSERT INTO video_render_events (render_id, event_type, message)
-     VALUES ($1, 'render_queued', 'Render queued')`,
-    [render.id]
-  );
-  return updated.rows[0];
+  return ensureRenderQueued(result.rows[0], projectId, orgId);
 }
 
 export async function getRender(id: string, orgId: string) {
