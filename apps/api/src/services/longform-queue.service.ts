@@ -361,7 +361,7 @@ async function enqueueAudioStudioGeneration(input: {
     `INSERT INTO studio_generations (
        organization_id,user_id,type,model,prompt,options,provider,status,idempotency_key,metadata
      ) VALUES ($1,$2,$3,$4,$5,$6::jsonb,'genx','pending',$7,$8::jsonb)
-     ON CONFLICT (organization_id,idempotency_key) DO NOTHING
+     ON CONFLICT (idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING
      RETURNING id`,
     [
       input.orgId,
