@@ -1,6 +1,7 @@
 import { Queue } from 'bullmq';
 import { query } from '../config/database';
 import { NotFoundError, AppError } from '../middleware/errorHandler';
+import * as studioService from './studio.service';
 
 const connection = {
   host: process.env.REDIS_HOST || 'localhost',
@@ -9,6 +10,137 @@ const connection = {
 };
 
 const renderQueue = new Queue('video-renders', { connection });
+
+function objectValue(value: unknown): Record<string, any> {
+  if (!value) return {};
+  if (typeof value === 'object' && !Array.isArray(value)) return value as Record<string, any>;
+  try {
+    const parsed = JSON.parse(String(value));
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? parsed as Record<string, any>
+      : {};
+  } catch {
+    return {};
+  }
+}
+
+function assetIdFromInternalUrl(value: unknown): string | null {
+  const match = String(value || '').match(/^\/api\/v1\/studio\/assets\/([0-9a-f-]{36})(?:$|[?#/])/i);
+  return match?.[1] || null;
+}
+
+async function verifyAudioAsset(
+  assetId: string,
+  orgId: string,
+  role: 'voice' | 'music'
+): Promise<{ id: string; url: string }> {
+  const result = await query(
+    `SELECT id,url,mime_type
+     FROM studio_assets
+     WHERE id=$1 AND organization_id=$2 AND deleted_at IS NULL
+     LIMIT 1`,
+    [assetId, orgId]
+  );
+  const asset = result.rows[0];
+  if (!asset) {
+    throw new AppError(409, `${role} audio asset is not available for this organization`, 'LONGFORM_AUDIO_ASSET_MISSING');
+  }
+  if (!String(asset.mime_type || '').toLowerCase().startsWith('audio/')) {
+    throw new AppError(409, `${role} asset is not an audio file`, 'LONGFORM_AUDIO_ASSET_INVALID');
+  }
+  const url = String(asset.url || `/api/v1/studio/assets/${asset.id}`);
+  return { id: String(asset.id), url };
+}
+
+async function reconcileAudioRole(
+  project: Record<string, any>,
+  orgId: string,
+  role: 'voice' | 'music'
+): Promise<void> {
+  const field = role === 'voice' ? 'voice_settings' : 'music_settings';
+  const settings = objectValue(project[field]);
+  if (settings.enabled !== true) return;
+
+  const configuredAssetId = String(settings.asset_id || assetIdFromInternalUrl(settings.asset_url) || '').trim();
+  if (configuredAssetId) {
+    const asset = await verifyAudioAsset(configuredAssetId, orgId, role);
+    await query(
+      `UPDATE video_projects
+       SET ${field}=COALESCE(${field},'{}'::jsonb) || $1::jsonb,updated_at=NOW()
+       WHERE id=$2 AND organization_id=$3`,
+      [
+        JSON.stringify({
+          asset_id: asset.id,
+          asset_url: asset.url,
+          delivery_status: 'saved',
+          generation_status: settings.generation_status || 'completed',
+        }),
+        project.id,
+        orgId,
+      ]
+    );
+    return;
+  }
+
+  const generationId = String(settings.generation_id || '').trim();
+  if (!generationId) {
+    throw new AppError(
+      409,
+      `${role} generation is enabled but no generated or organization-owned audio asset is configured`,
+      'LONGFORM_AUDIO_NOT_READY'
+    );
+  }
+
+  const generation = await studioService.getGeneration(generationId, orgId);
+  if (['pending', 'queued', 'processing', 'pending_control'].includes(generation.status)) {
+    throw new AppError(409, `${role} generation is not complete yet`, 'LONGFORM_AUDIO_NOT_READY');
+  }
+  if (['failed', 'cancelled'].includes(generation.status)) {
+    throw new AppError(409, `${role} generation did not complete successfully`, 'LONGFORM_AUDIO_GENERATION_FAILED');
+  }
+  if (generation.status !== 'completed') {
+    throw new AppError(409, `${role} generation is not in a renderable state`, 'LONGFORM_AUDIO_NOT_READY');
+  }
+  if (generation.delivery_status !== 'saved' || !generation.primary_output_url) {
+    throw new AppError(
+      409,
+      `${role} generation completed but its durable Studio asset is not available`,
+      'LONGFORM_AUDIO_DELIVERY_UNAVAILABLE'
+    );
+  }
+
+  const metadata = objectValue(generation.metadata);
+  const durableAssetId = String(
+    metadata.studio_asset_id || assetIdFromInternalUrl(generation.primary_output_url) || ''
+  ).trim();
+  if (!durableAssetId) {
+    throw new AppError(409, `${role} durable Studio asset ID is missing`, 'LONGFORM_AUDIO_DELIVERY_UNAVAILABLE');
+  }
+  const asset = await verifyAudioAsset(durableAssetId, orgId, role);
+
+  await query(
+    `UPDATE video_projects
+     SET ${field}=COALESCE(${field},'{}'::jsonb) || $1::jsonb,updated_at=NOW()
+     WHERE id=$2 AND organization_id=$3`,
+    [
+      JSON.stringify({
+        generation_id: generation.id,
+        generation_status: generation.status,
+        provider_job_id: generation.provider_job_id,
+        asset_id: asset.id,
+        asset_url: asset.url,
+        delivery_status: 'saved',
+      }),
+      project.id,
+      orgId,
+    ]
+  );
+}
+
+async function reconcileProjectAudio(project: Record<string, any>, orgId: string): Promise<void> {
+  await reconcileAudioRole(project, orgId, 'voice');
+  await reconcileAudioRole(project, orgId, 'music');
+}
 
 async function ensureRenderQueued(
   render: Record<string, any>,
@@ -54,11 +186,17 @@ async function ensureRenderQueued(
 }
 
 export async function createRender(projectId: string, orgId: string, requestedIdempotencyKey?: string) {
-  const project = await query(
-    'SELECT id FROM video_projects WHERE id = $1 AND organization_id = $2',
+  const projectResult = await query(
+    'SELECT * FROM video_projects WHERE id = $1 AND organization_id = $2',
     [projectId, orgId]
   );
-  if (project.rows.length === 0) throw new NotFoundError('Video project');
+  if (projectResult.rows.length === 0) throw new NotFoundError('Video project');
+  const project = projectResult.rows[0] as Record<string, any>;
+
+  // Audio reconciliation deliberately happens before replay lookup or render-row
+  // insertion. A render request therefore cannot create executable work until
+  // every enabled generated audio track is a durable organization-owned asset.
+  await reconcileProjectAudio(project, orgId);
 
   const idempotencyKey = String(requestedIdempotencyKey || `longform-project:${projectId}:render:v1`).trim();
   if (idempotencyKey.length < 8 || idempotencyKey.length > 255) {
