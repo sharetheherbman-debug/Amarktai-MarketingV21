@@ -67,6 +67,10 @@ function statusWord(value: unknown, fallback: string) {
   return text ? text.replaceAll('_', ' ') : fallback;
 }
 
+function lifecycleProgress(phase: unknown): number {
+  return ({ observing: 8, planning: 22, producing: 48, quality_review: 66, awaiting_owner_approval: 78, distributing: 88, measuring: 94, optimizing: 97, completed: 100, failed: 100 } as Record<string, number>)[String(phase || '')] || 0;
+}
+
 export default function DashboardPage() {
   const { user, currentOrganization } = useAuthStore();
   const [summary, setSummary] = useState<Summary>(emptySummary);
@@ -145,10 +149,13 @@ export default function DashboardPage() {
   const paused = summary.control.emergency_stop === true;
   const mode = statusWord(summary.control.operating_mode, 'unavailable');
   const availableCredits = summary.wallet.available_credits ?? summary.wallet.balance;
+  const directorCycles = Array.isArray(summary.director.cycles) ? summary.director.cycles as Row[] : [];
+  const latestDirectorCycle = directorCycles[0] || {};
   const directorState = statusWord(
-    summary.director.status ?? summary.director.state ?? summary.director.phase ?? summary.director.current_phase,
+    latestDirectorCycle.status ?? latestDirectorCycle.phase ?? summary.director.status ?? summary.director.state,
     'Ready to coordinate'
   );
+  const directorProgress = lifecycleProgress(latestDirectorCycle.status ?? latestDirectorCycle.phase);
 
   const startDirectorCycle = async () => {
     const objective = directorCommand.trim();
@@ -181,9 +188,9 @@ export default function DashboardPage() {
 
   const quickActions = [
     { href: '/business-brain', title: 'Analyse website', description: 'Build or refresh the Business Brain.', icon: BrainCircuit },
-    { href: '/campaigns/new', title: 'Plan campaign', description: 'Start with strategy, audience and objectives.', icon: Megaphone },
-    { href: '/content-studio/generate', title: 'Create content', description: 'Generate governed written marketing content.', icon: Sparkles },
-    { href: '/creative-studio', title: 'Creative Studio', description: 'Build visual, video and long-form assets.', icon: Sparkles },
+    { href: '/create', title: 'Create marketing', description: 'Request campaign outcomes and governed deliverable batches.', icon: Megaphone },
+    { href: '/campaigns', title: 'Campaign workspace', description: 'Review strategy, materials, calendar and progress.', icon: Sparkles },
+    { href: '/usage-safety', title: 'Spend controls', description: 'Review limits, operating mode and Emergency Stop.', icon: ShieldCheck },
     { href: '/approvals', title: 'Review approvals', description: `${metrics.approvals} item${metrics.approvals === 1 ? '' : 's'} waiting for owner review.`, icon: FileCheck2 },
     { href: '/connections', title: 'Connect channel', description: 'Connect publishing and measurement services.', icon: Plug },
   ];
@@ -255,8 +262,9 @@ export default function DashboardPage() {
 
         <div className="ep-card p-5 sm:p-6">
           <p className="ep-section-label">Marketing Director</p>
-          <div className="mt-4 flex items-start gap-3"><div className="rounded-xl bg-[var(--ep-blue-soft)] p-2.5 text-[var(--ep-blue)]"><UsersRound className="h-5 w-5" /></div><div><h2 className="font-extrabold capitalize text-[var(--ep-navy)]">{directorState}</h2><p className="mt-1 text-sm leading-5 text-[var(--ep-text-muted)]">Coordinates the existing specialist workforce around business context, campaigns and owner decisions.</p></div></div>
-          <Link href="/marketing-team" className="mt-5 inline-flex items-center gap-1.5 text-sm font-extrabold text-[var(--ep-blue)]">Open Marketing Team <ArrowRight className="h-4 w-4" /></Link>
+          <div className="mt-4 flex items-start gap-3"><div className="rounded-xl bg-[var(--ep-blue-soft)] p-2.5 text-[var(--ep-blue)]"><UsersRound className="h-5 w-5" /></div><div><h2 className="font-extrabold capitalize text-[var(--ep-navy)]">{directorState}</h2><p className="mt-1 text-sm leading-5 text-[var(--ep-text-muted)]">{latestDirectorCycle.objective ? `Working on: ${String(latestDirectorCycle.objective)}` : 'Coordinates the specialist workforce around business context, campaign batches and owner decisions.'}</p></div></div>
+          {directorCycles.length > 0 && <><div className="mt-4 h-2 overflow-hidden rounded-full bg-[var(--ep-surface-subtle)]"><div className="h-full rounded-full bg-[var(--ep-blue)] transition-all" style={{ width: `${directorProgress}%` }} /></div><p className="mt-2 text-xs leading-5 text-[var(--ep-text-soft)]">{directorProgress}% through the recorded lifecycle. Marketing pauses for owner approval before any policy-controlled release.</p></>}
+          <Link href="/campaigns" className="mt-5 inline-flex items-center gap-1.5 text-sm font-extrabold text-[var(--ep-blue)]">Open campaign work <ArrowRight className="h-4 w-4" /></Link>
         </div>
       </section>
 

@@ -79,12 +79,14 @@ function readMetrics(value: Campaign['metrics']): Record<string, number> {
 }
 
 function chooseModel(models: StudioModel[], tier: QualityTier): StudioModel | undefined {
-  const available = models.filter((model) => model.status !== 'unavailable');
+  // Customer tiers map only to reviewed, policy-approved routes. Never fall back
+  // to an arbitrary runtime model: an unavailable tier must remain unavailable.
+  const available = models.filter((model) => model.status === undefined || model.status === 'available' || model.status === 'healthy');
   for (const id of IMAGE_TIER_PREFERENCES[tier]) {
     const match = available.find((model) => model.id === id);
     if (match) return match;
   }
-  return available[0];
+  return undefined;
 }
 
 function splitWords(ctx: CanvasRenderingContext2D, text: string, maxWidth: number): string[] {
@@ -296,7 +298,7 @@ export default function AdvertisingPage() {
       return;
     }
     if (!selectedModel) {
-      setError('No priced image model is currently available.');
+      setError('The selected quality route is not currently available. Choose another quality level or return when the approved route is healthy.');
       return;
     }
     if (!visualPrompt.trim() || !headline.trim()) {
@@ -393,7 +395,7 @@ export default function AdvertisingPage() {
         <div className="mt-2 grid grid-cols-3 gap-2">
           {(Object.keys(TIER_COPY) as QualityTier[]).map((item) => <button key={item} type="button" onClick={() => setTier(item)} className={tier === item ? 'rounded-xl border border-[var(--ep-blue)] bg-[var(--ep-blue-soft)] p-3 text-left' : 'rounded-xl border border-[var(--ep-border)] bg-white p-3 text-left hover:border-[var(--ep-border-strong)]'}><span className="block text-xs font-extrabold text-[var(--ep-navy)]">{TIER_COPY[item].title}</span><span className="mt-1 block text-[10px] leading-4 text-[var(--ep-text-muted)]">{TIER_COPY[item].detail}</span></button>)}
         </div>
-        <p className="mt-2 text-xs text-[var(--ep-text-soft)]">Model: <span className="font-bold text-[var(--ep-text-muted)]">{selectedModel?.name || (loading ? 'Loading…' : 'Unavailable')}</span></p>
+        <p className="mt-2 text-xs text-[var(--ep-text-soft)]">Creation route: <span className="font-bold text-[var(--ep-text-muted)]">{selectedModel ? `${TIER_COPY[tier].title} route available` : (loading ? 'Checking availability…' : 'Unavailable')}</span></p>
 
         <label className="mt-5 block text-xs font-extrabold uppercase tracking-wide text-[var(--ep-text-muted)]">Ad format</label>
         <select value={format} onChange={(event) => setFormat(event.target.value as AdFormat)} className="ep-input mt-2 min-h-11 px-3 text-sm">{(Object.entries(FORMAT_PRESETS) as Array<[AdFormat, (typeof FORMAT_PRESETS)[AdFormat]]>).map(([key, preset]) => <option key={key} value={key}>{preset.label} · {preset.width}×{preset.height}</option>)}</select>

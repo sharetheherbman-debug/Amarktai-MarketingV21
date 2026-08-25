@@ -37,8 +37,16 @@ function planScopes(plan: Record<string, any>): string[] {
 
 function assetPrompt(plan: Record<string, any>, brief: Record<string, any>, variant: number): string {
   const scopes = planScopes(plan);
-  return `Create variation ${variant} of this internally validated campaign asset brief.
-Use the validated strategy and business facts as the only source of claims. Preserve the offer, central concept and CTA while adapting structure and length to the specified channel. Never invent facts, statistics, testimonials, guarantees, certifications or prices. Keep facts from different products/services correctly attributed when multiple scopes are selected.
+  return `Create variation ${variant} of this internally validated marketing deliverable.
+Use the validated strategy and business facts as the only source of claims. Preserve the offer, central concept and CTA while adapting composition, hook, pacing and hierarchy to the specified channel. Never invent facts, statistics, testimonials, guarantees, certifications, prices, product capability or proof. Keep facts from different products/services correctly attributed when multiple scopes are selected.
+
+MARKETING QUALITY REQUIREMENTS:
+- Produce a conversion-oriented promotional deliverable, not a generic aesthetic image or filler content.
+- Make the subject, offer context and campaign objective immediately clear for the intended platform.
+- Use a polished layout with clean focal hierarchy, suitable contrast and safe negative space for deterministic branded overlays where relevant.
+- Do not generate textual claims, logos, watermarks, UI or illegible pseudo-text inside visual media. Those are applied only by an approved composition step.
+- Respect the campaign visual direction, voice, approved CTA and accessibility requirements.
+- This output remains pending review until the durable quality and approval gates complete; do not imply that unreviewed media is client-ready.
 
 VALIDATED CAMPAIGN:
 ${JSON.stringify({ product_lines: scopes.length > 0 ? scopes : ['unclassified'], brief: asObject(plan.brief), creative_concept: asObject(plan.creative_concept), messaging_plan: asObject(plan.messaging_plan), constraints: asObject(plan.constraints) }, null, 2)}
@@ -93,6 +101,10 @@ export async function queueCampaignProduction(planId: string, orgId: string, use
 
       try {
         if (operation) {
+          const requestedDuration = Number(brief.duration_seconds || 0);
+          const boundedVideoDuration = operation === 'text_to_video'
+            ? Math.max(5, Math.min(15, requestedDuration || 15))
+            : undefined;
           const generation = run.studio_generation_id
             ? await studioService.retryGeneration(String(run.studio_generation_id), orgId, userId)
             : await studioService.createGeneration(orgId, userId, {
@@ -105,7 +117,11 @@ export async function queueCampaignProduction(planId: string, orgId: string, use
                 product_line: productLine,
                 product_lines: productLines,
                 idempotency_key: `campaign-asset:${run.id}`,
-                quantity: Number(brief.duration_seconds || 1),
+                // A variation is one governed provider request. Duration is never a
+                // quantity: this avoids accidentally creating many paid jobs.
+                quantity: 1,
+                duration_seconds: boundedVideoDuration,
+                production_mode: brief.production_mode || (operation === 'text_to_video' ? 'economical_short_form_video' : 'branded_marketing_asset'),
                 accessibility_text: brief.accessibility_requirements || [],
               },
             });

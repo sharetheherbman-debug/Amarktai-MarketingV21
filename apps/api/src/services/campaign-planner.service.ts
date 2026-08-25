@@ -50,6 +50,14 @@ export interface CalendarEntry {
   status: string;
 }
 
+export interface RequestedDeliverable {
+  kind: 'campaign' | 'weekly_marketing' | 'social_ad' | 'image_ad' | 'video_ad' | 'social_post' | 'promotional_graphic' | 'website_banner' | 'email_campaign' | 'landing_page' | 'article' | 'offer_promotion' | 'retargeting_material';
+  count: number;
+  platforms?: string[];
+  format?: string;
+  duration_seconds?: number;
+}
+
 export interface CampaignPlanInput {
   name: string;
   goal: string;
@@ -72,6 +80,8 @@ export interface CampaignPlanInput {
   success_criteria?: string[];
   generation_credit_limit?: number;
   language?: string;
+  /** Owner-facing marketing outcomes requested as one bounded campaign batch. */
+  requested_deliverables?: RequestedDeliverable[];
   idempotency_key?: string;
 }
 
@@ -98,6 +108,60 @@ const REQUIRED_PLAN_KEYS = [
   'brief', 'strategy', 'creative_concept', 'messaging_plan', 'channels',
   'content_calendar', 'asset_requirements', 'kpis', 'optimization_plan', 'constraints',
 ] as const;
+
+export function normalizeRequestedDeliverables(value: CampaignPlanInput['requested_deliverables']): RequestedDeliverable[] {
+  const supported = new Set<RequestedDeliverable['kind']>([
+    'campaign','weekly_marketing','social_ad','image_ad','video_ad','social_post','promotional_graphic','website_banner','email_campaign','landing_page','article','offer_promotion','retargeting_material',
+  ]);
+  return (Array.isArray(value) ? value : []).slice(0, 12).flatMap((item) => {
+    const kind = String(item?.kind || '') as RequestedDeliverable['kind'];
+    if (!supported.has(kind)) return [];
+    const count = Math.max(1, Math.min(12, Math.floor(Number(item?.count || 1))));
+    const platforms = Array.isArray(item?.platforms) ? item.platforms.map(String).filter(Boolean).slice(0, 6) : [];
+    return [{ kind, count, platforms, format: String(item?.format || '').slice(0, 80) || undefined, duration_seconds: kind === 'video_ad' ? (Math.max(5, Math.min(15, Math.floor(Number(item?.duration_seconds || 15)))) || 15) : undefined }];
+  });
+}
+
+function deliverableFormat(kind: RequestedDeliverable['kind']): string {
+  return ({
+    campaign: 'campaign marketing set', weekly_marketing: 'weekly marketing set', social_ad: 'social ad', image_ad: 'image ad', video_ad: 'short video ad', social_post: 'social post', promotional_graphic: 'promotional graphic', website_banner: 'website banner', email_campaign: 'email campaign', landing_page: 'landing page', article: 'article', offer_promotion: 'offer promotion', retargeting_material: 'retargeting creative',
+  } as Record<RequestedDeliverable['kind'], string>)[kind];
+}
+
+export function applyRequestedDeliverables(plan: Record<string, any>, requested: RequestedDeliverable[]): Record<string, any> {
+  if (requested.length === 0) return plan;
+  const brief = plan.brief && typeof plan.brief === 'object' ? plan.brief : {};
+  const creative = plan.creative_concept && typeof plan.creative_concept === 'object' ? plan.creative_concept : {};
+  const messaging = plan.messaging_plan && typeof plan.messaging_plan === 'object' ? plan.messaging_plan : {};
+  const cta = Array.isArray(brief.calls_to_action) ? String(brief.calls_to_action[0] || '') : '';
+  const requirements = requested.map((deliverable, index) => ({
+    brief_id: `owner-deliverable-${index + 1}-${deliverable.kind}`,
+    platform: deliverable.platforms?.[0] || (deliverable.kind === 'email_campaign' ? 'email' : deliverable.kind === 'website_banner' || deliverable.kind === 'landing_page' ? 'website' : deliverable.kind === 'article' ? 'blog' : 'social'),
+    format: deliverable.format || deliverableFormat(deliverable.kind),
+    purpose: `${deliverable.count} ${deliverableFormat(deliverable.kind)}${deliverable.count === 1 ? '' : 's'} for the owner-requested campaign outcome`,
+    hook: String(creative.hook || creative.central_idea || ''),
+    message: String(messaging.primary_message || brief.objective || ''),
+    cta,
+    dimensions_or_length: deliverable.duration_seconds ? `${deliverable.duration_seconds} seconds maximum` : '',
+    duration_seconds: deliverable.duration_seconds,
+    accessibility_requirements: ['Use legible text, brand-safe contrast and accurate alt text where applicable.'],
+    variations: deliverable.count,
+    production_mode: deliverable.kind === 'video_ad' ? 'economical_short_form_video' : 'branded_marketing_asset',
+  }));
+  return {
+    ...plan,
+    strategy: {
+      ...(plan.strategy || {}),
+      deliverable_batch: {
+        requested_deliverables: requested,
+        total_requested_assets: requested.reduce((total, item) => total + item.count, 0),
+        production_policy: 'Create one governed campaign batch. Keep brand, claims and CTA consistent while varying platform-ready executions.',
+        video_policy: 'Use one bounded short-form route of up to 15 seconds. Use composition assets only when that runtime is available; never treat duration as a quantity or default to an expensive 30-second generation.',
+      },
+    },
+    asset_requirements: requirements,
+  };
+}
 
 function parseGeneratedPlan(content: string): Record<string, any> {
   const unfenced = content.replace(/```(?:json)?\s*/gi, '').replace(/```/g, '').trim();
@@ -163,6 +227,7 @@ export async function generatePlan(orgId: string, input: CampaignPlanInput, user
     success_criteria: input.success_criteria || [],
     generation_credit_limit: input.generation_credit_limit || 0,
     language: input.language || 'en-GB',
+    requested_deliverables: normalizeRequestedDeliverables(input.requested_deliverables),
   };
 
   const prompt = `You are the connected Marketing workspace's senior campaign strategist and creative director.
@@ -180,7 +245,7 @@ Adapt each asset to its platform rather than duplicating identical copy. Connect
 Return strict JSON only with this shape:
 {
   "brief": {"objective_stage":"conversion","objective":"","success_criteria":[],"audience_segments":[{"name":"","needs":[],"objections":[],"motivations":[]}],"offer":"","value_proposition":"","proof_points":[],"calls_to_action":[],"language":"en-GB"},
-  "strategy": {"overview":"","positioning":"","journey":[],"key_messages":[],"channel_rationale":{}},
+  "strategy": {"overview":"","positioning":"","journey":[],"key_messages":[],"channel_rationale":{},"deliverable_batch":{"summary":"","production_approach":"","brand_consistency_notes":[]}},
   "creative_concept": {"name":"","central_idea":"","hook":"","narrative":"","visual_direction":"","voice_direction":""},
   "messaging_plan": {"primary_message":"","supporting_messages":[],"objection_responses":[],"cta_hierarchy":[]},
   "channels": {"social":{},"email":{},"content":{},"seo":{},"advertising":{}},
@@ -204,7 +269,10 @@ Return strict JSON only with this shape:
       payload: { campaign_name: input.name, objective_stage: factualInputs.objective_stage, product_lines: productLines },
     });
 
-    const parsed = parseGeneratedPlan(result.content);
+    const parsed = applyRequestedDeliverables(
+      parseGeneratedPlan(result.content),
+      normalizeRequestedDeliverables(input.requested_deliverables),
+    );
     const missingInformation = Array.isArray(parsed.constraints?.missing_information)
       ? parsed.constraints.missing_information.filter((item: unknown) => String(item || '').trim())
       : [];

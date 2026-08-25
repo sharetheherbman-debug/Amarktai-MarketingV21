@@ -2,82 +2,47 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
-import { ArrowRight, CircleDollarSign, FileCheck2, Loader2, ShieldCheck, TriangleAlert } from 'lucide-react';
+import { ArrowRight, CircleDollarSign, FileCheck2, Loader2, PauseCircle, Save, ShieldCheck, TriangleAlert } from 'lucide-react';
 import { api } from '@/lib/api';
 import type { ApiResponse } from '@/types';
 
+type OperatingMode = 'manual' | 'approval' | 'autonomous';
+type Channel = 'content' | 'social' | 'email' | 'advertising' | 'seo' | 'analytics';
 type Control = {
-  emergency_stop?: boolean;
-  operating_mode?: string;
-  status?: string;
-  daily_generation_credit_limit?: number | string | null;
-  monthly_generation_credit_limit?: number | string | null;
+  emergency_stop?: boolean; operating_mode?: OperatingMode; status?: string;
+  daily_generation_credit_limit?: number | string | null; per_action_credit_limit?: number | string | null;
+  daily_ad_budget_pence?: number | string | null; per_campaign_ad_limit_pence?: number | string | null;
+  approval_credit_threshold?: number | string | null; approval_ad_threshold_pence?: number | string | null;
+  allowed_channels?: Channel[]; require_approval_for_new_channel?: boolean; require_approval_for_new_audience?: boolean; require_approval_for_price_claims?: boolean;
+  runtime?: { state?: string; can_execute_autonomously?: boolean }; today?: { generation_credits_used?: number; generation_credits_remaining?: number; daily_generation_credit_limit?: number };
 };
+type Wallet = { available_credits?: number | string; balance?: number | string; reserved_credits?: number | string; total_reserved?: number | string };
+type Draft = { operating_mode: OperatingMode; daily_generation_credit_limit: string; per_action_credit_limit: string; per_campaign_ad_limit_pence: string; approval_credit_threshold: string; allowed_channels: Channel[]; require_approval_for_new_channel: boolean; require_approval_for_new_audience: boolean; require_approval_for_price_claims: boolean };
 
-type Wallet = {
-  available_credits?: number | string;
-  balance?: number | string;
-  reserved_credits?: number | string;
-  total_reserved?: number | string;
-};
-
-function number(value: unknown) {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed.toLocaleString() : '—';
-}
+const channels: Array<{ key: Channel; label: string; note: string }> = [
+  { key: 'content', label: 'Content', note: 'Draft and approved written material' }, { key: 'social', label: 'Social', note: 'Scheduled social delivery where connected' }, { key: 'email', label: 'Email', note: 'Controlled email delivery' }, { key: 'advertising', label: 'Advertising', note: 'Approved advertising actions' }, { key: 'seo', label: 'SEO', note: 'Search and site recommendations' }, { key: 'analytics', label: 'Analytics', note: 'Performance measurement' },
+];
+const emptyDraft: Draft = { operating_mode: 'approval', daily_generation_credit_limit: '0', per_action_credit_limit: '0', per_campaign_ad_limit_pence: '0', approval_credit_threshold: '0', allowed_channels: [], require_approval_for_new_channel: true, require_approval_for_new_audience: true, require_approval_for_price_claims: true };
+function number(value: unknown) { const parsed = Number(value); return Number.isFinite(parsed) ? parsed.toLocaleString() : '—'; }
+function draftFrom(control: Control): Draft { return { operating_mode: control.operating_mode || 'approval', daily_generation_credit_limit: String(control.daily_generation_credit_limit ?? 0), per_action_credit_limit: String(control.per_action_credit_limit ?? 0), per_campaign_ad_limit_pence: String(control.per_campaign_ad_limit_pence ?? 0), approval_credit_threshold: String(control.approval_credit_threshold ?? 0), allowed_channels: Array.isArray(control.allowed_channels) ? control.allowed_channels : [], require_approval_for_new_channel: control.require_approval_for_new_channel !== false, require_approval_for_new_audience: control.require_approval_for_new_audience !== false, require_approval_for_price_claims: control.require_approval_for_price_claims !== false }; }
 
 export default function UsageSafetyPage() {
-  const [control, setControl] = useState<Control>({});
-  const [wallet, setWallet] = useState<Wallet>({});
-  const [loading, setLoading] = useState(true);
-  const [partial, setPartial] = useState(false);
-
-  const load = useCallback(async () => {
-    setLoading(true);
-    const [controlResult, walletResult] = await Promise.allSettled([
-      api.get<ApiResponse<Control>>('/relaunch-control'),
-      api.get<ApiResponse<Wallet>>('/generation-credits/wallet'),
-    ]);
-    if (controlResult.status === 'fulfilled') setControl(controlResult.value.data || {});
-    if (walletResult.status === 'fulfilled') setWallet(walletResult.value.data || {});
-    setPartial(controlResult.status === 'rejected' || walletResult.status === 'rejected');
-    setLoading(false);
-  }, []);
-
+  const [control, setControl] = useState<Control>({}); const [wallet, setWallet] = useState<Wallet>({}); const [draft, setDraft] = useState<Draft>(emptyDraft); const [loading, setLoading] = useState(true); const [partial, setPartial] = useState(false); const [saving, setSaving] = useState(false); const [message, setMessage] = useState<string | null>(null); const [stopReason, setStopReason] = useState('');
+  const load = useCallback(async () => { setLoading(true); const [controlResult, walletResult] = await Promise.allSettled([api.get<ApiResponse<Control>>('/relaunch-control'), api.get<ApiResponse<Wallet>>('/generation-credits/wallet')]); if (controlResult.status === 'fulfilled') { const next = controlResult.value.data || {}; setControl(next); setDraft(draftFrom(next)); } if (walletResult.status === 'fulfilled') setWallet(walletResult.value.data || {}); setPartial(controlResult.status === 'rejected' || walletResult.status === 'rejected'); setLoading(false); }, []);
   useEffect(() => { void load(); }, [load]);
-
+  const save = async () => { setSaving(true); setMessage(null); try { await api.put('/relaunch-control/policy', { body: { operating_mode: draft.operating_mode, daily_generation_credit_limit: Math.max(0, Number(draft.daily_generation_credit_limit) || 0), per_action_credit_limit: Math.max(0, Number(draft.per_action_credit_limit) || 0), per_campaign_ad_limit_pence: Math.max(0, Number(draft.per_campaign_ad_limit_pence) || 0), approval_credit_threshold: Math.max(0, Number(draft.approval_credit_threshold) || 0), allowed_channels: draft.allowed_channels, require_approval_for_new_channel: draft.require_approval_for_new_channel, require_approval_for_new_audience: draft.require_approval_for_new_audience, require_approval_for_price_claims: draft.require_approval_for_price_claims, reason: 'Owner updated Marketing operating controls' } }); setMessage('Marketing controls were saved. New work will be evaluated against the updated policy.'); await load(); } catch (error) { setMessage(error instanceof Error ? error.message : 'Marketing controls could not be saved.'); } finally { setSaving(false); } };
+  const emergencyStop = async (stopped: boolean) => { if (!stopReason.trim()) { setMessage('Enter a short reason before changing Emergency Stop.'); return; } setSaving(true); setMessage(null); try { await api.post('/relaunch-control/emergency-stop', { body: { stopped, reason: stopReason.trim() } }); setStopReason(''); setMessage(stopped ? 'Emergency Stop is active. External actions are blocked.' : 'Emergency Stop is released. Fresh policy checks still apply to every action.'); await load(); } catch (error) { setMessage(error instanceof Error ? error.message : 'Emergency Stop could not be changed.'); } finally { setSaving(false); } };
   if (loading) return <div className="flex min-h-[55vh] items-center justify-center"><Loader2 className="h-8 w-8 animate-spin text-[var(--ep-blue)]" /></div>;
-
-  const paused = control.emergency_stop === true;
-  const available = wallet.available_credits ?? wallet.balance;
-  const reserved = wallet.reserved_credits ?? wallet.total_reserved;
-  const mode = String(control.operating_mode || 'unavailable');
-
-  return (
-    <div className="space-y-6">
-      <header className="ep-panel p-6 sm:p-8">
-        <p className="ep-section-label">Usage & Safety</p>
-        <h1 className="ep-page-title mt-2">Know what can run, what needs approval and what it can spend.</h1>
-        <p className="ep-page-copy mt-3 max-w-3xl text-sm leading-6 sm:text-base">This customer view reports the Control Centre and Generation Credit state without exposing dangerous operator or provider controls.</p>
-      </header>
-
-      {partial && <div className="ep-status-warning rounded-xl border px-4 py-3 text-sm">Some live usage information is unavailable. The workspace has not been changed.</div>}
-
-      <section className={`${paused ? 'ep-status-warning' : 'ep-status-success'} rounded-2xl border p-5 sm:p-6`}>
-        <div className="flex items-start gap-3"><div className="rounded-xl bg-white/70 p-2.5"><ShieldCheck className="h-5 w-5" /></div><div><p className="text-xs font-extrabold uppercase tracking-wide">Control Centre</p><h2 className="mt-1 text-xl font-extrabold">{paused ? 'External execution is paused' : 'Execution is available within policy'}</h2><p className="mt-2 text-sm leading-6 opacity-80">Operating mode: <strong className="capitalize">{mode}</strong>. {paused ? 'Generation, rendering and outbound actions remain blocked by Emergency Stop.' : 'Fresh policy decisions, approvals and spending controls still apply before external actions.'}</p></div></div>
-      </section>
-
-      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <article className="ep-card p-5"><CircleDollarSign className="h-5 w-5 text-[var(--ep-blue)]" /><p className="mt-4 text-xs font-bold text-[var(--ep-text-muted)]">Available Generation Credits</p><p className="mt-1 text-2xl font-extrabold text-[var(--ep-navy)]">{number(available)}</p></article>
-        <article className="ep-card p-5"><CircleDollarSign className="h-5 w-5 text-[var(--ep-blue)]" /><p className="mt-4 text-xs font-bold text-[var(--ep-text-muted)]">Reserved</p><p className="mt-1 text-2xl font-extrabold text-[var(--ep-navy)]">{number(reserved)}</p></article>
-        <article className="ep-card p-5"><ShieldCheck className="h-5 w-5 text-[var(--ep-blue)]" /><p className="mt-4 text-xs font-bold text-[var(--ep-text-muted)]">Mode</p><p className="mt-1 text-2xl font-extrabold capitalize text-[var(--ep-navy)]">{mode}</p></article>
-        <article className="ep-card p-5"><TriangleAlert className="h-5 w-5 text-[var(--ep-blue)]" /><p className="mt-4 text-xs font-bold text-[var(--ep-text-muted)]">Emergency Stop</p><p className="mt-1 text-2xl font-extrabold text-[var(--ep-navy)]">{paused ? 'On' : 'Off'}</p></article>
-      </section>
-
-      <section className="grid gap-4 md:grid-cols-2">
-        <Link href="/approvals" className="ep-card group p-5"><div className="flex items-start gap-3"><div className="rounded-xl bg-[var(--ep-blue-soft)] p-2.5 text-[var(--ep-blue)]"><FileCheck2 className="h-5 w-5" /></div><div><h2 className="font-extrabold text-[var(--ep-navy)]">Owner approvals</h2><p className="mt-1 text-sm leading-5 text-[var(--ep-text-muted)]">Review exact content versions before customer-facing use.</p><span className="mt-3 inline-flex items-center gap-1 text-xs font-extrabold text-[var(--ep-blue)]">Open approvals <ArrowRight className="h-3.5 w-3.5" /></span></div></div></Link>
-        <div className="ep-card p-5"><h2 className="font-extrabold text-[var(--ep-navy)]">Spend is governed, not estimated away</h2><p className="mt-2 text-sm leading-6 text-[var(--ep-text-muted)]">Paid generation reserves credits before provider execution and settles against actual usage. Failed/cancelled work releases unused reservations through the existing accounting path.</p></div>
-      </section>
-    </div>
-  );
+  const paused = control.emergency_stop === true; const available = wallet.available_credits ?? wallet.balance; const reserved = wallet.reserved_credits ?? wallet.total_reserved; const mode = String(control.operating_mode || 'approval');
+  return <div className="space-y-6"><header className="ep-panel p-6 sm:p-8"><p className="ep-section-label">Usage & Safety</p><h1 className="ep-page-title mt-2">Set the guardrails. Marketing works within them.</h1><p className="ep-page-copy mt-3 max-w-3xl text-sm leading-6 sm:text-base">Choose how much autonomy is appropriate, which channels are in scope and the maximum generation spend. These controls are enforced server-side; this page never exposes provider credentials or bypasses approvals.</p></header>{partial && <div className="ep-status-warning rounded-xl border px-4 py-3 text-sm">Some live usage information is unavailable. The workspace has not been changed.</div>}{message && <div className="ep-status-warning rounded-xl border px-4 py-3 text-sm">{message}</div>}
+    <section className={`${paused ? 'ep-status-warning' : 'ep-status-success'} rounded-2xl border p-5 sm:p-6`}><div className="flex items-start gap-3"><div className="rounded-xl bg-white/70 p-2.5"><ShieldCheck className="h-5 w-5" /></div><div><p className="text-xs font-extrabold uppercase tracking-wide">Control Centre</p><h2 className="mt-1 text-xl font-extrabold">{paused ? 'External execution is paused' : 'Execution is available within policy'}</h2><p className="mt-2 text-sm leading-6 opacity-80">Current mode: <strong className="capitalize">{mode}</strong>. {paused ? 'Generation, rendering, publishing and connected outbound actions remain blocked.' : control.runtime?.can_execute_autonomously ? 'Autonomous work can proceed only within the policy and active channels.' : 'Owner approval or manual review remains required for external actions.'}</p></div></div></section>
+    <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4"><Metric label="Available Generation Credits" value={number(available)} icon={<CircleDollarSign className="h-5 w-5 text-[var(--ep-blue)]"/>}/><Metric label="Reserved" value={number(reserved)} icon={<CircleDollarSign className="h-5 w-5 text-[var(--ep-blue)]"/>}/><Metric label="Today used" value={number(control.today?.generation_credits_used)} icon={<ShieldCheck className="h-5 w-5 text-[var(--ep-blue)]"/>}/><Metric label="Emergency Stop" value={paused ? 'On' : 'Off'} icon={<TriangleAlert className="h-5 w-5 text-[var(--ep-blue)]"/>}/></section>
+    <section className="ep-card p-5 sm:p-6"><p className="ep-section-label">Operating mode</p><h2 className="mt-1 text-lg font-extrabold text-[var(--ep-navy)]">Decide how much Marketing can do without a new release decision.</h2><div className="mt-4 grid gap-3 md:grid-cols-3">{([{ key: 'manual', title: 'Plan and review', note: 'Prepare strategy and drafts; external actions remain owner-led.' }, { key: 'approval', title: 'Auto-run approved campaigns', note: 'Prepare work automatically, but require an approval decision for controlled external actions.' }, { key: 'autonomous', title: 'Marketing Autopilot', note: 'May proceed only inside credit, channel and approval thresholds. Emergency Stop overrides it.' }] as Array<{key: OperatingMode; title: string; note: string}>).map((item)=><button key={item.key} type="button" onClick={()=>setDraft({...draft,operating_mode:item.key})} className={draft.operating_mode===item.key?'rounded-xl border border-[var(--ep-blue)] bg-[var(--ep-blue-soft)] p-4 text-left':'rounded-xl border border-[var(--ep-border)] bg-white p-4 text-left hover:border-[var(--ep-border-strong)]'}><p className="font-extrabold text-[var(--ep-navy)]">{item.title}</p><p className="mt-1 text-xs leading-5 text-[var(--ep-text-muted)]">{item.note}</p></button>)}</div></section>
+    <section className="grid gap-5 xl:grid-cols-[1.1fr_.9fr]"><div className="ep-card p-5 sm:p-6"><p className="ep-section-label">Spend controls</p><h2 className="mt-1 text-lg font-extrabold text-[var(--ep-navy)]">Bound generation before it starts.</h2><div className="mt-5 grid gap-4 sm:grid-cols-2"><NumberField label="Daily generation-credit limit" value={draft.daily_generation_credit_limit} onChange={(value)=>setDraft({...draft,daily_generation_credit_limit:value})}/><NumberField label="Per-action credit limit" value={draft.per_action_credit_limit} onChange={(value)=>setDraft({...draft,per_action_credit_limit:value})}/><NumberField label="Per-campaign advertising limit (pence)" value={draft.per_campaign_ad_limit_pence} onChange={(value)=>setDraft({...draft,per_campaign_ad_limit_pence:value})}/><NumberField label="Approval threshold (credits)" value={draft.approval_credit_threshold} onChange={(value)=>setDraft({...draft,approval_credit_threshold:value})}/></div><p className="mt-4 text-xs leading-5 text-[var(--ep-text-soft)]">Short-form video batches are capped at 15 seconds per variation in campaign planning. The per-action limit remains the cost gate for any approved video generation route.</p></div>
+      <div className="ep-card p-5 sm:p-6"><p className="ep-section-label">Allowed channels</p><h2 className="mt-1 text-lg font-extrabold text-[var(--ep-navy)]">Keep Marketing inside connected, approved territory.</h2><div className="mt-4 space-y-2">{channels.map((channel)=>{const checked=draft.allowed_channels.includes(channel.key);return <label key={channel.key} className="flex cursor-pointer items-start gap-3 rounded-xl border border-[var(--ep-border)] p-3"><input type="checkbox" checked={checked} onChange={()=>setDraft({...draft,allowed_channels:checked?draft.allowed_channels.filter((key)=>key!==channel.key):[...draft.allowed_channels,channel.key]})} className="mt-1 h-4 w-4"/><span><span className="block text-sm font-extrabold text-[var(--ep-navy)]">{channel.label}</span><span className="block text-xs leading-5 text-[var(--ep-text-muted)]">{channel.note}</span></span></label>})}</div></div></section>
+    <section className="ep-card p-5 sm:p-6"><p className="ep-section-label">Approval safeguards</p><div className="mt-4 grid gap-3 md:grid-cols-3">{([{key:'require_approval_for_new_channel',label:'New channel'}, {key:'require_approval_for_new_audience',label:'New audience'}, {key:'require_approval_for_price_claims',label:'Price claims'}] as Array<{key:keyof Pick<Draft,'require_approval_for_new_channel'|'require_approval_for_new_audience'|'require_approval_for_price_claims'>;label:string}>).map((item)=><label key={item.key} className="flex items-center justify-between rounded-xl border border-[var(--ep-border)] p-4"><span className="text-sm font-bold text-[var(--ep-navy)]">Require approval for {item.label.toLowerCase()}</span><input type="checkbox" checked={draft[item.key]} onChange={(event)=>setDraft({...draft,[item.key]:event.target.checked})} className="h-4 w-4"/></label>)}</div><div className="mt-5 flex flex-wrap gap-2"><button type="button" disabled={saving} onClick={()=>void save()} className="ep-button-primary px-4 py-2.5 text-sm"><Save className="h-4 w-4"/>{saving?'Saving…':'Save Marketing controls'}</button><Link href="/approvals" className="ep-button-secondary px-4 py-2.5 text-sm"><FileCheck2 className="h-4 w-4"/>Review approvals</Link></div></section>
+    <section className="ep-status-warning rounded-2xl border p-5 sm:p-6"><div className="flex items-start gap-3"><PauseCircle className="mt-0.5 h-5 w-5 shrink-0"/><div className="min-w-0 flex-1"><h2 className="font-extrabold">Emergency Stop</h2><p className="mt-1 text-sm leading-6 opacity-80">Use only when you need to block all external generation, rendering, publishing and connected outbound work immediately. A reason is required and recorded by the server.</p><div className="mt-4 flex flex-col gap-2 sm:flex-row"><input value={stopReason} onChange={(event)=>setStopReason(event.target.value)} placeholder="Reason for this control change" className="ep-input min-h-11 flex-1 px-3 text-sm"/><button type="button" disabled={saving} onClick={()=>void emergencyStop(!paused)} className={paused?'ep-button-primary px-4 py-2.5 text-sm':'rounded-xl bg-[var(--ep-danger)] px-4 py-2.5 text-sm font-extrabold text-white hover:opacity-90'}>{paused?'Release Emergency Stop':'Activate Emergency Stop'}</button></div></div></div></section>
+  </div>;
 }
+function Metric({label,value,icon}:{label:string;value:string;icon:React.ReactNode}){return <article className="ep-card p-5">{icon}<p className="mt-4 text-xs font-bold text-[var(--ep-text-muted)]">{label}</p><p className="mt-1 text-2xl font-extrabold text-[var(--ep-navy)]">{value}</p></article>;}
+function NumberField({label,value,onChange}:{label:string;value:string;onChange:(value:string)=>void}){return <label className="block"><span className="text-xs font-extrabold text-[var(--ep-text-muted)]">{label}</span><input type="number" min="0" value={value} onChange={(event)=>onChange(event.target.value)} className="ep-input mt-2 min-h-11 w-full px-3 text-sm"/></label>;}
