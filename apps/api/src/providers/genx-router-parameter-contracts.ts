@@ -18,6 +18,10 @@ function isSeedance25TextVideoModel(id: string): boolean {
   return id === 'seedance-2.5';
 }
 
+function isLyria3Model(id: string): boolean {
+  return id === 'lyria-3-clip-preview' || id === 'lyria-3-pro-preview';
+}
+
 /**
  * The live Router model-detail endpoint currently returns identity, category,
  * provider and retirement state, but not the model-specific parameter schema.
@@ -31,6 +35,33 @@ export function routerParameterContract(
 ): GenXRouterParameterContract | null {
   const id = modelId.trim().toLowerCase();
   const normalizedCategory = category.trim().toLowerCase();
+
+  if (normalizedCategory === 'voice') {
+    if (id === 'aura-2') {
+      return {
+        operations: ['text_to_speech'],
+        parameters: schema(['text', 'voice']),
+      };
+    }
+    if (id === 'grok-tts') {
+      return {
+        operations: ['text_to_speech'],
+        parameters: schema(['text', 'language', 'format']),
+      };
+    }
+    return null;
+  }
+
+  if (normalizedCategory === 'audio') {
+    if (isLyria3Model(id)) {
+      return {
+        operations: ['music_generation'],
+        parameters: schema(['prompt']),
+      };
+    }
+    return null;
+  }
+
   if (normalizedCategory !== 'video') return null;
 
   if (id === 'kling-avatar-v2-pro') {
@@ -167,6 +198,18 @@ export function translateRouterGenerationParams(
 ): Record<string, unknown> {
   const id = modelId.trim().toLowerCase();
   const translated = { ...params };
+
+  if (id === 'aura-2' || id === 'grok-tts') {
+    if (translated.prompt && !translated.text) {
+      translated.text = translated.prompt;
+    }
+    delete translated.prompt;
+    delete translated.quantity;
+  }
+
+  if (isLyria3Model(id)) {
+    delete translated.quantity;
+  }
 
   if (id.startsWith('kling-') && id.endsWith('-i2v') && translated.image_url) {
     translated.start_image_url = translated.image_url;
