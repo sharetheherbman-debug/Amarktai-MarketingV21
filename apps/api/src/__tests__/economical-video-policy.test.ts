@@ -19,7 +19,7 @@ describe('economical promotional video policy', () => {
       duration_seconds: 10,
       generated_ingredients: [{ type: 'still_image', operation: 'text_to_image', model_id: 'reviewed-image-model', price_snapshot_id: 'snapshot-1' }],
       composition: {
-        engine: 'ffmpeg', scene_strategy: 'still_heavy', brand_end_card: true,
+        engine: 'ffmpeg', scene_strategy: 'small_multiscene_still_heavy', brand_end_card: true,
         captions: true, cta: true, raw_text_to_video: false, estimated_generation_credits: 2,
       },
     });

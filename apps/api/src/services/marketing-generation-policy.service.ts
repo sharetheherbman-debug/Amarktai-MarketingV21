@@ -29,18 +29,58 @@ export interface MarketingGenerationRoute {
   requiredFormat?: string;
 }
 
-type PricedCandidate = MarketingGenerationRoute & { runtimeConfirmed: boolean };
+type PricedCandidate = MarketingGenerationRoute & {
+  runtimeConfirmed: boolean;
+  healthScore: number;
+  failureRate: number;
+  qualityScore: number;
+  latencyMs: number;
+};
+
+function numberInRange(value: unknown, fallback: number, min = 0, max = 100): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= min && parsed <= max ? parsed : fallback;
+}
+
+function candidateSignals(raw: Record<string, unknown> | undefined): Pick<PricedCandidate, 'healthScore' | 'failureRate' | 'qualityScore' | 'latencyMs'> {
+  const metadata = raw || {};
+  return {
+    healthScore: numberInRange(metadata.runtime_health_score ?? metadata.health_score, 80),
+    failureRate: numberInRange(metadata.recent_failure_rate ?? metadata.failure_rate, 0),
+    qualityScore: numberInRange(metadata.marketing_visual_qa_score ?? metadata.recent_campaign_visual_qa_score, 50),
+    latencyMs: numberInRange(metadata.average_latency_ms ?? metadata.latency_ms, 0, 120000),
+  };
+}
+
+function supportsRequestedFormat(raw: Record<string, unknown> | undefined, requiredFormat?: string): boolean {
+  if (!requiredFormat) return true;
+  const formats = raw?.supported_dimensions ?? raw?.supported_formats;
+  if (!Array.isArray(formats) || formats.length === 0) return true;
+  return formats.map(String).includes(requiredFormat);
+}
+
+function chooseCandidate(tier: MarketingGenerationTier, candidates: PricedCandidate[]): PricedCandidate {
+  const priceSorted = [...candidates].sort((left, right) => left.estimatedCredits - right.estimatedCredits || left.modelId.localeCompare(right.modelId));
+  if (tier === 'economy') return priceSorted[0];
+  const minCredits = priceSorted[0].estimatedCredits;
+  const maxCredits = priceSorted[priceSorted.length - 1].estimatedCredits;
+  const scored = candidates.map((candidate) => {
+    const costScore = maxCredits === minCredits ? 100 : 100 - (((candidate.estimatedCredits - minCredits) / (maxCredits - minCredits)) * 100);
+    const latencyScore = candidate.latencyMs <= 0 ? 70 : Math.max(0, 100 - Math.min(100, candidate.latencyMs / 100));
+    const reliabilityScore = 100 - candidate.failureRate;
+    const quality = (candidate.healthScore * 0.25) + (reliabilityScore * 0.25) + (candidate.qualityScore * 0.30) + (latencyScore * 0.05);
+    // Recommended is a documented quality/cost balance. Premium remains a
+    // quality-first route after the owner policy gate, never a catalogue fallback.
+    const selectionScore = tier === 'premium' ? quality : quality + (costScore * 0.15);
+    return { candidate, selectionScore };
+  }).sort((left, right) => right.selectionScore - left.selectionScore || left.candidate.estimatedCredits - right.candidate.estimatedCredits || left.candidate.modelId.localeCompare(right.candidate.modelId));
+  return scored[0].candidate;
+}
 
 function normalizeTier(value: unknown): MarketingGenerationTier {
   const tier = String(value || 'recommended').toLowerCase();
   if (tier === 'economy' || tier === 'recommended' || tier === 'premium') return tier;
   throw new AppError(400, 'Marketing generation tier must be Economy, Recommended, or Premium', 'MARKETING_TIER_INVALID');
-}
-
-function selectedIndex(tier: MarketingGenerationTier, count: number): number {
-  if (tier === 'economy') return 0;
-  if (tier === 'premium') return count - 1;
-  return Math.floor((count - 1) * 0.5);
 }
 
 /**
@@ -80,6 +120,7 @@ export async function routeMarketingGeneration(input: MarketingGenerationRouteIn
     // until a runtime probe has confirmed it, regardless of its display order.
     if (model.available === false || model.deprecated === true || model.verification_status !== 'runtime_confirmed') continue;
     if (!(model.operations || []).includes(input.operation)) continue;
+    if (!supportsRequestedFormat(model.raw_metadata, input.requiredFormat)) continue;
     try {
       const quote = await pricing.quoteGeneration({
         modelId: model.id,
@@ -96,6 +137,7 @@ export async function routeMarketingGeneration(input: MarketingGenerationRouteIn
         pricingLastSyncedAt: quote.pricing_last_synced_at,
         requiredFormat: input.requiredFormat,
         runtimeConfirmed: true,
+        ...candidateSignals(model.raw_metadata),
       });
     } catch {
       // Missing, stale, or ambiguous prices are never silently substituted.
@@ -105,8 +147,7 @@ export async function routeMarketingGeneration(input: MarketingGenerationRouteIn
     throw new AppError(503, `No live-priced, runtime-confirmed Marketing model is available for ${input.operation}`, 'MARKETING_MODEL_ROUTE_UNAVAILABLE');
   }
 
-  candidates.sort((left, right) => left.estimatedCredits - right.estimatedCredits || left.modelId.localeCompare(right.modelId));
-  const selected = candidates[selectedIndex(tier, candidates.length)];
+  const selected = chooseCandidate(tier, candidates);
   const perActionLimit = Number(policy.per_action_credit_limit || 0);
   const dailyLimit = Number(policy.daily_generation_credit_limit || 0);
   const remainingToday = Number((control.today as Record<string, unknown> | undefined)?.generation_credits_remaining || 0);

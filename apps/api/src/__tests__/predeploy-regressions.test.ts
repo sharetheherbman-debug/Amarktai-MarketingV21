@@ -191,7 +191,10 @@ describe('pre-deployment runtime regressions', () => {
     expect(compositor).toContain('composeCampaignVideoMaterial');
     expect(ffmpeg).toContain('composeEconomicalMarketingVideo');
     expect(videoPolicy).toContain('raw_text_to_video: false');
-    expect(videoPolicy).toContain("scene_strategy: 'still_heavy'");
+    expect(videoPolicy).toContain("scene_strategy: 'small_multiscene_still_heavy'");
+    expect(compositor).toContain('assessMarketingIngredient');
+    expect(production).toContain('queueCampaignMaterialRepair');
+    expect(router).toContain('chooseCandidate');
     expect(rotation).toContain("status='scheduling'");
     expect(rotation).toContain('schedulePostThroughControlCentre');
     expect(rotationMigration).toContain('UNIQUE (organization_id,idempotency_key)');

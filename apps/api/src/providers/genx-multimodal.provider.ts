@@ -66,6 +66,33 @@ export interface GenXFile {
   created_at: string;
 }
 
+/** Provider-neutral structured contract for Marketing ingredient review. */
+export interface GenXVisualAssessment {
+  subject_relevance: number;
+  campaign_relevance: number;
+  commercial_usability: number;
+  composition_quality: number;
+  subject_integrity: number;
+  negative_space_usability: number;
+  unexpected_text: boolean;
+  unexpected_logo: boolean;
+  watermark: boolean;
+  obvious_ai_artifacts: boolean;
+  wrong_product: boolean;
+  wrong_subject: boolean;
+  brand_safety: boolean;
+  rejection_reasons: string[];
+  repair_instructions: string[];
+}
+
+export interface GenXVisualAssessmentRequest {
+  image_url: string;
+  brief: Record<string, unknown>;
+  technical_qa: Record<string, unknown>;
+  instructions: string;
+  thresholds: Record<string, number>;
+}
+
 function recordValue(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? value as Record<string, unknown>
@@ -191,6 +218,26 @@ export class GenXMultimodalProvider {
     }));
     const data = recordValue(raw.data);
     return this.normalizeJob(Object.keys(data).length > 0 ? data : raw);
+  }
+
+  /**
+   * Marketing visual QA uses the canonical GenX multimodal boundary. The live
+   * deployment adapter maps this stable request to the configured vision route;
+   * callers validate every field and fail closed if its response is incomplete.
+   */
+  async assessVisual(request: GenXVisualAssessmentRequest): Promise<GenXVisualAssessment> {
+    const raw = recordValue(await this.request('POST', '/api/v1/analyze', {
+      task: 'marketing_visual_quality_assessment',
+      image_url: request.image_url,
+      brief: request.brief,
+      technical_qa: request.technical_qa,
+      instructions: request.instructions,
+      thresholds: request.thresholds,
+      response_format: 'marketing_visual_assessment_v1',
+    }));
+    const data = recordValue(raw.data);
+    const assessment = recordValue(data.assessment || data.result || data);
+    return assessment as unknown as GenXVisualAssessment;
   }
 
   async getJob(jobId: string): Promise<GenXJob> {

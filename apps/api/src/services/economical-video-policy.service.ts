@@ -15,7 +15,7 @@ export interface EconomicalVideoCostPlan {
   }>;
   composition: {
     engine: 'ffmpeg';
-    scene_strategy: 'still_heavy';
+    scene_strategy: 'small_multiscene_still_heavy';
     brand_end_card: true;
     captions: true;
     cta: true;
@@ -49,7 +49,7 @@ export function buildEconomicalVideoCostPlan(
     }],
     composition: {
       engine: 'ffmpeg',
-      scene_strategy: 'still_heavy',
+      scene_strategy: 'small_multiscene_still_heavy',
       brand_end_card: true,
       captions: true,
       cta: true,

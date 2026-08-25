@@ -397,7 +397,10 @@ export async function composeFinalVideo(
 }
 
 export interface EconomicalMarketingVideoOptions {
+  /** The primary governed ingredient. Retained for backward compatibility. */
   stillPath: string;
+  /** Approved campaign stills may enrich the sequence; no raw video is required. */
+  stillPaths?: string[];
   endCardPath: string;
   outputPath: string;
   durationSeconds: number;
@@ -406,31 +409,46 @@ export interface EconomicalMarketingVideoOptions {
 }
 
 /**
- * Creates a bounded short-form marketing video from one governed still plus a
- * deterministic branded end-card. It deliberately uses no raw text-to-video
- * request: the only generated ingredient is the already-quoted still image.
+ * Produces a short, bounded promotional sequence from one to four approved
+ * stills and a deterministic branded end card. Each still has gentle crop/zoom
+ * motion and fade transitions. It never issues a raw provider text-to-video call.
  */
 export async function composeEconomicalMarketingVideo(
   options: EconomicalMarketingVideoOptions
 ): Promise<FFmpegResult> {
   const duration = Math.max(5, Math.min(15, Math.floor(options.durationSeconds || 15)));
   const endCardDuration = Math.min(3, Math.max(2, Math.floor(duration / 3)));
-  const sceneDuration = Math.max(3, duration - endCardDuration);
+  const contentDuration = Math.max(3, duration - endCardDuration);
+  const stills = Array.from(new Set([options.stillPath, ...(options.stillPaths || [])].filter(Boolean))).slice(0, 4);
+  if (stills.length === 0) throw new Error('Economical promotional video requires an approved still ingredient');
+  const sceneDurations = stills.map((_, index) => {
+    const base = Math.floor(contentDuration / stills.length);
+    return index === stills.length - 1 ? contentDuration - (base * (stills.length - 1)) : base;
+  });
   const workPath = `${options.outputPath}.scene.mp4`;
-  const sceneFrames = sceneDuration * 30;
-  const videoFilter = [
-    `[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,zoompan=z='min(zoom+0.0006,1.12)':d=${sceneFrames}:s=1080x1920:fps=30,trim=duration=${sceneDuration},setpts=PTS-STARTPTS[scene]`,
-    `[1:v]scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih):color=black,trim=duration=${endCardDuration},setpts=PTS-STARTPTS[endcard]`,
-    '[scene][endcard]concat=n=2:v=1:a=0[videoout]',
-  ].join(';');
+  const inputs: string[] = ['-y'];
+  stills.forEach((still, index) => {
+    inputs.push('-loop', '1', '-t', String(sceneDurations[index]), '-i', still);
+  });
+  const endCardIndex = stills.length;
+  const audioIndex = stills.length + 1;
+  inputs.push(
+    '-loop', '1', '-t', String(endCardDuration), '-i', options.endCardPath,
+    '-f', 'lavfi', '-t', String(duration), '-i', 'anullsrc=channel_layout=stereo:sample_rate=48000'
+  );
+  const filters: string[] = stills.map((_, index) => {
+    const seconds = sceneDurations[index];
+    const frames = seconds * 30;
+    const zoom = index % 2 === 0 ? "min(zoom+0.0008,1.12)" : "if(lte(zoom,1.0),1.12,max(1.0,zoom-0.0008))";
+    return `[${index}:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,zoompan=z='${zoom}':d=${frames}:s=1080x1920:fps=30,trim=duration=${seconds},setpts=PTS-STARTPTS,fade=t=in:st=0:d=0.25,fade=t=out:st=${Math.max(0.25, seconds - 0.25).toFixed(2)}:d=0.25[scene${index}]`;
+  });
+  filters.push(`[${endCardIndex}:v]scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih):color=black,trim=duration=${endCardDuration},setpts=PTS-STARTPTS,fade=t=in:st=0:d=0.25[endcard]`);
+  filters.push(`${[...stills.map((_, index) => `[scene${index}]`), '[endcard]'].join('')}concat=n=${stills.length + 1}:v=1:a=0[videoout]`);
   try {
     await ffmpeg([
-      '-y',
-      '-loop', '1', '-t', String(sceneDuration), '-i', options.stillPath,
-      '-loop', '1', '-t', String(endCardDuration), '-i', options.endCardPath,
-      '-f', 'lavfi', '-t', String(duration), '-i', 'anullsrc=channel_layout=stereo:sample_rate=48000',
-      '-filter_complex', videoFilter,
-      '-map', '[videoout]', '-map', '2:a:0',
+      ...inputs,
+      '-filter_complex', filters.join(';'),
+      '-map', '[videoout]', '-map', `${audioIndex}:a:0`,
       '-t', String(duration),
       '-c:v', 'libx264', '-preset', 'medium', '-crf', '21', '-pix_fmt', 'yuv420p',
       '-c:a', 'aac', '-b:a', '128k', '-ar', '48000', '-ac', '2',

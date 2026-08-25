@@ -12,6 +12,7 @@ import * as contentEngine from './content-engine.service';
 import * as contentQuality from './content-quality.service';
 import * as contentWorkflow from './content-workflow.service';
 import { getDeliverableRoute, type DeliverableRoute } from './marketing-deliverable-registry.service';
+import { assessMarketingIngredient, visualQaRejection } from './marketing-visual-qa.service';
 import type { ContentPlatform, ContentType } from '../types';
 
 const MAX_BRAND_LOGO_BYTES = 5 * 1024 * 1024;
@@ -293,8 +294,13 @@ function contentTypeFor(kind: string): ContentType {
 
 async function failMaterialRun(run: Json, error: unknown): Promise<never> {
   const message = error instanceof Error ? error.message : String(error || 'Material composition failed');
-  const nextAttempt = Number(run.material_attempt_count || 0) + 1;
-  const terminal = nextAttempt >= MAX_MATERIAL_REPAIRS;
+  const code = error instanceof AppError ? error.code : '';
+  const repairable = ['MATERIAL_VISUAL_QA_REJECTED', 'MATERIAL_INGREDIENT_VISUAL_REJECTED', 'MATERIAL_INGREDIENT_FORMAT_INVALID', 'MATERIAL_INGREDIENT_DIMENSIONS_INVALID'].includes(code);
+  const repairsAlreadyAttempted = Number(run.material_attempt_count || 0);
+  const terminal = !repairable || repairsAlreadyAttempted >= MAX_MATERIAL_REPAIRS;
+  // This field counts only fresh governed repair generations. The initial
+  // ingredient is not a repair, so it may be followed by two new attempts.
+  const repairCount = repairable && !terminal ? repairsAlreadyAttempted + 1 : repairsAlreadyAttempted;
   await query(
     `UPDATE campaign_asset_runs
         SET status=$1,material_status=$2,material_attempt_count=$3,
@@ -302,8 +308,8 @@ async function failMaterialRun(run: Json, error: unknown): Promise<never> {
       WHERE id=$6 AND organization_id=$7`,
     [
       terminal ? 'failed' : 'planned',
-      terminal ? 'failed_after_bounded_retries' : 'ingredient_rejected',
-      nextAttempt,
+      terminal ? (repairable ? 'failed_after_bounded_retries' : 'failed_after_bounded_retries') : 'ingredient_rejected',
+      repairCount,
       terminal ? 'failed_after_bounded_retries' : 'pending_generation',
       message.slice(0, 2000),
       run.id,
@@ -362,12 +368,14 @@ export async function composeCampaignMaterial(runId: string, orgId: string, user
   try {
     const ingredientQa = await inspectIngredient(String(ingredient.storage_path));
     await recordQuality(run, 'ingredient_technical', 'passed', ingredientQa, 100);
-    await recordQuality(run, 'marketing_visual', 'passed', {
-      review_mode: 'bounded_deterministic',
-      ingredient_variance: ingredientQa.ingredient_variance,
-      text_safe_area_required: true,
-      generated_text_disallowed: true,
-    }, 100);
+    const visualQa = await assessMarketingIngredient({
+      ingredientPath: String(ingredient.storage_path),
+      ingredientUrl: ingredient.url ? String(ingredient.url) : undefined,
+      brief,
+      technicalQa: ingredientQa,
+    });
+    await recordQuality(run, 'marketing_visual', visualQa.accepted ? 'passed' : 'failed', visualQa, visualQa.commercial_usability);
+    if (!visualQa.accepted) throw visualQaRejection(visualQa);
 
     const identity = await resolveBrandIdentity(orgId);
     const resolvedLogo = await loadLogo(identity.logoUrl, orgId);
@@ -453,7 +461,7 @@ export async function composeCampaignMaterial(runId: string, orgId: string, user
       throw new AppError(409, 'Final material copy failed canonical content quality checks', 'MATERIAL_COPY_QA_FAILED');
     }
     await contentWorkflow.submitForReview(content.id, orgId, userId, userId);
-    const qa = { ingredient: ingredientQa, final: finalQa, text_quality_score: textQuality.overall_score };
+    const qa = { ingredient: ingredientQa, visual: visualQa, final: finalQa, text_quality_score: textQuality.overall_score };
     await query(
       `UPDATE campaign_asset_runs
           SET status='completed',resolution_status='pending_review',content_id=$1,
@@ -550,12 +558,14 @@ export async function composeCampaignVideoMaterial(runId: string, orgId: string,
   try {
     const ingredientQa = await inspectIngredient(String(ingredient.storage_path));
     await recordQuality(run, 'ingredient_technical', 'passed', ingredientQa, 100);
-    await recordQuality(run, 'marketing_visual', 'passed', {
-      review_mode: 'bounded_deterministic',
-      scene_strategy: 'still_heavy',
-      generated_text_disallowed: true,
-      caption_safe_area_required: true,
-    }, 100);
+    const visualQa = await assessMarketingIngredient({
+      ingredientPath: String(ingredient.storage_path),
+      ingredientUrl: ingredient.url ? String(ingredient.url) : undefined,
+      brief,
+      technicalQa: ingredientQa,
+    });
+    await recordQuality(run, 'marketing_visual', visualQa.accepted ? 'passed' : 'failed', { ...visualQa, scene_strategy: 'still_heavy' }, visualQa.commercial_usability);
+    if (!visualQa.accepted) throw visualQaRejection(visualQa);
     const identity = await resolveBrandIdentity(orgId);
     const dimension = dimensionFor(route.defaultDimensions);
     const directory = path.join(process.cwd(), 'uploads', 'marketing-materials', orgId, String(run.campaign_plan_id), runId);
@@ -570,9 +580,23 @@ export async function composeCampaignVideoMaterial(runId: string, orgId: string,
       `1\n${srtTimestamp(0)} --> ${srtTimestamp(Math.max(1, sceneDuration - 0.1))}\n${String(endCard.final_text.headline).replace(/\n/g, ' ')}\\N${String(endCard.final_text.cta).replace(/\n/g, ' ')}\n`,
       { mode: 0o600 }
     );
+    const approvedScenes = await query(
+      `SELECT asset.storage_path
+         FROM campaign_asset_runs sibling
+         JOIN studio_assets asset ON asset.id=sibling.final_material_asset_id
+        WHERE sibling.campaign_plan_id=$1 AND sibling.organization_id=$2
+          AND sibling.id<>$3 AND sibling.material_status='approved'
+          AND asset.deleted_at IS NULL AND asset.mime_type LIKE 'image/%'
+        ORDER BY sibling.completed_at ASC NULLS LAST LIMIT 3`,
+      [run.campaign_plan_id, orgId, run.id]
+    );
+    const supportingStills = approvedScenes.rows
+      .map((row) => String(row.storage_path || ''))
+      .filter(Boolean);
     const ffmpeg = await import('./ffmpeg.service');
     const video = await ffmpeg.composeEconomicalMarketingVideo({
       stillPath: String(ingredient.storage_path),
+      stillPaths: supportingStills,
       endCardPath,
       outputPath,
       durationSeconds: duration,
@@ -594,6 +618,8 @@ export async function composeCampaignVideoMaterial(runId: string, orgId: string,
       brand_end_card_present: true,
       captions_present: true,
       cta_present: true,
+      scene_count: Math.min(5, 2 + approvedScenes.rows.length),
+      scene_strategy: supportingStills.length > 0 ? 'approved_stills_multiscene' : 'single_governed_still_fallback',
     };
     await recordQuality(run, 'final_material', 'passed', finalQa, 100);
     const stat = await fs.stat(outputPath);
@@ -646,7 +672,7 @@ export async function composeCampaignVideoMaterial(runId: string, orgId: string,
     const textQuality = await contentQuality.runQualityChecks(content.id, orgId);
     if (!textQuality.passed) throw new AppError(409, 'Final video copy failed canonical content quality checks', 'VIDEO_COPY_QA_FAILED');
     await contentWorkflow.submitForReview(content.id, orgId, userId, userId);
-    const qa = { ingredient: ingredientQa, final: finalQa, text_quality_score: textQuality.overall_score };
+    const qa = { ingredient: ingredientQa, visual: visualQa, final: finalQa, text_quality_score: textQuality.overall_score };
     await query(
       `UPDATE campaign_asset_runs
           SET status='completed',resolution_status='pending_review',content_id=$1,

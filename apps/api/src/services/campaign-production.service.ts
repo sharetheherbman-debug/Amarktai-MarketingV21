@@ -227,6 +227,120 @@ export async function queueCampaignProduction(planId: string, orgId: string, use
   return listCampaignProduction(planId, orgId);
 }
 
+/**
+ * Queues a distinct governed replacement ingredient after the existing run's
+ * visual gate rejects its prior ingredient. The campaign run stays canonical;
+ * only its Studio generation changes, so a repair can never create a second
+ * final material or silently replay an already approved one.
+ */
+export async function queueCampaignMaterialRepair(input: {
+  runId: string;
+  organizationId: string;
+  userId: string;
+}): Promise<string | null> {
+  const source = await query(
+    `SELECT run.*, plan.asset_requirements,plan.constraints,plan.generation_credit_limit,
+            plan.product_line,plan.product_lines, generation.options AS generation_options
+       FROM campaign_asset_runs run
+       JOIN campaign_plans plan ON plan.id=run.campaign_plan_id AND plan.organization_id=run.organization_id
+       LEFT JOIN studio_generations generation ON generation.id=run.studio_generation_id AND generation.organization_id=run.organization_id
+      WHERE run.id=$1 AND run.organization_id=$2`,
+    [input.runId, input.organizationId]
+  );
+  if (!source.rows[0]) throw new NotFoundError('Campaign asset run');
+  const run = source.rows[0] as Record<string, any>;
+  if (String(run.material_status) !== 'ingredient_rejected' || String(run.resolution_status) !== 'pending_generation') return null;
+  const claimed = await query(
+    `UPDATE campaign_asset_runs
+        SET status='queueing',resolution_status='repair_queueing',updated_at=NOW()
+      WHERE id=$1 AND organization_id=$2 AND material_status='ingredient_rejected'
+        AND resolution_status='pending_generation' AND status='planned'
+      RETURNING *`,
+    [input.runId, input.organizationId]
+  );
+  if (!claimed.rows[0]) return null;
+  const claimedRun = claimed.rows[0] as Record<string, any>;
+  const requirements = Array.isArray(run.asset_requirements) ? run.asset_requirements : JSON.parse(String(run.asset_requirements || '[]'));
+  const brief = asObject(requirements.find((item: Record<string, any>) => String(item?.brief_id) === String(run.brief_id)));
+  const previousOptions = asObject(run.generation_options);
+  const route = getDeliverableRoute(previousOptions.deliverable_kind || brief.deliverable_kind);
+  if (!route.composition || !route.ingredientOperation) {
+    throw new AppError(409, 'Rejected campaign material has no canonical governed ingredient route', 'MATERIAL_REPAIR_ROUTE_REQUIRED');
+  }
+  const latestVisualQa = await query(
+    `SELECT detail FROM campaign_material_quality_checks
+      WHERE campaign_asset_run_id=$1 AND organization_id=$2 AND stage='marketing_visual' AND outcome='failed'
+      ORDER BY created_at DESC LIMIT 1`,
+    [input.runId, input.organizationId]
+  );
+  const visualQa = asObject(latestVisualQa.rows[0]?.detail);
+  const repairs = Array.isArray(visualQa.repair_instructions)
+    ? visualQa.repair_instructions.map(String).map((item) => item.trim()).filter(Boolean).slice(0, 8)
+    : [];
+  const repairInstructions = repairs.length > 0
+    ? repairs.join('\n- ')
+    : 'Use a professional campaign-relevant subject with clear safe negative space. Do not render text, logos, watermarks, fake claims or visual artifacts.';
+  const plan = { ...run, product_lines: run.product_lines, product_line: run.product_line };
+  const premiumPermitted = brief.premium_permitted === true && asObject(run.constraints).premium_generation_approved === true;
+  try {
+    const modelRoute = await routeMarketingGeneration({
+      organizationId: input.organizationId,
+      operation: route.ingredientOperation as MarketingGenerationOperation,
+      tier: brief.generation_tier || brief.production_tier || 'recommended',
+      quantity: 1,
+      campaignCreditLimit: Number(run.generation_credit_limit || 0),
+      premiumPermitted,
+      requiredFormat: route.defaultDimensions,
+    });
+    const repairAttempt = Number(claimedRun.material_attempt_count || 0);
+    const prompt = `${assetPrompt(plan, brief, Number(run.variant_number))}\n\nVISUAL QA REPAIR REQUIRED:\n- ${repairInstructions}\nCreate a new corrected ingredient. Do not reuse the rejected image.`;
+    const generation = await studioService.createGeneration(input.organizationId, input.userId, {
+      type: route.ingredientOperation,
+      model: modelRoute.modelId,
+      prompt,
+      options: {
+        ...previousOptions,
+        campaign_plan_id: run.campaign_plan_id,
+        brief_id: run.brief_id,
+        variant_number: Number(run.variant_number),
+        quantity: 1,
+        idempotency_key: `campaign-asset:${run.id}:repair:${repairAttempt}`,
+        repair_of_generation_id: run.studio_generation_id,
+        repair_attempt: repairAttempt,
+        repair_instructions: repairs,
+        model_routing: modelRoute,
+      },
+    });
+    const repairEvidence = {
+      repair_attempt: repairAttempt,
+      rejected_generation_id: run.studio_generation_id,
+      replacement_generation_id: generation.id,
+      rejection_reasons: Array.isArray(visualQa.rejection_reasons) ? visualQa.rejection_reasons : [],
+      repair_instructions: repairs,
+      queued_at: new Date().toISOString(),
+    };
+    await query(
+      `UPDATE campaign_asset_runs
+          SET studio_generation_id=$1,status='queued',material_status='pending_ingredient',
+              resolution_status='pending_generation',ingredient_asset_id=NULL,error_message=NULL,
+              material_metadata=jsonb_set(COALESCE(material_metadata,'{}'::jsonb),'{repair_history}',
+                COALESCE(material_metadata->'repair_history','[]'::jsonb) || $2::jsonb,true),updated_at=NOW()
+        WHERE id=$3 AND organization_id=$4`,
+      [generation.id, JSON.stringify([repairEvidence]), input.runId, input.organizationId]
+    );
+    return generation.id;
+  } catch (error) {
+    await query(
+      `UPDATE campaign_asset_runs
+          SET status='failed',material_status='failed_after_bounded_retries',resolution_status='failed_after_bounded_retries',
+              resolution_reason=$1,error_message=$1,updated_at=NOW()
+        WHERE id=$2 AND organization_id=$3`,
+      [error instanceof Error ? error.message.slice(0, 2000) : 'Governed repair could not be queued', input.runId, input.organizationId]
+    );
+    throw error;
+  }
+}
+
 export async function listCampaignProduction(planId: string, orgId: string): Promise<Record<string, unknown>[]> {
   return (await query(
     `SELECT * FROM campaign_asset_runs WHERE campaign_plan_id=$1 AND organization_id=$2

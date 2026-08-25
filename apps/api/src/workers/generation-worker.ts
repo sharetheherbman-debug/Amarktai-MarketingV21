@@ -16,6 +16,7 @@ import {
 import * as contentEngine from '../services/content-engine.service';
 import * as studioService from '../services/studio.service';
 import { composeCampaignMaterial, composeCampaignVideoMaterial } from '../services/marketing-material-compositor.service';
+import { queueCampaignMaterialRepair } from '../services/campaign-production.service';
 import { safeFetch } from '../utils/safe-fetch';
 
 const connection = {
@@ -246,10 +247,26 @@ async function processStudio(job: Job): Promise<void> {
             await composeCampaignMaterial(String(campaignRun.id), data.organizationId, data.userId);
           }
         } catch (materialError) {
-          // The run records its own bounded failure state. The paid generation
-          // itself was completed and must not be replayed solely because final
-          // material QA rejected the ingredient or composition.
+          // Final-composition errors never replay a paid generation. A visual
+          // ingredient rejection is different: its bounded state was persisted
+          // by the compositor, so queue one fresh governed repair generation.
           logger.error(`Campaign material composition failed for run ${campaignRun.id}: ${materialError}`);
+          if (materialError instanceof AppError && [
+            'MATERIAL_VISUAL_QA_REJECTED',
+            'MATERIAL_INGREDIENT_VISUAL_REJECTED',
+            'MATERIAL_INGREDIENT_FORMAT_INVALID',
+            'MATERIAL_INGREDIENT_DIMENSIONS_INVALID',
+          ].includes(materialError.code)) {
+            try {
+              await queueCampaignMaterialRepair({
+                runId: String(campaignRun.id),
+                organizationId: data.organizationId,
+                userId: data.userId,
+              });
+            } catch (repairError) {
+              logger.error(`Campaign ingredient repair could not be queued for run ${campaignRun.id}: ${repairError}`);
+            }
+          }
         }
       }
     } else {
