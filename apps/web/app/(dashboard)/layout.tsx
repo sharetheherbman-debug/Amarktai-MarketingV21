@@ -20,6 +20,16 @@ const mobileNav: MobileNavItem[] = [
   { label: 'Calendar', href: '/content-studio/calendar', icon: CalendarRange },
 ];
 
+function isActivePath(pathname: string, href: string): boolean {
+  if (href === '/create') {
+    return pathname === '/create'
+      || pathname === '/advertising'
+      || pathname.startsWith('/content-studio/generate')
+      || pathname.startsWith('/creative-studio');
+  }
+  return pathname === href || pathname.startsWith(`${href}/`);
+}
+
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname() || '/dashboard';
@@ -72,7 +82,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       <nav className="fixed bottom-0 left-0 right-0 z-30 border-t border-[var(--ep-border)] bg-white/95 backdrop-blur-md lg:hidden" aria-label="Mobile navigation">
         <div className="flex h-16 items-stretch">
           {mobileNav.map((item) => {
-            const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
+            const active = isActivePath(pathname, item.href);
             const Icon = item.icon;
             return (
               <Link
