@@ -3,6 +3,7 @@ import net from 'net';
 import type { LookupFunction } from 'net';
 import { Agent } from 'undici';
 import { AppError } from '../middleware/errorHandler';
+import { env } from '../config/env';
 
 export interface SafeFetchOptions extends Omit<RequestInit, 'redirect' | 'signal'> {
   timeoutMs?: number;
@@ -42,6 +43,28 @@ function isPrivateAddress(address: string): boolean {
   if (version === 4) return isPrivateIpv4(address);
   if (version === 6) return isPrivateIpv6(address);
   return true;
+}
+
+function configuredGenXOrigin(): string | null {
+  try {
+    return new URL(env.GENX_BASE_URL).origin;
+  } catch {
+    return null;
+  }
+}
+
+function requestHeadersFor(current: URL, configured?: HeadersInit): Headers {
+  const headers = new Headers(configured || {});
+  const genxOrigin = configuredGenXOrigin();
+  if (
+    genxOrigin &&
+    current.origin === genxOrigin &&
+    env.GENX_API_KEY &&
+    !headers.has('Authorization')
+  ) {
+    headers.set('Authorization', `Bearer ${env.GENX_API_KEY}`);
+  }
+  return headers;
 }
 
 export async function validatePublicHttpUrl(value: string): Promise<URL> {
@@ -143,10 +166,12 @@ export async function safeFetch(value: string, options: SafeFetchOptions = {}): 
       else callback(null, pinnedAddresses[0].address, pinnedAddresses[0].family);
     }) as unknown as LookupFunction;
     const dispatcher = new Agent({ connect: { lookup: pinnedLookup } });
+    const headers = requestHeadersFor(current, options.headers);
     let response: Response;
     try {
       response = await fetch(current, {
         ...options,
+        headers,
         method,
         body,
         redirect: 'manual',
