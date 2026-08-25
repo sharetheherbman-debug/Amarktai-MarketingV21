@@ -53,7 +53,7 @@ function configuredGenXOrigin(): string | null {
   }
 }
 
-function requestHeadersFor(current: URL, configured?: HeadersInit): Headers {
+function requestHeadersFor(current: URL, configured?: RequestInit['headers']): Headers {
   const headers = new Headers(configured || {});
   const genxOrigin = configuredGenXOrigin();
   if (
