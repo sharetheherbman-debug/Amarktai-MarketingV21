@@ -30,6 +30,40 @@ function fail(res: Response<ApiResponse>, status: number, message: string) {
   res.status(status).json({ success: false, error: { message, code: status === 403 ? 'FORBIDDEN' : 'BAD_REQUEST' } });
 }
 
+async function persistMediaSettings(
+  projectId: string,
+  orgId: string,
+  body: Record<string, unknown>
+): Promise<void> {
+  const updates: string[] = [];
+  const values: unknown[] = [];
+  let index = 1;
+
+  for (const [field, value] of [
+    ['voice_settings', body.voice_settings],
+    ['music_settings', body.music_settings],
+    ['caption_settings', body.caption_settings],
+  ] as Array<[string, unknown]>) {
+    if (value === undefined) continue;
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      throw new Error(`${field} must be an object`);
+    }
+    updates.push(`${field}=$${index++}::jsonb`);
+    values.push(JSON.stringify(value));
+  }
+
+  if (updates.length === 0) return;
+  updates.push('updated_at=NOW()');
+  values.push(projectId, orgId);
+  const result = await query(
+    `UPDATE video_projects SET ${updates.join(', ')}
+     WHERE id=$${index} AND organization_id=$${index + 1}
+     RETURNING id`,
+    values
+  );
+  if (result.rows.length === 0) throw new Error('Video project not found');
+}
+
 router.get('/projects', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction) => {
   try {
     const auth = await resolveOrg(req);
@@ -60,7 +94,9 @@ router.put('/projects/:id', async (req: AuthRequest, res: Response<ApiResponse>,
   try {
     const auth = await resolveOrg(req, 'body');
     if (auth.error) return fail(res, auth.status, auth.error);
-    res.json({ success: true, data: await longformService.updateProject(req.params.id, auth.orgId, req.body) });
+    await longformService.updateProject(req.params.id, auth.orgId, req.body);
+    await persistMediaSettings(req.params.id, auth.orgId, req.body);
+    res.json({ success: true, data: await longformService.getProject(req.params.id, auth.orgId) });
   } catch (error) { next(error); }
 });
 
