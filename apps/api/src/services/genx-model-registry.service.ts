@@ -160,7 +160,10 @@ export async function syncModelsToDatabase(models: GenXModel[]): Promise<{ total
              name=$2, category=$3, vendor=$4, inputs=$5, outputs=$6, operations=$7,
              parameters=$8, available=$9, deprecated=$10, raw_metadata=$11,
              last_seen=$12, last_verified=$13,
-             verification_status=CASE WHEN verification_status='runtime_confirmed' THEN verification_status ELSE $14 END,
+             verification_status=CASE
+               WHEN verification_status IN ('runtime_confirmed','failed') THEN verification_status
+               ELSE $14
+             END,
              required_parameters=$15, optional_parameters=$16
            WHERE id=$1`,
           [
