@@ -1,4 +1,5 @@
 import path from 'path';
+import { stat } from 'fs/promises';
 import { AppError } from '../middleware/errorHandler';
 import { genxMultimodalProvider, type GenXVisualAssessment } from '../providers/genx-multimodal.provider';
 
@@ -34,8 +35,8 @@ export type MarketingVisualQaResult = {
 };
 
 export type MarketingVisualQaInput = {
+  /** A trusted, durable Studio asset path. Remote/internal URLs are never fetched. */
   ingredientPath: string;
-  ingredientUrl?: string;
   brief: Json;
   technicalQa: Json;
 };
@@ -145,19 +146,55 @@ function fixtureAssessment(): GenXVisualAssessment {
  * Live assessment is deliberately fail-closed. The explicit fixture mode is only
  * for contract tests and disposable candidates without the production GenX secret.
  */
+function imageMimeType(filePath: string): string {
+  switch (path.extname(filePath).toLowerCase()) {
+    case '.jpg': case '.jpeg': return 'image/jpeg';
+    case '.png': return 'image/png';
+    case '.webp': return 'image/webp';
+    default: throw new AppError(409, 'Marketing visual QA only accepts a trusted PNG, JPEG, or WebP ingredient', 'MATERIAL_VISUAL_QA_MEDIA_INVALID');
+  }
+}
+
+/**
+ * Uploads a trusted durable ingredient through the authenticated GenX file
+ * boundary, then analyses by file ID. This prevents local file URLs, private
+ * application routes, arbitrary remote URL fetches, and permanent public media
+ * exposure. The temporary provider file is deleted on every terminal path.
+ */
 export async function assessMarketingIngredient(input: MarketingVisualQaInput): Promise<MarketingVisualQaResult> {
   if (process.env.MARKETING_VISUAL_QA_MODE === 'fixture') {
     return validateMarketingVisualQa(fixtureAssessment(), 'fixture_contract');
   }
-  const imageUrl = input.ingredientUrl || `file://${path.resolve(input.ingredientPath)}`;
-  const response = await genxMultimodalProvider.assessVisual({
-    image_url: imageUrl,
-    brief: input.brief,
-    technical_qa: input.technicalQa,
-    instructions: sourceInstructions(input.brief),
-    thresholds: MARKETING_VISUAL_QA_THRESHOLDS,
-  });
-  return validateMarketingVisualQa(response, 'genx_multimodal');
+  const absolutePath = path.resolve(input.ingredientPath);
+  const fileInfo = await stat(absolutePath).catch(() => null);
+  if (!fileInfo?.isFile()) {
+    throw new AppError(409, 'Marketing visual QA ingredient is unavailable as a durable local file', 'MATERIAL_VISUAL_QA_MEDIA_INVALID');
+  }
+  const mimeType = imageMimeType(absolutePath);
+  let temporaryFileId: string | null = null;
+  try {
+    const uploaded = await genxMultimodalProvider.uploadFile(
+      absolutePath,
+      `marketing-qa-${path.basename(absolutePath).replace(/[^a-zA-Z0-9._-]/g, '_')}`,
+      mimeType
+    );
+    temporaryFileId = uploaded.id;
+    const response = await genxMultimodalProvider.assessVisual({
+      file_id: temporaryFileId,
+      brief: input.brief,
+      technical_qa: input.technicalQa,
+      instructions: sourceInstructions(input.brief),
+      thresholds: MARKETING_VISUAL_QA_THRESHOLDS,
+    });
+    return validateMarketingVisualQa(response, 'genx_multimodal');
+  } catch (error) {
+    if (error instanceof AppError) throw error;
+    throw new AppError(503, 'Marketing visual QA is temporarily unavailable; the ingredient was not accepted or made ready for review', 'MATERIAL_VISUAL_QA_PROVIDER_UNAVAILABLE');
+  } finally {
+    if (temporaryFileId) {
+      await genxMultimodalProvider.deleteFile(temporaryFileId).catch(() => undefined);
+    }
+  }
 }
 
 export function visualQaRejection(result: MarketingVisualQaResult): AppError {

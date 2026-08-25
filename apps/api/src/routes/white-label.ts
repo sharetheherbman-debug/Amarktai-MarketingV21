@@ -11,6 +11,7 @@ const router = Router();
 router.use(requireAuth);
 
 const updateWhiteLabelSchema = z.object({
+  organization_id: z.string().uuid(),
   brand_name: z.string().max(255).optional(), brand_logo: z.string().optional(), brand_favicon: z.string().optional(),
   brand_colors: z.record(z.unknown()).optional(), brand_font: z.string().max(100).optional(), custom_css: z.string().optional(),
   email_branding: z.record(z.unknown()).optional(), login_page_config: z.record(z.unknown()).optional(),

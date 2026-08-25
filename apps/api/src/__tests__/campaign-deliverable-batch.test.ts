@@ -57,6 +57,14 @@ describe('campaign deliverable batch contract', () => {
     expect(first.filter((run) => run.canonicalRoute?.kind === 'image_ad')).toHaveLength(5);
     expect(first[0]).toMatchObject({ operation: 'text_to_image', canonicalRoute: { composition: 'branded_video', maxDurationSeconds: 15 } });
     expect(first.slice(1).every((run) => run.operation === 'text_to_image' && run.canonicalRoute?.composition === 'branded_static')).toBe(true);
+    const requestedFinalAssets = first.filter((run) => ['branded_static', 'branded_video'].includes(String(run.canonicalRoute?.composition)));
+    const finalSummary = {
+      requested_final_assets: requestedFinalAssets.length,
+      final_image_assets: requestedFinalAssets.filter((run) => run.canonicalRoute?.composition === 'branded_static').length,
+      final_video_assets: requestedFinalAssets.filter((run) => run.canonicalRoute?.composition === 'branded_video').length,
+      ready_final_assets: requestedFinalAssets.length,
+    };
+    expect(finalSummary).toEqual({ requested_final_assets: 6, final_image_assets: 5, final_video_assets: 1, ready_final_assets: 6 });
   });
 
   it('keeps legacy or untrusted briefs at the stricter three-variation bound', () => {

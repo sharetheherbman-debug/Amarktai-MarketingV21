@@ -14,6 +14,7 @@ import {
   type GovernedGeneration,
 } from '../services/governed-generation.service';
 import * as contentEngine from '../services/content-engine.service';
+import * as contentWorkflow from '../services/content-workflow.service';
 import * as studioService from '../services/studio.service';
 import { composeCampaignMaterial, composeCampaignVideoMaterial } from '../services/marketing-material-compositor.service';
 import { queueCampaignMaterialRepair } from '../services/campaign-production.service';
@@ -688,12 +689,27 @@ async function processCampaignText(job: Job): Promise<void> {
     [data.runId, data.organizationId]
   );
   const result = await contentEngine.generateContent(data.organizationId, data.request, data.userId);
+  await contentWorkflow.submitForReview(result.content.id, data.organizationId, data.userId, data.userId);
+  const finalMode = String(data.request?.composition_mode || data.request?.material_mode || 'branded_copy');
   await query(
     `UPDATE campaign_asset_runs
-     SET status='completed',content_id=$1,resolution_status='pending_review',
+     SET status='completed',content_id=$1,resolution_status='pending_review',material_status='ready_for_review',
+         material_metadata=COALESCE(material_metadata,'{}'::jsonb) || $2::jsonb,
          completed_at=NOW(),updated_at=NOW()
-     WHERE id=$2 AND organization_id=$3`,
-    [result.content.id, data.runId, data.organizationId]
+     WHERE id=$3 AND organization_id=$4`,
+    [
+      result.content.id,
+      JSON.stringify({
+        material_role: 'final_marketing_content',
+        material_mode: finalMode,
+        content_id: result.content.id,
+        deliverable_kind: data.request?.deliverable_kind || null,
+        campaign_plan_id: data.request?.campaign_plan_id || null,
+        approval_state: 'pending_review',
+      }),
+      data.runId,
+      data.organizationId,
+    ]
   );
 }
 

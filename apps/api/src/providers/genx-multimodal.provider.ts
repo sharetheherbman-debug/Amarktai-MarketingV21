@@ -86,7 +86,8 @@ export interface GenXVisualAssessment {
 }
 
 export interface GenXVisualAssessmentRequest {
-  image_url: string;
+  /** Ephemeral file ID created through the authenticated GenX file boundary. */
+  file_id: string;
   brief: Record<string, unknown>;
   technical_qa: Record<string, unknown>;
   instructions: string;
@@ -228,7 +229,7 @@ export class GenXMultimodalProvider {
   async assessVisual(request: GenXVisualAssessmentRequest): Promise<GenXVisualAssessment> {
     const raw = recordValue(await this.request('POST', '/api/v1/analyze', {
       task: 'marketing_visual_quality_assessment',
-      image_url: request.image_url,
+      file_id: request.file_id,
       brief: request.brief,
       technical_qa: request.technical_qa,
       instructions: request.instructions,

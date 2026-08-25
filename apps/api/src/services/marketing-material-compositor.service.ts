@@ -45,6 +45,28 @@ export interface MaterialCompositionResult {
   tracking: Json;
 }
 
+/**
+ * Supporting scenes are final tenant assets approved through the canonical
+ * content workflow. `material_status` remains ready_for_review after approval;
+ * `resolution_status`, content status, and an owner approval prove eligibility.
+ */
+export const APPROVED_MARKETING_SCENE_QUERY = `SELECT asset.storage_path
+  FROM campaign_asset_runs sibling
+  JOIN studio_assets asset ON asset.id=sibling.final_material_asset_id
+  JOIN content_items content ON content.id=sibling.content_id AND content.organization_id=sibling.organization_id
+ WHERE sibling.campaign_plan_id=$1 AND sibling.organization_id=$2
+   AND sibling.id<>$3 AND sibling.final_material_asset_id IS NOT NULL
+   AND sibling.material_status='ready_for_review'
+   AND sibling.resolution_status='approved'
+   AND content.status='approved' AND content.deleted_at IS NULL
+   AND asset.organization_id=sibling.organization_id AND asset.deleted_at IS NULL AND asset.mime_type LIKE 'image/%'
+   AND EXISTS (
+     SELECT 1 FROM content_approvals approval
+      WHERE approval.content_id=content.id AND approval.organization_id=sibling.organization_id
+        AND approval.status='approved'
+   )
+ ORDER BY sibling.completed_at ASC NULLS LAST LIMIT 3`;
+
 function asObject(value: unknown): Json {
   if (value && typeof value === 'object' && !Array.isArray(value)) return value as Json;
   try { return JSON.parse(String(value || '{}')) as Json; } catch { return {}; }
@@ -370,7 +392,6 @@ export async function composeCampaignMaterial(runId: string, orgId: string, user
     await recordQuality(run, 'ingredient_technical', 'passed', ingredientQa, 100);
     const visualQa = await assessMarketingIngredient({
       ingredientPath: String(ingredient.storage_path),
-      ingredientUrl: ingredient.url ? String(ingredient.url) : undefined,
       brief,
       technicalQa: ingredientQa,
     });
@@ -560,7 +581,6 @@ export async function composeCampaignVideoMaterial(runId: string, orgId: string,
     await recordQuality(run, 'ingredient_technical', 'passed', ingredientQa, 100);
     const visualQa = await assessMarketingIngredient({
       ingredientPath: String(ingredient.storage_path),
-      ingredientUrl: ingredient.url ? String(ingredient.url) : undefined,
       brief,
       technicalQa: ingredientQa,
     });
@@ -581,13 +601,7 @@ export async function composeCampaignVideoMaterial(runId: string, orgId: string,
       { mode: 0o600 }
     );
     const approvedScenes = await query(
-      `SELECT asset.storage_path
-         FROM campaign_asset_runs sibling
-         JOIN studio_assets asset ON asset.id=sibling.final_material_asset_id
-        WHERE sibling.campaign_plan_id=$1 AND sibling.organization_id=$2
-          AND sibling.id<>$3 AND sibling.material_status='approved'
-          AND asset.deleted_at IS NULL AND asset.mime_type LIKE 'image/%'
-        ORDER BY sibling.completed_at ASC NULLS LAST LIMIT 3`,
+      APPROVED_MARKETING_SCENE_QUERY,
       [run.campaign_plan_id, orgId, run.id]
     );
     const supportingStills = approvedScenes.rows
