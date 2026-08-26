@@ -27,15 +27,25 @@ export interface MarketingGenerationRoute {
   priceSnapshotId: string;
   pricingLastSyncedAt: string;
   requiredFormat?: string;
+  selectionReasoning: {
+    policy: MarketingGenerationTier;
+    selectedScore: number;
+    summary: string;
+    weights: Record<string, number>;
+    selectedSignals: Record<string, number | boolean | string>;
+    candidatesConsidered: number;
+  };
 }
 
-type PricedCandidate = MarketingGenerationRoute & {
+export type PricedCandidate = Omit<MarketingGenerationRoute, 'selectionReasoning'> & {
   runtimeConfirmed: boolean;
   healthScore: number;
   failureRate: number;
   qualityScore: number;
   latencyMs: number;
 };
+
+type ScoredCandidate = { candidate: PricedCandidate; score: number; signals: Record<string, number> };
 
 function numberInRange(value: unknown, fallback: number, min = 0, max = 100): number {
   const parsed = Number(value);
@@ -59,22 +69,49 @@ function supportsRequestedFormat(raw: Record<string, unknown> | undefined, requi
   return formats.map(String).includes(requiredFormat);
 }
 
-function chooseCandidate(tier: MarketingGenerationTier, candidates: PricedCandidate[]): PricedCandidate {
+export function rankMarketingCandidates(tier: MarketingGenerationTier, candidates: PricedCandidate[]): ScoredCandidate[] {
   const priceSorted = [...candidates].sort((left, right) => left.estimatedCredits - right.estimatedCredits || left.modelId.localeCompare(right.modelId));
-  if (tier === 'economy') return priceSorted[0];
+  if (tier === 'economy') return priceSorted.map((candidate, index) => ({
+    candidate,
+    score: Number((100 - index).toFixed(2)),
+    signals: { safe_cost_rank: index + 1 },
+  }));
   const minCredits = priceSorted[0].estimatedCredits;
   const maxCredits = priceSorted[priceSorted.length - 1].estimatedCredits;
-  const scored = candidates.map((candidate) => {
+  return candidates.map((candidate) => {
     const costScore = maxCredits === minCredits ? 100 : 100 - (((candidate.estimatedCredits - minCredits) / (maxCredits - minCredits)) * 100);
     const latencyScore = candidate.latencyMs <= 0 ? 70 : Math.max(0, 100 - Math.min(100, candidate.latencyMs / 100));
     const reliabilityScore = 100 - candidate.failureRate;
-    const quality = (candidate.healthScore * 0.25) + (reliabilityScore * 0.25) + (candidate.qualityScore * 0.30) + (latencyScore * 0.05);
-    // Recommended is a documented quality/cost balance. Premium remains a
-    // quality-first route after the owner policy gate, never a catalogue fallback.
-    const selectionScore = tier === 'premium' ? quality : quality + (costScore * 0.15);
-    return { candidate, selectionScore };
-  }).sort((left, right) => right.selectionScore - left.selectionScore || left.candidate.estimatedCredits - right.candidate.estimatedCredits || left.candidate.modelId.localeCompare(right.candidate.modelId));
-  return scored[0].candidate;
+    const score = tier === 'premium'
+      ? (candidate.healthScore * 0.30) + (reliabilityScore * 0.30) + (candidate.qualityScore * 0.35) + (latencyScore * 0.05)
+      : (candidate.healthScore * 0.20) + (reliabilityScore * 0.25) + (candidate.qualityScore * 0.30) + (latencyScore * 0.05) + (costScore * 0.20);
+    return { candidate, score: Number(score.toFixed(2)), signals: { cost: Number(costScore.toFixed(2)), health: candidate.healthScore, reliability: reliabilityScore, historical_quality: candidate.qualityScore, latency: Number(latencyScore.toFixed(2)) } };
+  }).sort((left, right) => right.score - left.score || left.candidate.estimatedCredits - right.candidate.estimatedCredits || left.candidate.modelId.localeCompare(right.candidate.modelId));
+}
+
+function chooseCandidate(tier: MarketingGenerationTier, candidates: PricedCandidate[]): { candidate: PricedCandidate; reasoning: MarketingGenerationRoute['selectionReasoning'] } {
+  const ranked = rankMarketingCandidates(tier, candidates);
+  const selected = ranked[0];
+  const weights: Record<string, number> = tier === 'economy'
+    ? { safe_cost_rank: 1 }
+    : tier === 'premium'
+      ? { health: 0.30, reliability: 0.30, historical_quality: 0.35, latency: 0.05, cost: 0 }
+      : { health: 0.20, reliability: 0.25, historical_quality: 0.30, latency: 0.05, cost: 0.20 };
+  return {
+    candidate: selected.candidate,
+    reasoning: {
+      policy: tier,
+      selectedScore: selected.score,
+      summary: tier === 'economy'
+        ? 'Lowest-credit runtime-confirmed route satisfying operation, format and live-pricing gates.'
+        : tier === 'premium'
+          ? 'Highest quality/reliability score among explicitly permitted safe routes.'
+          : 'Best-value weighted score using runtime health, observed failure rate, available QA history, latency and live cost.',
+      weights,
+      selectedSignals: { ...selected.signals, runtime_confirmed: true, required_format: selected.candidate.requiredFormat || 'not specified' },
+      candidatesConsidered: ranked.length,
+    },
+  };
 }
 
 function normalizeTier(value: unknown): MarketingGenerationTier {
@@ -147,7 +184,8 @@ export async function routeMarketingGeneration(input: MarketingGenerationRouteIn
     throw new AppError(503, `No live-priced, runtime-confirmed Marketing model is available for ${input.operation}`, 'MARKETING_MODEL_ROUTE_UNAVAILABLE');
   }
 
-  const selected = chooseCandidate(tier, candidates);
+  const selection = chooseCandidate(tier, candidates);
+  const selected = selection.candidate;
   const perActionLimit = Number(policy.per_action_credit_limit || 0);
   const dailyLimit = Number(policy.daily_generation_credit_limit || 0);
   const remainingToday = Number((control.today as Record<string, unknown> | undefined)?.generation_credits_remaining || 0);
@@ -163,5 +201,5 @@ export async function routeMarketingGeneration(input: MarketingGenerationRouteIn
   }
 
   const { runtimeConfirmed: _runtimeConfirmed, ...route } = selected;
-  return route;
+  return { ...route, selectionReasoning: selection.reasoning };
 }

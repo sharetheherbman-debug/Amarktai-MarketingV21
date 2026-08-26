@@ -14,11 +14,13 @@ import {
   type GovernedGeneration,
 } from '../services/governed-generation.service';
 import * as contentEngine from '../services/content-engine.service';
+import * as contentQuality from '../services/content-quality.service';
 import * as contentWorkflow from '../services/content-workflow.service';
 import * as studioService from '../services/studio.service';
 import { composeCampaignMaterial, composeCampaignVideoMaterial } from '../services/marketing-material-compositor.service';
 import { queueCampaignMaterialRepair } from '../services/campaign-production.service';
 import { safeFetch } from '../utils/safe-fetch';
+import { finalizeCanonicalTextMaterial } from '../services/marketing-text-material.service';
 
 const connection = {
   host: process.env.REDIS_HOST || 'localhost',
@@ -689,8 +691,28 @@ async function processCampaignText(job: Job): Promise<void> {
     [data.runId, data.organizationId]
   );
   const result = await contentEngine.generateContent(data.organizationId, data.request, data.userId);
-  await contentWorkflow.submitForReview(result.content.id, data.organizationId, data.userId, data.userId);
-  const finalMode = String(data.request?.composition_mode || data.request?.material_mode || 'branded_copy');
+  const finalMaterial = finalizeCanonicalTextMaterial({
+    deliverableKind: data.request?.deliverable_kind,
+    compositionMode: data.request?.composition_mode,
+    materialType: data.request?.material_type,
+    channel: data.request?.channel,
+    dimensionsOrFormat: data.request?.dimensions_or_format,
+    requiresOwnerApproval: data.request?.requires_owner_approval,
+    campaignPlanId: data.request?.campaign_plan_id,
+    briefId: data.request?.brief_id,
+    title: result.content.title,
+    generatedBody: result.content.body || '',
+  });
+  const finalizedContent = await contentEngine.update(result.content.id, data.organizationId, {
+    body: finalMaterial.body,
+    format: finalMaterial.format,
+    metadata: { ...(result.content.metadata || {}), ...finalMaterial.metadata },
+  }, data.userId);
+  const quality = await contentQuality.runQualityChecks(finalizedContent.id, data.organizationId);
+  if (!quality.passed) {
+    throw new AppError(422, 'Finalized campaign text did not pass the required quality checks', 'CAMPAIGN_TEXT_QUALITY_FAILED');
+  }
+  await contentWorkflow.submitForReview(finalizedContent.id, data.organizationId, data.userId, data.userId);
   await query(
     `UPDATE campaign_asset_runs
      SET status='completed',content_id=$1,resolution_status='pending_review',material_status='ready_for_review',
@@ -698,15 +720,8 @@ async function processCampaignText(job: Job): Promise<void> {
          completed_at=NOW(),updated_at=NOW()
      WHERE id=$3 AND organization_id=$4`,
     [
-      result.content.id,
-      JSON.stringify({
-        material_role: 'final_marketing_content',
-        material_mode: finalMode,
-        content_id: result.content.id,
-        deliverable_kind: data.request?.deliverable_kind || null,
-        campaign_plan_id: data.request?.campaign_plan_id || null,
-        approval_state: 'pending_review',
-      }),
+      finalizedContent.id,
+      JSON.stringify({ ...finalMaterial.metadata, content_id: finalizedContent.id }),
       data.runId,
       data.organizationId,
     ]

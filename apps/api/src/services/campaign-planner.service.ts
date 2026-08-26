@@ -117,7 +117,9 @@ const REQUIRED_PLAN_KEYS = [
 export function normalizeRequestedDeliverables(value: CampaignPlanInput['requested_deliverables']): RequestedDeliverable[] {
   return (Array.isArray(value) ? value : []).slice(0, 12).flatMap((item) => {
     const kind = String(item?.kind || '');
-    if (!isOwnerDeliverableKind(kind)) return [];
+    if (!isOwnerDeliverableKind(kind)) {
+      throw new AppError(400, `Unsupported owner deliverable kind: ${kind || 'missing'}`, 'OWNER_DELIVERABLE_UNSUPPORTED');
+    }
     const route = getDeliverableRoute(kind);
     const count = Math.max(1, Math.min(12, Math.floor(Number(item?.count || 1))));
     const platforms = Array.isArray(item?.platforms) ? item.platforms.map(String).filter(Boolean).slice(0, 6) : [];

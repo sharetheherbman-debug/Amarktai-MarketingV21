@@ -9,6 +9,7 @@ const pricedStillRoute: MarketingGenerationRoute = {
   estimatedCredits: 2,
   estimatedRetailGbp: 0.04,
   pricingLastSyncedAt: '2026-08-25T00:00:00.000Z',
+  selectionReasoning: { policy: 'economy', selectedScore: 100, summary: 'Lowest safe cost.', weights: { safe_cost_rank: 1 }, selectedSignals: { runtime_confirmed: true }, candidatesConsidered: 1 },
 };
 
 describe('economical promotional video policy', () => {

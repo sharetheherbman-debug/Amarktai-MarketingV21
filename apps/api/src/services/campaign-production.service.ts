@@ -126,7 +126,7 @@ export async function queueCampaignProduction(planId: string, orgId: string, use
       const prompt = assetPrompt(plan, brief, variant);
 
       try {
-        if (operation) {
+        if (operation && operation !== 'text_generation') {
           const requestedDuration = Number(brief.duration_seconds || 0);
           const boundedVideoDuration = operation === 'text_to_video'
             ? Math.max(5, Math.min(15, requestedDuration || 15))
@@ -202,6 +202,12 @@ export async function queueCampaignProduction(planId: string, orgId: string, use
             calls_to_action: asObject(plan.brief).calls_to_action || [],
             prohibited_claims: asObject(plan.constraints).prohibited_claims || [],
             idempotency_key: `campaign-asset:${run.id}`,
+            deliverable_kind: canonicalRoute?.kind,
+            composition_mode: canonicalRoute?.composition,
+            material_type: canonicalRoute?.materialType,
+            channel: canonicalRoute?.primaryChannel || String(brief.platform || ''),
+            requires_owner_approval: canonicalRoute?.requiresOwnerApproval ?? true,
+            dimensions_or_format: canonicalRoute?.defaultDimensions || String(brief.dimensions_or_length || ''),
           } as GenerateContentRequest & { product_lines: string[] };
           const job = await generationQueue.add('campaign-text', {
             kind: 'campaign-text', runId: run.id, organizationId: orgId, userId, request,

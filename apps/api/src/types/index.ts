@@ -1090,6 +1090,14 @@ export interface GenerateContentRequest {
   required_terms?: string[];
   alt_text?: string;
   idempotency_key?: string;
+  /** Canonical owner-visible Marketing route. These fields are supplied only by
+   * the governed campaign planner and are validated again by the worker. */
+  deliverable_kind?: string;
+  composition_mode?: string;
+  material_type?: string;
+  channel?: string;
+  requires_owner_approval?: boolean;
+  dimensions_or_format?: string;
 }
 
 export interface ContentQualityCheck {

@@ -15,13 +15,17 @@ describe('campaign deliverable batch contract', () => {
     const normalized = normalizeRequestedDeliverables([
       { kind: 'video_ad', count: 1, duration_seconds: 15 },
       { kind: 'image_ad', count: 5 },
-      { kind: 'unknown' as never, count: 99 },
     ]);
 
     expect(normalized).toEqual([
       { kind: 'video_ad', count: 1, platforms: [], format: 'Short video ad', duration_seconds: 15 },
       { kind: 'image_ad', count: 5, platforms: [], format: 'Image ad', duration_seconds: undefined },
     ]);
+  });
+
+  it('fails closed for an unknown owner deliverable instead of silently dropping it', () => {
+    expect(() => normalizeRequestedDeliverables([{ kind: 'unknown' as never, count: 1 }]))
+      .toThrow('Unsupported owner deliverable kind');
   });
 
   it('turns one owner batch request into exact branded campaign deliverables rather than studio jobs', () => {
