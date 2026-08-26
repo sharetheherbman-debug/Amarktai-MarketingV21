@@ -22,7 +22,7 @@ const MIN_TEXT_CONTRAST = 4.5;
 
 type Json = Record<string, any>;
 
-type BrandMaterialIdentity = {
+export type BrandMaterialIdentity = {
   name: string;
   logoUrl: string;
   primary: string;
@@ -172,11 +172,7 @@ function contrastingText(background: string, configured: string): string {
   return selected.color;
 }
 
-async function resolveBrandIdentity(orgId: string): Promise<BrandMaterialIdentity> {
-  const [whiteLabelConfig, dna] = await Promise.all([
-    whiteLabel.getWhiteLabelConfig(orgId),
-    brandDna.get(orgId),
-  ]);
+export function resolveBrandIdentityFromConfig(whiteLabelConfig: Json, dna: Json | null | undefined): BrandMaterialIdentity {
   const whiteColors = asObject(whiteLabelConfig.brand_colors);
   const dnaColors = asObject(dna?.colors);
   const primary = findColor(whiteColors, ['primary', 'primary_color', 'brand_primary'])
@@ -205,6 +201,14 @@ async function resolveBrandIdentity(orgId: string): Promise<BrandMaterialIdentit
     prohibitedPhrases: stringArray(dna?.prohibited_phrases),
     complianceRules: stringArray(dna?.compliance_rules),
   };
+}
+
+async function resolveBrandIdentity(orgId: string): Promise<BrandMaterialIdentity> {
+  const [whiteLabelConfig, dna] = await Promise.all([
+    whiteLabel.getWhiteLabelConfig(orgId),
+    brandDna.get(orgId),
+  ]);
+  return resolveBrandIdentityFromConfig(whiteLabelConfig, dna as Json | null);
 }
 
 async function loadLogo(logoUrl: string, orgId: string): Promise<Buffer> {

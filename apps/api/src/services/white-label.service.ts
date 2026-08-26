@@ -3,6 +3,7 @@ import { resolveCname, resolveTxt } from 'dns/promises';
 import { query } from '../config/database';
 import { NotFoundError, ConflictError, AppError } from '../middleware/errorHandler';
 import { logger } from '../utils/logger';
+import { safeFetch, validatePublicHttpUrl } from '../utils/safe-fetch';
 
 export interface WhiteLabelConfig {
   id: string; organization_id: string; brand_name: string | null; brand_logo: string | null;
@@ -28,11 +29,40 @@ export interface ClientPortal {
 }
 
 export interface UpdateWhiteLabelData {
-  brand_name?: string; brand_logo?: string; brand_favicon?: string; brand_colors?: Record<string, unknown>;
-  brand_font?: string; custom_css?: string; email_branding?: Record<string, unknown>;
+  brand_name?: string | null; brand_logo?: string | null; brand_favicon?: string | null; brand_colors?: Record<string, unknown>;
+  brand_font?: string | null; custom_css?: string; email_branding?: Record<string, unknown>;
   login_page_config?: Record<string, unknown>; sidebar_config?: Record<string, unknown>;
-  removed_branding?: boolean; custom_footer?: string; support_email?: string; support_url?: string;
+  removed_branding?: boolean; custom_footer?: string; support_email?: string | null; support_url?: string;
   terms_url?: string; privacy_url?: string;
+}
+
+function normalizedHex(value: unknown, field: string): string | null {
+  if (value === undefined || value === null || value === '') return null;
+  const raw = String(value).trim();
+  const hex = raw.startsWith('#') ? raw : `#${raw}`;
+  if (!/^#[0-9a-fA-F]{6}$/.test(hex)) throw new AppError(400, `${field} must be a six-digit hex colour`, 'WHITE_LABEL_COLOR_INVALID');
+  return hex.toUpperCase();
+}
+
+async function validateBrandLogo(orgId: string, value: string | null | undefined): Promise<string | null | undefined> {
+  if (value === undefined || value === null || value.trim() === '') return value === undefined ? undefined : null;
+  const logo = value.trim();
+  const internal = logo.match(/^\/api\/v1\/studio\/assets\/([0-9a-f-]{36})$/i);
+  if (internal) {
+    const asset = await query(
+      `SELECT 1 FROM studio_assets WHERE id=$1 AND organization_id=$2
+        AND deleted_at IS NULL AND mime_type LIKE 'image/%'`,
+      [internal[1], orgId]
+    );
+    if (!asset.rows[0]) throw new AppError(400, 'Select an image owned by this workspace for the brand logo', 'WHITE_LABEL_LOGO_NOT_OWNED');
+    return logo;
+  }
+  await validatePublicHttpUrl(logo);
+  const response = await safeFetch(logo, { timeoutMs: 10_000, maxRedirects: 3, maxResponseBytes: 5 * 1024 * 1024 });
+  if (!response.ok || !String(response.headers.get('content-type') || '').toLowerCase().startsWith('image/')) {
+    throw new AppError(400, 'Brand logo URL must return a public image', 'WHITE_LABEL_LOGO_INVALID');
+  }
+  return response.url;
 }
 
 export interface AddCustomDomainData { domain: string; target_cname?: string; is_primary?: boolean; }
@@ -73,14 +103,24 @@ export async function getWhiteLabelConfig(orgId: string): Promise<WhiteLabelConf
 
 export async function updateWhiteLabelConfig(orgId: string, data: UpdateWhiteLabelData): Promise<WhiteLabelConfig> {
   await getWhiteLabelConfig(orgId);
+  const validatedLogo = await validateBrandLogo(orgId, data.brand_logo);
+  const colors = data.brand_colors === undefined ? undefined : {
+    ...data.brand_colors,
+    ...(data.brand_colors.primary !== undefined
+      ? { primary: normalizedHex(data.brand_colors.primary, 'Primary colour') }
+      : {}),
+    ...(data.brand_colors.accent !== undefined || data.brand_colors.secondary !== undefined
+      ? { accent: normalizedHex(data.brand_colors.accent ?? data.brand_colors.secondary, 'Accent colour') }
+      : {}),
+  };
   const updates: string[] = [];
   const values: unknown[] = [];
   let parameter = 1;
   const add = (column: string, value: unknown) => { updates.push(`${column}=$${parameter++}`); values.push(value); };
   if (data.brand_name !== undefined) add('brand_name', data.brand_name);
-  if (data.brand_logo !== undefined) add('brand_logo', data.brand_logo);
+  if (validatedLogo !== undefined) add('brand_logo', validatedLogo);
   if (data.brand_favicon !== undefined) add('brand_favicon', data.brand_favicon);
-  if (data.brand_colors !== undefined) add('brand_colors', JSON.stringify(data.brand_colors));
+  if (colors !== undefined) add('brand_colors', JSON.stringify(colors));
   if (data.brand_font !== undefined) add('brand_font', data.brand_font);
   if (data.custom_css !== undefined) add('custom_css', data.custom_css);
   if (data.email_branding !== undefined) add('email_branding', JSON.stringify(data.email_branding));

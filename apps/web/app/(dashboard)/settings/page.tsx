@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, type ComponentType } from 'react';
+import { useCallback, useEffect, useState, type ComponentType } from 'react';
 import Link from 'next/link';
 import { Building2, BrainCircuit, CheckCircle2, Globe2, Lock, Palette, RefreshCw, Save, ShieldCheck, User } from 'lucide-react';
 import { useAuthStore } from '@/stores/auth.store';
@@ -15,6 +15,7 @@ type WhiteLabelConfig = {
   brand_colors?: Record<string, unknown> | null;
   support_email?: string | null;
   support_url?: string | null;
+  brand_font?: string | null;
 };
 
 type CustomDomain = {
@@ -34,13 +35,16 @@ export default function SettingsPage() {
   const [brandName, setBrandName] = useState('');
   const [supportEmail, setSupportEmail] = useState('');
   const [primaryColor, setPrimaryColor] = useState('#2e6da4');
+  const [accentColor, setAccentColor] = useState('#65a3d7');
+  const [brandLogo, setBrandLogo] = useState('');
+  const [brandFont, setBrandFont] = useState('Inter');
   const [domainInput, setDomainInput] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [domainBusy, setDomainBusy] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
 
-  const loadWhiteLabel = async () => {
+  const loadWhiteLabel = useCallback(async () => {
     if (!currentOrganization?.id) { setLoading(false); return; }
     setLoading(true);
     setMessage(null);
@@ -56,14 +60,17 @@ export default function SettingsPage() {
       setSupportEmail(String(nextConfig.support_email || ''));
       const colors = nextConfig.brand_colors || {};
       setPrimaryColor(typeof colors.primary === 'string' ? colors.primary : '#2e6da4');
+      setAccentColor(typeof colors.accent === 'string' ? colors.accent : typeof colors.secondary === 'string' ? colors.secondary : '#65a3d7');
+      setBrandLogo(String(nextConfig.brand_logo || ''));
+      setBrandFont(String(nextConfig.brand_font || 'Inter'));
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'White-label settings could not be loaded. Existing workspace settings were not changed.');
     } finally {
       setLoading(false);
     }
-  };
+  }, [currentOrganization?.id, currentOrganization?.name]);
 
-  useEffect(() => { void loadWhiteLabel(); }, [currentOrganization?.id]);
+  useEffect(() => { void loadWhiteLabel(); }, [loadWhiteLabel]);
 
   const saveBranding = async () => {
     setSaving(true);
@@ -73,7 +80,9 @@ export default function SettingsPage() {
         body: {
           brand_name: brandName.trim() || null,
           support_email: supportEmail.trim() || null,
-          brand_colors: { ...(config?.brand_colors || {}), primary: primaryColor },
+          brand_logo: brandLogo.trim() || null,
+          brand_font: brandFont,
+          brand_colors: { ...(config?.brand_colors || {}), primary: primaryColor, accent: accentColor },
         },
       });
       setConfig(response.data || config);
@@ -127,7 +136,7 @@ export default function SettingsPage() {
       <section className="ep-card p-5 sm:p-6"><div className="flex items-center gap-2"><ShieldCheck className="h-5 w-5 text-[var(--ep-blue)]"/><h2 className="text-lg font-extrabold text-[var(--ep-navy)]">Security</h2></div><div className="mt-5 space-y-3"><div className="ep-status-success flex items-start gap-3 rounded-xl border p-4"><Lock className="mt-0.5 h-4 w-4 shrink-0"/><div><p className="text-sm font-extrabold">Multi-factor authentication required</p><p className="mt-1 text-xs leading-5 opacity-80">Owner access remains protected by the Marketing MFA flow. Setup secrets and recovery-code values are never displayed here.</p></div></div><div className="rounded-xl border border-[var(--ep-border)] bg-[var(--ep-surface-subtle)] p-4"><div className="flex items-start gap-3"><Palette className="mt-0.5 h-4 w-4 text-[var(--ep-blue)]"/><div><p className="text-sm font-extrabold text-[var(--ep-navy)]">{MARKETING_BRAND_NAME} interface</p><p className="mt-1 text-xs leading-5 text-[var(--ep-text-muted)]">The deployment uses its configured brand identity and interface colours. Customer pages do not expose provider or internal infrastructure branding.</p></div></div></div></div></section>
     </div>
 
-    <section className="ep-card p-5 sm:p-6"><div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between"><div><p className="ep-section-label">White-label identity</p><h2 className="mt-1 text-lg font-extrabold text-[var(--ep-navy)]">Customer-facing brand settings</h2><p className="mt-2 max-w-3xl text-sm leading-6 text-[var(--ep-text-muted)]">Save a workspace identity without exposing raw deployment controls. Domain activation remains separate and requires verifiable DNS ownership.</p></div><button type="button" onClick={() => void loadWhiteLabel()} disabled={loading || saving} className="ep-button-secondary shrink-0 px-3 py-2 text-xs"><RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`}/> Refresh</button></div><div className="mt-5 grid gap-4 md:grid-cols-3"><label className="text-xs font-bold text-[var(--ep-text-muted)]">Brand name<input value={brandName} onChange={(event) => setBrandName(event.target.value)} disabled={loading} className="ep-input mt-1 min-h-11 w-full px-3 text-sm font-normal" placeholder="Your customer-facing brand"/></label><label className="text-xs font-bold text-[var(--ep-text-muted)]">Support email<input type="email" value={supportEmail} onChange={(event) => setSupportEmail(event.target.value)} disabled={loading} className="ep-input mt-1 min-h-11 w-full px-3 text-sm font-normal" placeholder="support@example.com"/></label><label className="text-xs font-bold text-[var(--ep-text-muted)]">Primary colour<input value={primaryColor} onChange={(event) => setPrimaryColor(event.target.value)} disabled={loading} className="ep-input mt-1 min-h-11 w-full px-3 text-sm font-normal" placeholder="#2e6da4"/></label></div><button type="button" onClick={() => void saveBranding()} disabled={loading || saving} className="ep-button-primary mt-5 px-4 py-2.5 text-sm">{saving ? <RefreshCw className="h-4 w-4 animate-spin"/> : <Save className="h-4 w-4"/>}{saving ? 'Saving…' : 'Save brand settings'}</button></section>
+    <section className="ep-card p-5 sm:p-6"><div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between"><div><p className="ep-section-label">White-label identity</p><h2 className="mt-1 text-lg font-extrabold text-[var(--ep-navy)]">Customer-facing brand settings</h2><p className="mt-2 max-w-3xl text-sm leading-6 text-[var(--ep-text-muted)]">Explicit workspace settings take priority, then Business Brain Brand DNA, then the neutral Marketing interface. Domain activation remains separate and requires verifiable DNS ownership.</p></div><button type="button" onClick={() => void loadWhiteLabel()} disabled={loading || saving} className="ep-button-secondary shrink-0 px-3 py-2 text-xs"><RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`}/> Refresh</button></div><div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-3"><label className="text-xs font-bold text-[var(--ep-text-muted)]">Brand name<input aria-label="Brand name" value={brandName} onChange={(event) => setBrandName(event.target.value)} disabled={loading} className="ep-input mt-1 min-h-11 w-full px-3 text-sm font-normal" placeholder="Your customer-facing brand"/></label><label className="text-xs font-bold text-[var(--ep-text-muted)]">Support email<input aria-label="Support email" type="email" value={supportEmail} onChange={(event) => setSupportEmail(event.target.value)} disabled={loading} className="ep-input mt-1 min-h-11 w-full px-3 text-sm font-normal" placeholder="support@example.com"/></label><label className="text-xs font-bold text-[var(--ep-text-muted)]">Logo URL or workspace asset<input aria-label="Brand logo" value={brandLogo} onChange={(event) => setBrandLogo(event.target.value)} disabled={loading} className="ep-input mt-1 min-h-11 w-full px-3 text-sm font-normal" placeholder="https://brand.example/logo.png"/></label><label className="text-xs font-bold text-[var(--ep-text-muted)]">Primary colour<span className="mt-1 flex gap-2"><input aria-label="Primary colour" type="color" value={primaryColor} onChange={(event)=>setPrimaryColor(event.target.value)} className="h-11 w-14 rounded-lg border border-[var(--ep-border)] bg-white p-1"/><input value={primaryColor} onChange={(event) => setPrimaryColor(event.target.value)} className="ep-input min-h-11 flex-1 px-3 text-sm font-normal"/></span></label><label className="text-xs font-bold text-[var(--ep-text-muted)]">Accent colour<span className="mt-1 flex gap-2"><input aria-label="Accent colour" type="color" value={accentColor} onChange={(event)=>setAccentColor(event.target.value)} className="h-11 w-14 rounded-lg border border-[var(--ep-border)] bg-white p-1"/><input value={accentColor} onChange={(event) => setAccentColor(event.target.value)} className="ep-input min-h-11 flex-1 px-3 text-sm font-normal"/></span></label><label className="text-xs font-bold text-[var(--ep-text-muted)]">Typography<select aria-label="Brand typography" value={brandFont} onChange={(event)=>setBrandFont(event.target.value)} className="ep-input mt-1 min-h-11 w-full px-3 text-sm font-normal">{['Inter','Arial','Georgia','Helvetica','system-ui','sans-serif'].map((font)=><option key={font} value={font}>{font}</option>)}</select></label></div><div className="mt-5 overflow-hidden rounded-xl border border-[var(--ep-border)]" style={{fontFamily:brandFont}}><div className="h-2" style={{background:accentColor}}/><div className="flex items-center gap-4 p-5" style={{background:primaryColor}}>{brandLogo?<img src={brandLogo} alt="Brand preview logo" className="h-12 w-20 rounded bg-white/90 object-contain p-1"/>:<div className="flex h-12 w-20 items-center justify-center rounded border border-white/30 text-xs font-bold text-white/80">Logo</div>}<div><p className="text-lg font-extrabold text-white">{brandName||'Marketing workspace'}</p><p className="text-xs text-white/75">Preview before save · {supportEmail||'support email not set'}</p></div></div></div><button type="button" onClick={() => void saveBranding()} disabled={loading || saving} className="ep-button-primary mt-5 px-4 py-2.5 text-sm">{saving ? <RefreshCw className="h-4 w-4 animate-spin"/> : <Save className="h-4 w-4"/>}{saving ? 'Saving…' : 'Save brand settings'}</button></section>
 
     <section className="ep-card p-5 sm:p-6"><div><p className="ep-section-label">Custom domain</p><h2 className="mt-1 text-lg font-extrabold text-[var(--ep-navy)]">Connect a verified public domain</h2><p className="mt-2 max-w-3xl text-sm leading-6 text-[var(--ep-text-muted)]">A domain remains pending until the required DNS record is found. It is never represented as active before verification and certificate provisioning complete.</p></div><div className="mt-5 flex flex-col gap-3 sm:flex-row"><input value={domainInput} onChange={(event) => setDomainInput(event.target.value)} className="ep-input min-h-11 flex-1 px-3 text-sm" placeholder="marketing.example.com" aria-label="Custom domain"/><button type="button" onClick={() => void addDomain()} disabled={domainBusy !== null} className="ep-button-secondary px-4 py-2.5 text-sm">{domainBusy === 'add' ? <RefreshCw className="h-4 w-4 animate-spin"/> : <Globe2 className="h-4 w-4"/>} Add domain</button></div><div className="mt-5 space-y-3">{loading ? <p className="text-sm text-[var(--ep-text-muted)]">Loading configured domains…</p> : domains.length === 0 ? <p className="rounded-xl bg-[var(--ep-surface-subtle)] p-4 text-sm text-[var(--ep-text-muted)]">No custom domain has been added. The standard Marketing workspace domain remains in use.</p> : domains.map((domain) => <article key={domain.id} className="rounded-xl border border-[var(--ep-border)] p-4"><div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div><div className="flex flex-wrap items-center gap-2"><p className="font-extrabold text-[var(--ep-navy)]">{domain.domain}</p>{domain.is_primary && <span className="rounded-full bg-[var(--ep-blue-soft)] px-2 py-0.5 text-[10px] font-bold text-[var(--ep-blue)]">Primary</span>}</div><p className="mt-1 text-xs text-[var(--ep-text-muted)]">DNS: {domain.verification_status} · SSL: {domain.ssl_status}</p>{domain.verification_status !== 'verified' && domain.verification_token && <p className="mt-2 break-all text-xs leading-5 text-[var(--ep-text-muted)]">Add TXT <strong>_amarktai.{domain.domain}</strong> with value <strong>amarktai-verification={domain.verification_token}</strong>.</p>}</div>{domain.verification_status === 'verified' ? <span className="inline-flex items-center gap-1.5 text-xs font-bold text-[var(--ep-success)]"><CheckCircle2 className="h-4 w-4"/> DNS verified</span> : <button type="button" onClick={() => void verifyDomain(domain)} disabled={domainBusy !== null} className="ep-button-secondary shrink-0 px-3 py-2 text-xs">{domainBusy === domain.id ? <RefreshCw className="h-3.5 w-3.5 animate-spin"/> : <CheckCircle2 className="h-3.5 w-3.5"/>} Verify DNS</button>}</div></article>)}</div></section>
 

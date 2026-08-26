@@ -6,8 +6,9 @@ import path from 'node:path';
 const root = path.resolve(import.meta.dirname, '..');
 const output = path.join(root, 'apps', 'web', '.next');
 const variants = [
-  { name: 'Northstar Marketing', logo: '/logo.svg', host: 'Northstar Suite', primary: '#123456', accent: '#abcdef' },
-  { name: 'Harbour Growth', logo: '/favicon.svg', host: 'Harbour Platform', primary: '#654321', accent: '#fedcba' },
+  { name: 'AmarktAI Marketing', logo: '/logo.svg', host: 'AmarktAI', primary: '#0A1B3F', accent: '#5AA469' },
+  { name: 'EquiProfile Marketing', logo: '/favicon.svg', host: 'EquiProfile', primary: '#2456A6', accent: '#D4A72C' },
+  { name: 'Northstar Growth', logo: '/logo.svg', host: 'Northstar Suite', primary: '#6B2D5C', accent: '#2AA198' },
 ];
 
 function corpus(directory) {

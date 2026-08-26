@@ -12,11 +12,11 @@ router.use(requireAuth);
 
 const updateWhiteLabelSchema = z.object({
   organization_id: z.string().uuid(),
-  brand_name: z.string().max(255).optional(), brand_logo: z.string().optional(), brand_favicon: z.string().optional(),
-  brand_colors: z.record(z.unknown()).optional(), brand_font: z.string().max(100).optional(), custom_css: z.string().optional(),
+  brand_name: z.string().max(255).nullable().optional(), brand_logo: z.string().max(2000).nullable().optional(), brand_favicon: z.string().max(2000).nullable().optional(),
+  brand_colors: z.record(z.unknown()).optional(), brand_font: z.enum(['Inter', 'Arial', 'Georgia', 'Helvetica', 'system-ui', 'sans-serif']).nullable().optional(), custom_css: z.string().optional(),
   email_branding: z.record(z.unknown()).optional(), login_page_config: z.record(z.unknown()).optional(),
   sidebar_config: z.record(z.unknown()).optional(), removed_branding: z.boolean().optional(), custom_footer: z.string().optional(),
-  support_email: z.string().email().optional(), support_url: z.string().optional(), terms_url: z.string().optional(), privacy_url: z.string().optional(),
+  support_email: z.string().email().nullable().optional(), support_url: z.string().optional(), terms_url: z.string().optional(), privacy_url: z.string().optional(),
 });
 
 const addDomainSchema = z.object({
