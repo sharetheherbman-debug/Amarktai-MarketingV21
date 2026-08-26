@@ -63,6 +63,20 @@ test('real customer journey, auth refresh, controls, desktop and mobile navigati
   expect(authCookies.find((cookie) => cookie.name === 'refreshToken')?.httpOnly).toBe(true);
   expect(await page.evaluate(() => ({ access: localStorage.getItem('auth_token'), refresh: localStorage.getItem('refresh_token') }))).toEqual({ access: null, refresh: null });
 
+  await page.goto('/settings');
+  await page.getByLabel('Brand name').fill('Acceptance White Label');
+  await page.getByLabel('Support email').fill('owner-support@example.test');
+  await page.getByLabel('Brand logo').fill('/api/v1/studio/assets/10000000-0000-4000-8000-000000000004');
+  await page.getByLabel('Primary colour', { exact: true }).first().fill('#1f4d7a');
+  await page.getByLabel('Accent colour', { exact: true }).first().fill('#d8a62b');
+  await page.getByLabel('Brand typography').selectOption('Georgia');
+  await page.getByRole('button', { name: 'Save brand settings' }).click();
+  await expect(page.getByText(/Brand settings saved/)).toBeVisible();
+  await page.reload();
+  await expect(page.getByLabel('Brand name')).toHaveValue('Acceptance White Label');
+  await expect(page.getByLabel('Support email')).toHaveValue('owner-support@example.test');
+  await expect(page.getByLabel('Brand typography')).toHaveValue('Georgia');
+
   await page.goto('/brand-dna');
   const companyName = page.getByLabel('Company name');
   await expect(companyName).toHaveValue('Acceptance Equine');

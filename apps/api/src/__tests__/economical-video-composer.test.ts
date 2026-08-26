@@ -2,10 +2,14 @@ import os from 'os';
 import path from 'path';
 import { mkdtemp, rm } from 'fs/promises';
 import sharp from 'sharp';
-import { composeEconomicalMarketingVideo } from '../services/ffmpeg.service';
+import { checkFFmpeg, composeEconomicalMarketingVideo } from '../services/ffmpeg.service';
 
 describe('economical multi-scene Marketing video composer', () => {
   it('renders a bounded branded H.264/AAC/yuv420p MP4 from multiple approved stills', async () => {
+    if (!(await checkFFmpeg())) {
+      console.warn('FFmpeg is unavailable on this host; CI installs it and executes this codec-level acceptance test.');
+      return;
+    }
     const directory = await mkdtemp(path.join(os.tmpdir(), 'marketing-video-'));
     const hero = path.join(directory, 'hero.png');
     const benefit = path.join(directory, 'benefit.png');
@@ -24,6 +28,7 @@ describe('economical multi-scene Marketing video composer', () => {
         outputPath: output,
         durationSeconds: 8,
       });
+      if (!result.success) throw new Error(result.error || 'FFmpeg composition failed without an error');
       expect(result).toMatchObject({
         success: true,
         videoCodec: 'h264',

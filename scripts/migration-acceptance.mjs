@@ -10,8 +10,8 @@ const required = (name) => {
 
 const freshUrl = required('MIGRATION_FRESH_DATABASE_URL');
 const upgradeUrl = required('MIGRATION_UPGRADE_DATABASE_URL');
-const productionHistoryMaximum = '035_genx_account_pricing_source.sql';
-const forwardMigration = '036_longform_cost_governor.sql';
+const productionHistoryMaximum = '039_campaign_material_approval_sync.sql';
+const forwardMigration = '040_social_oauth_onboarding.sql';
 
 function assertDisposable(url, suffix) {
   const database = new URL(url).pathname.replace(/^\//, '');
@@ -55,6 +55,8 @@ async function assertSchema(databaseUrl) {
       to_regclass('public.idx_video_projects_cost_quote') IS NOT NULL AS has_quote_index,
       to_regclass('public.idx_video_projects_generation_idempotency') IS NOT NULL AS has_project_idempotency,
       to_regclass('public.idx_video_renders_idempotency') IS NOT NULL AS has_render_idempotency,
+      to_regclass('public.social_oauth_sessions') IS NOT NULL AS has_social_oauth_sessions,
+      to_regclass('public.idx_social_oauth_sessions_tenant') IS NOT NULL AS has_social_oauth_tenant_index,
       EXISTS (
         SELECT 1 FROM information_schema.columns
         WHERE table_schema='public' AND table_name='autonomous_growth_cycles'
@@ -88,14 +90,17 @@ async function main() {
   migrate(freshUrl);
   const freshSecond = await journal(freshUrl);
   if (JSON.stringify(freshFirst) !== JSON.stringify(freshSecond)) throw new Error('Fresh database second migration run changed the journal');
-  if (freshFirst.at(-1)?.filename !== forwardMigration) throw new Error('Fresh database did not finish at migration 036');
+  if (freshFirst.at(-1)?.filename !== forwardMigration) throw new Error(`Fresh database did not finish at ${forwardMigration}`);
   await assertSchema(freshUrl);
 
   // This is a genuine production-history fixture: the repository migrator
-  // executes and journals every SQL file through 035 in filename order.
+  // executes and journals every SQL file through 039 in filename order. This
+  // proves historical migration 036 remains journalled and untouched, while
+  // only the new forward migration is applied by the upgrade.
   migrate(upgradeUrl, productionHistoryMaximum);
   const beforeUpgrade = await journal(upgradeUrl);
-  if (beforeUpgrade.some((entry) => entry.filename === forwardMigration)) throw new Error('Pre-036 fixture unexpectedly contains migration 036');
+  if (!beforeUpgrade.some((entry) => entry.filename === '036_longform_cost_governor.sql')) throw new Error('Production-history fixture is missing historical migration 036');
+  if (beforeUpgrade.some((entry) => entry.filename === forwardMigration)) throw new Error(`Production-history fixture unexpectedly contains ${forwardMigration}`);
   const historicalTimes = new Map(beforeUpgrade.map((entry) => [entry.filename, String(entry.applied_at)]));
   migrate(upgradeUrl);
   const afterUpgrade = await journal(upgradeUrl);
@@ -109,7 +114,7 @@ async function main() {
   }
   migrate(upgradeUrl);
   const upgradeSecond = await journal(upgradeUrl);
-  if (JSON.stringify(afterUpgrade) !== JSON.stringify(upgradeSecond)) throw new Error('Post-036 second migration run changed the journal');
+  if (JSON.stringify(afterUpgrade) !== JSON.stringify(upgradeSecond)) throw new Error(`Post-${forwardMigration} second migration run changed the journal`);
   await assertSchema(upgradeUrl);
 
   console.log(`MIGRATION_ACCEPTANCE_REPORT=${JSON.stringify({status:'PASS',fresh:{migrations:freshFirst.length,second_run:'no-op'},upgrade:{historical_migrations:beforeUpgrade.length,applied:[forwardMigration],second_run:'no-op'},schema_assertions:'PASS'})}`);

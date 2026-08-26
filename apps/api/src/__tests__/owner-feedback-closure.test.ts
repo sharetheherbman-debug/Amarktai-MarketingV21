@@ -56,7 +56,8 @@ describe('owner feedback closes campaign asset state', () => {
       }] };
       if (sql.includes('UPDATE campaign_asset_runs SET resolution_status=')) {
         expect(params[0]).toBe('approved');
-        expect(params[2]).toBe(4);
+        expect(params[2]).toBe(true);
+        expect(params[3]).toBe(4);
         return { rows: [{ id: 'run-1', campaign_plan_id: 'plan-1' }] };
       }
       return { rows: [] };

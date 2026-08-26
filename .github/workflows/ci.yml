@@ -2,9 +2,9 @@ name: CI/CD Pipeline
 
 on:
   push:
-    branches: [master, development, phase-1/small-medium-completion, rescue/client-handover-marketing-2026-08-24, release-candidate/marketing-client-handover-2026-08-24]
+    branches: [master, development, phase-1/small-medium-completion, rescue/client-handover-marketing-2026-08-24, rescue/client-dashboard-2026-08-25, release-candidate/marketing-client-handover-2026-08-24]
   pull_request:
-    branches: [master, development, phase-1/small-medium-completion, rescue/client-handover-marketing-2026-08-24, release-candidate/marketing-client-handover-2026-08-24]
+    branches: [master, development, phase-1/small-medium-completion, rescue/client-handover-marketing-2026-08-24, rescue/client-dashboard-2026-08-25, release-candidate/marketing-client-handover-2026-08-24]
 
 permissions:
   contents: write
@@ -88,7 +88,7 @@ jobs:
           NEXT_PUBLIC_MARKETING_BRAND_PRIMARY_COLOR: '#123456'
           NEXT_PUBLIC_MARKETING_BRAND_ACCENT_COLOR: '#abcdef'
         run: cd apps/web && npm run build
-      - name: Verify two independent white-label builds
+      - name: Verify AmarktAI, EquiProfile and third-tenant white-label builds
         run: npm run test:white-label-build
       - name: Build reusable Application Connector SDK
         run: npm run build --workspace=@amarktai/application-connector-sdk
@@ -104,6 +104,8 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
       - run: npm ci
+      - name: Install FFmpeg for codec-level acceptance
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
       - name: Run API tests
         run: cd apps/api && npm test -- --runInBand
 
@@ -159,7 +161,7 @@ jobs:
         run: |
           psql postgresql://amarktai:test-password@localhost:5432/postgres -v ON_ERROR_STOP=1 -c 'CREATE DATABASE amarktai_migration_acceptance_fresh'
           psql postgresql://amarktai:test-password@localhost:5432/postgres -v ON_ERROR_STOP=1 -c 'CREATE DATABASE amarktai_migration_acceptance_upgrade'
-      - name: Verify fresh, idempotent and real pre-036 production-history upgrades
+      - name: Verify fresh, idempotent and real post-036 production-history upgrades
         run: npm run test:migrations
 
   e2e:
@@ -225,6 +227,8 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
       - run: npm ci
+      - name: Install FFmpeg for the real customer journey
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
       - name: Build API and copy migrations
         run: |
           npm run build --workspace=@amarktai/api
