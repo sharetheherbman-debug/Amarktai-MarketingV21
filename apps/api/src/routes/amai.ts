@@ -5,9 +5,11 @@ import * as workflowService from '../services/workflow-engine.service';
 import * as socialService from '../services/social-publishing.service';
 import * as hierarchyService from '../services/agent-hierarchy.service';
 import * as toolSdk from '../services/tool-sdk.service';
+import * as socialOAuth from '../services/social-oauth.service';
+import { requireOrganizationMembership, requireOrganizationRole } from '../middleware/organization-access';
 
 const router = Router();
-router.use(requireAuth);
+router.use(requireAuth, requireOrganizationMembership);
 
 // ─── Workflows ───────────────────────────────────────────────────────────────
 
@@ -71,6 +73,30 @@ router.get('/social/capabilities', (_req: AuthRequest, res: Response<ApiResponse
   res.json({ success: true, data: socialService.SOCIAL_PLATFORM_CAPABILITIES });
 });
 
+router.get('/social/oauth/providers', (_req: AuthRequest, res: Response<ApiResponse>): void => {
+  res.json({ success: true, data: socialOAuth.listSocialOAuthProviders() });
+});
+
+router.post('/social/oauth/:platform/start', requireOrganizationRole('owner', 'admin'), async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
+  try {
+    res.json({ success: true, data: await socialOAuth.beginSocialOAuth({ organizationId: req.organizationId!, userId: req.user!.userId, platform: req.params.platform }) });
+  } catch (error) { next(error); }
+});
+
+router.post('/social/oauth/:platform/callback', requireOrganizationRole('owner', 'admin'), async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
+  try {
+    if (!req.body.state || !req.body.code) { res.status(400).json({ success: false, error: { message: 'OAuth state and authorization code are required', code: 'BAD_REQUEST' } }); return; }
+    res.json({ success: true, data: await socialOAuth.exchangeSocialOAuth({ organizationId: req.organizationId!, userId: req.user!.userId, platform: req.params.platform, state: req.body.state, code: req.body.code }) });
+  } catch (error) { next(error); }
+});
+
+router.post('/social/oauth/sessions/:sessionId/select', requireOrganizationRole('owner', 'admin'), async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
+  try {
+    if (!req.body.account_id) { res.status(400).json({ success: false, error: { message: 'account_id required', code: 'BAD_REQUEST' } }); return; }
+    res.status(201).json({ success: true, data: await socialOAuth.completeSocialOAuth({ organizationId: req.organizationId!, userId: req.user!.userId, sessionId: req.params.sessionId, accountId: req.body.account_id }) });
+  } catch (error) { next(error); }
+});
+
 router.get('/social/connections', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
   try {
     const orgId = req.query.organization_id as string;
@@ -80,7 +106,7 @@ router.get('/social/connections', async (req: AuthRequest, res: Response<ApiResp
   } catch (error) { next(error); }
 });
 
-router.post('/social/connections', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
+router.post('/social/connections', requireOrganizationRole('owner', 'admin'), async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
   try {
     const { organization_id, platform, account_name, config, credentials } = req.body;
     if (!organization_id || !platform || !account_name) { res.status(400).json({ success: false, error: { message: 'organization_id, platform, and account_name required', code: 'BAD_REQUEST' } }); return; }
@@ -89,7 +115,7 @@ router.post('/social/connections', async (req: AuthRequest, res: Response<ApiRes
   } catch (error) { next(error); }
 });
 
-router.put('/social/connections/:id', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
+router.put('/social/connections/:id', requireOrganizationRole('owner', 'admin'), async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
   try {
     const organizationId = req.body.organization_id || req.query.organization_id as string;
     if (!organizationId) { res.status(400).json({ success: false, error: { message: 'organization_id required', code: 'BAD_REQUEST' } }); return; }
@@ -98,7 +124,7 @@ router.put('/social/connections/:id', async (req: AuthRequest, res: Response<Api
   } catch (error) { next(error); }
 });
 
-router.delete('/social/connections/:id', async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
+router.delete('/social/connections/:id', requireOrganizationRole('owner', 'admin'), async (req: AuthRequest, res: Response<ApiResponse>, next: NextFunction): Promise<void> => {
   try {
     const organizationId = req.query.organization_id as string;
     if (!organizationId) { res.status(400).json({ success: false, error: { message: 'organization_id required', code: 'BAD_REQUEST' } }); return; }
