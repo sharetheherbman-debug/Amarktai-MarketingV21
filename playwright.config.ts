@@ -36,6 +36,12 @@ export default defineConfig({
       timeout: 60_000,
     },
     {
+      command: 'node scripts/e2e-generation-worker.mjs',
+      url: 'http://127.0.0.1:4101/health',
+      reuseExistingServer: !process.env.CI,
+      timeout: 60_000,
+    },
+    {
       command: 'npm start --workspace=@amarktai/web -- -p 3000',
       url: 'http://127.0.0.1:3000/login',
       env: { NODE_ENV: 'production' },
