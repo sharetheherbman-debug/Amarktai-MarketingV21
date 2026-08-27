@@ -7,6 +7,25 @@ const port = Number(process.env.E2E_PROVIDER_PORT || 4100);
 const ingredientPath = path.resolve(process.cwd(), 'tests/e2e/fixtures/acceptance-ingredient.png');
 let nextJob = 1;
 const jobs = new Map();
+const temporaryFiles = new Set();
+
+const acceptedVisualAssessment = {
+  subject_relevance: 90,
+  campaign_relevance: 90,
+  commercial_usability: 90,
+  composition_quality: 85,
+  subject_integrity: 90,
+  negative_space_usability: 80,
+  unexpected_text: false,
+  unexpected_logo: false,
+  watermark: false,
+  obvious_ai_artifacts: false,
+  wrong_product: false,
+  wrong_subject: false,
+  brand_safety: true,
+  rejection_reasons: [],
+  repair_instructions: [],
+};
 
 const plan = {
   brief: { objective_stage: 'conversion', objective: 'Grow qualified Academy enrolments', success_criteria: ['Qualified visits'], audience_segments: [{ name: 'UK horse owners', needs: ['Trusted learning'], objections: [], motivations: ['Better care'] }], offer: 'Explore the Academy', value_proposition: 'Practical grounded learning', proof_points: [], calls_to_action: ['Explore the Academy'], language: 'en-GB' },
@@ -29,6 +48,12 @@ function json(res, payload, status = 200) {
 
 function mediaUrl(req) {
   return `http://${req.headers.host}/api/v1/media/acceptance-ingredient.png`;
+}
+
+async function requestBody(req) {
+  const chunks = [];
+  for await (const chunk of req) chunks.push(chunk);
+  return Buffer.concat(chunks);
 }
 
 const server = http.createServer(async (req, res) => {
@@ -71,6 +96,37 @@ const server = http.createServer(async (req, res) => {
     const resultUrl = mediaUrl(req);
     jobs.set(id, { id, model: 'e2e-image-model', status: 'completed', progress: 100, result_url: resultUrl, result_data: { candidate_fixture: true, provider_boundary: 'local' }, usage: { cost: 0.02 } });
     json(res, { data: jobs.get(id) });
+    return;
+  }
+  if (req.method === 'POST' && url.pathname === '/api/v1/files') {
+    const bytes = await requestBody(req);
+    if (bytes.byteLength === 0) {
+      json(res, { error: 'Visual QA upload was empty' }, 400);
+      return;
+    }
+    const id = `candidate-file-${temporaryFiles.size + 1}`;
+    temporaryFiles.add(id);
+    json(res, { data: { id, filename: 'acceptance-ingredient.png', mime_type: 'image/png', size: bytes.byteLength } });
+    return;
+  }
+  if (req.method === 'POST' && url.pathname === '/api/v1/analyze') {
+    const bytes = await requestBody(req);
+    const body = JSON.parse(bytes.toString('utf8') || '{}');
+    if (body.task !== 'marketing_visual_quality_assessment' || !temporaryFiles.has(String(body.file_id || ''))) {
+      json(res, { error: 'Unknown visual QA file or task' }, 400);
+      return;
+    }
+    json(res, { data: { assessment: acceptedVisualAssessment } });
+    return;
+  }
+  const fileMatch = url.pathname.match(/^\/api\/v1\/files\/([^/]+)$/);
+  if (req.method === 'DELETE' && fileMatch) {
+    const id = decodeURIComponent(fileMatch[1]);
+    if (!temporaryFiles.delete(id)) {
+      json(res, { error: 'Unknown temporary file' }, 404);
+      return;
+    }
+    json(res, { data: { deleted: true } });
     return;
   }
   const jobMatch = url.pathname.match(/^\/api\/v1\/jobs\/([^/]+)(?:\/(result|file))?$/);
