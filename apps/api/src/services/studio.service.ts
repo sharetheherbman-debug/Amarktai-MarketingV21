@@ -19,7 +19,17 @@ const redisConnection = {
 const INTERNAL_ASSET_PREFIX = '/api/v1/studio/assets/';
 const MAX_STUDIO_MEDIA_BYTES = 25 * 1024 * 1024;
 
-export const generationQueue = new Queue('studio-generations', { connection: redisConnection });
+let generationQueue: Queue | null = null;
+
+/**
+ * Keep the Redis-backed queue lazy so read-only imports (including policy and
+ * compositor tests) cannot start a reconnect timer. Runtime calls still share
+ * one queue and connect on their first real enqueue/read operation.
+ */
+export function getGenerationQueue(): Queue {
+  if (!generationQueue) generationQueue = new Queue('studio-generations', { connection: redisConnection });
+  return generationQueue;
+}
 
 export interface StudioGeneration {
   id: string;
@@ -500,7 +510,7 @@ export async function createGeneration(
   const generation = mapGenerationRow(result.rows[0]);
   let job;
   try {
-    job = await generationQueue.add(
+    job = await getGenerationQueue().add(
       'studio-generate',
       {
         kind: 'studio',
@@ -563,7 +573,7 @@ export async function retryGeneration(id: string, orgId: string, userId: string)
   const row = result.rows[0];
   if (!['failed','cancelled'].includes(String(row.status))) return mapGenerationRow(await prepareGenerationRow(row));
   const options = typeof row.options === 'string' ? JSON.parse(row.options) : row.options || {};
-  const job = await generationQueue.add('studio-generate', {
+  const job = await getGenerationQueue().add('studio-generate', {
     kind: 'studio', generationId: id, organizationId: orgId, userId,
     type: row.type, modelId: row.model, prompt: row.prompt,
     negativePrompt: row.negative_prompt, options,
@@ -621,7 +631,7 @@ export async function cancelGeneration(id: string, orgId: string): Promise<void>
   const providerJobId = row.rows[0]?.provider_job_id as string | undefined;
 
   if (queueJobId) {
-    const job = await generationQueue.getJob(queueJobId);
+    const job = await getGenerationQueue().getJob(queueJobId);
     if (job && !(await job.isActive())) await job.remove().catch(() => undefined);
   }
   if (providerJobId) {

@@ -96,6 +96,7 @@ jobs:
   test:
     name: Run Tests
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     needs: typescript
     steps:
       - uses: actions/checkout@v5
@@ -107,7 +108,7 @@ jobs:
       - name: Install FFmpeg for codec-level acceptance
         run: sudo apt-get update && sudo apt-get install -y ffmpeg
       - name: Run API tests
-        run: cd apps/api && npm test -- --runInBand
+        run: cd apps/api && npm test -- --runInBand --detectOpenHandles
 
   migrations:
     name: Fresh and Production-History Migration Acceptance
@@ -246,6 +247,16 @@ jobs:
         run: npx playwright install --with-deps chromium
       - name: Run real customer journey
         run: npm run test:e2e
+      - name: Preserve customer-journey diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: marketing-customer-journey-diagnostics
+          path: |
+            playwright-report
+            test-results
+          if-no-files-found: warn
+          retention-days: 7
 
   docker:
     name: Docker Build

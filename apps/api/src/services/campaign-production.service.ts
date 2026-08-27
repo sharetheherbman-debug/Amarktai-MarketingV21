@@ -1,7 +1,7 @@
 import { query } from '../config/database';
 import { AppError, NotFoundError } from '../middleware/errorHandler';
 import type { ContentPlatform, ContentType, GenerateContentRequest } from '../types';
-import { generationQueue } from './studio.service';
+import { getGenerationQueue } from './studio.service';
 import * as studioService from './studio.service';
 import { legacyProductLine, normalizeProductScopes } from '../utils/product-scope';
 import { getDeliverableRoute, type MarketingGenerationOperation } from './marketing-deliverable-registry.service';
@@ -209,7 +209,7 @@ export async function queueCampaignProduction(planId: string, orgId: string, use
             requires_owner_approval: canonicalRoute?.requiresOwnerApproval ?? true,
             dimensions_or_format: canonicalRoute?.defaultDimensions || String(brief.dimensions_or_length || ''),
           } as GenerateContentRequest & { product_lines: string[] };
-          const job = await generationQueue.add('campaign-text', {
+          const job = await getGenerationQueue().add('campaign-text', {
             kind: 'campaign-text', runId: run.id, organizationId: orgId, userId, request,
           }, {
             jobId: `campaign-text:${run.id}:attempt:${attempt}`,

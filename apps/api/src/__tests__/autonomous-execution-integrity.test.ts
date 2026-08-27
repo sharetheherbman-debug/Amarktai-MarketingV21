@@ -75,7 +75,7 @@ describe('autonomous execution integrity', () => {
     expect(migration).toContain('ranked_pending_approvals');
     expect(migration).toContain('ADD COLUMN IF NOT EXISTS decision_id UUID');
     expect(migration).toContain('AFTER INSERT OR UPDATE ON relaunch_action_decisions');
-    expect(production).toContain("generationQueue.add('campaign-text'");
+    expect(production).toContain("getGenerationQueue().add('campaign-text'");
     expect(production).toContain("status='queueing',resolution_status='pending_generation'");
     expect(production).toContain('attempt_count=attempt_count+1');
     expect(production).toContain('campaign-text:${run.id}:attempt:${attempt}');

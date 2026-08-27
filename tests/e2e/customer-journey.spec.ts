@@ -67,6 +67,10 @@ test('real customer journey, auth refresh, controls, desktop and mobile navigati
   await page.getByLabel('Brand name').fill('Acceptance White Label');
   await page.getByLabel('Support email').fill('owner-support@example.test');
   await page.getByLabel('Brand logo').fill('/api/v1/studio/assets/10000000-0000-4000-8000-000000000004');
+  const previewLogo = page.getByRole('img', { name: 'Brand preview logo' });
+  const e2eApiBase = String(process.env.NEXT_PUBLIC_API_URL || '/api/v1').replace(/\/+$/, '');
+  await expect(previewLogo).toHaveAttribute('src', `${e2eApiBase}/studio/assets/10000000-0000-4000-8000-000000000004`);
+  await expect.poll(async () => previewLogo.evaluate((image) => (image as HTMLImageElement).naturalWidth)).toBeGreaterThan(0);
   await page.getByLabel('Primary colour', { exact: true }).first().fill('#1f4d7a');
   await page.getByLabel('Accent colour', { exact: true }).first().fill('#d8a62b');
   await page.getByLabel('Brand typography').selectOption('Georgia');
