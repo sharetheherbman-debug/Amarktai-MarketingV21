@@ -196,7 +196,7 @@ export default function AdvertisingPage() {
     const secondary = String(colors.secondary || colors.text || dna?.secondaryColor || '').trim();
     const accent = String(colors.accent || colors.accent_color || dna?.accentColor || primary || '').trim();
     setBrandName(configuredName); setBrandLogo(configuredLogo); setBrandPrimary(primary); setBrandSecondary(secondary); setBrandAccent(accent); setBrandFont(String(whiteLabel?.brand_font || 'sans-serif'));
-    if (dna?.preferredCtas?.[0] && !cta.trim()) setCta(String(dna.preferredCtas[0]));
+    if (dna?.preferredCtas?.[0]) setCta((current) => current.trim() || String(dna.preferredCtas![0]));
 
     if (modelsResult.status === 'rejected') {
       setError(modelsResult.reason instanceof Error ? modelsResult.reason.message : 'Image generation models could not be loaded.');
@@ -204,7 +204,7 @@ export default function AdvertisingPage() {
       setError('Ad creation is available, but some connected-account reporting could not be refreshed.');
     }
     setLoading(false);
-  }, [studio]);
+  }, [organizationId, organizationName, studio]);
 
   useEffect(() => {
     void load();

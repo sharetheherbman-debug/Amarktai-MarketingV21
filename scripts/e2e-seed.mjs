@@ -17,6 +17,12 @@ export const E2E = {
   email: 'owner.e2e@example.test',
   password: 'E2e-owner-password-24!',
   recoveryCode: 'E2E-OWNER-RECOVERY-24',
+  whiteLabelUserId: '10000000-0000-4000-8000-000000000011',
+  whiteLabelOrganizationId: '10000000-0000-4000-8000-000000000012',
+  whiteLabelPackId: '10000000-0000-4000-8000-000000000013',
+  whiteLabelPackItemId: '10000000-0000-4000-8000-000000000014',
+  whiteLabelEmail: 'white-label-owner.e2e@example.test',
+  whiteLabelRecoveryCode: 'E2E-WHITELABEL-RECOVERY-24',
 };
 
 const E2E_MODEL_IDS = ['gpt-5.6-luna', 'e2e-image-model', 'e2e-video-model'];
@@ -24,6 +30,8 @@ const jwtSecret = String(process.env.JWT_SECRET || 'test-jwt-secret-that-is-long
 const recoveryHash = crypto.createHmac('sha256', jwtSecret)
   .update(E2E.recoveryCode.replace(/\s/g, '').toUpperCase()).digest('hex');
 const passwordHash = await bcrypt.hash(E2E.password, 12);
+const whiteLabelRecoveryHash = crypto.createHmac('sha256', jwtSecret)
+  .update(E2E.whiteLabelRecoveryCode.replace(/\s/g, '').toUpperCase()).digest('hex');
 const brandLogoPath = path.resolve(process.cwd(), 'tests/e2e/fixtures/acceptance-brand-logo.svg');
 const brandLogoStat = await stat(brandLogoPath);
 const client = new Client({ connectionString: databaseUrl });
@@ -35,7 +43,8 @@ try {
   // release their price-snapshot foreign keys. The named catalogue fixtures are
   // global, so only remove them after that candidate-owned history has cascaded.
   await client.query('DELETE FROM organizations WHERE id=$1', [E2E.organizationId]);
-  await client.query('DELETE FROM users WHERE id=$1 OR email=$2', [E2E.userId, E2E.email]);
+  await client.query('DELETE FROM organizations WHERE id=$1', [E2E.whiteLabelOrganizationId]);
+  await client.query('DELETE FROM users WHERE id=ANY($1::uuid[]) OR email=ANY($2::text[])', [[E2E.userId,E2E.whiteLabelUserId],[E2E.email,E2E.whiteLabelEmail]]);
   await client.query('DELETE FROM genx_price_snapshots WHERE model_id = ANY($1::text[])', [E2E_MODEL_IDS]);
   await client.query('DELETE FROM genx_models WHERE id = ANY($1::text[])', [E2E_MODEL_IDS]);
   await client.query(
@@ -43,6 +52,7 @@ try {
      VALUES ($1,'Acceptance Workspace','acceptance-workspace','enterprise','active','{}')`,
     [E2E.organizationId]
   );
+  await client.query(`INSERT INTO organizations (id,name,slug,plan,status,settings) VALUES ($1,'Blank White Label','blank-white-label','enterprise','active','{}')`,[E2E.whiteLabelOrganizationId]);
   await client.query(
     `INSERT INTO users
        (id,email,password_hash,name,role,email_verified,status,two_factor_enabled,
@@ -51,9 +61,31 @@ try {
     [E2E.userId, E2E.email, passwordHash, JSON.stringify([recoveryHash])]
   );
   await client.query(
+    `INSERT INTO users (id,email,password_hash,name,role,email_verified,status,two_factor_enabled,two_factor_secret,two_factor_recovery_codes,two_factor_enrolled_at)
+     VALUES ($1,$2,$3,'White Label Owner','admin',TRUE,'active',TRUE,'{}',$4,NOW())`,
+    [E2E.whiteLabelUserId,E2E.whiteLabelEmail,passwordHash,JSON.stringify([whiteLabelRecoveryHash])]
+  );
+  await client.query(
     `INSERT INTO organization_members (organization_id,user_id,role)
      VALUES ($1,$2,'owner')`,
     [E2E.organizationId, E2E.userId]
+  );
+  await client.query(`INSERT INTO organization_members (organization_id,user_id,role) VALUES ($1,$2,'owner')`,[E2E.whiteLabelOrganizationId,E2E.whiteLabelUserId]);
+  await client.query(
+    `INSERT INTO application_connectors (application_id,name,base_url,key_hash,active,default_organization_id,metadata)
+     VALUES ('equiprofile','EquiProfile','https://equiprofile.example.test',$1,TRUE,$2,'{"e2e":true}'::jsonb)
+     ON CONFLICT (application_id) DO UPDATE SET default_organization_id=EXCLUDED.default_organization_id,active=TRUE`,
+    ['a'.repeat(64),E2E.organizationId]
+  );
+  await client.query(
+    `INSERT INTO library_packs (id,organization_id,slug,version,name,description,status,is_system,metadata,created_by)
+     VALUES ($1,$2,'white-label-safe-test-pack',1,'Safe Test Pack','Private fixture pack','active',FALSE,'{}',$3)`,
+    [E2E.whiteLabelPackId,E2E.whiteLabelOrganizationId,E2E.whiteLabelUserId]
+  );
+  await client.query(
+    `INSERT INTO library_pack_items (id,pack_id,item_key,kind,category,name,description,tags,platforms,definition)
+     VALUES ($1,$2,'welcome-001','copy_template','welcome','Private welcome structure','Uses owner-approved facts only','["private"]','[]','{"schema":"copy_structure_v1","pattern":"{{owner_approved_welcome}}"}')`,
+    [E2E.whiteLabelPackItemId,E2E.whiteLabelPackId]
   );
   await client.query(
     `INSERT INTO relaunch_control_policies

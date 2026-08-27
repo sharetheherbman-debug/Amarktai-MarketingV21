@@ -14,6 +14,7 @@ import * as contentWorkflow from './content-workflow.service';
 import { getDeliverableRoute, type DeliverableRoute } from './marketing-deliverable-registry.service';
 import { assessMarketingIngredient, visualQaRejection } from './marketing-visual-qa.service';
 import type { ContentPlatform, ContentType } from '../types';
+import { saveFinalMaterialToLibrary } from './library-tools.service';
 
 const MAX_BRAND_LOGO_BYTES = 5 * 1024 * 1024;
 const MAX_MATERIAL_REPAIRS = 2;
@@ -251,8 +252,9 @@ async function inspectIngredient(ingredientPath: string): Promise<Json> {
   return { format: metadata.format, width, height, ingredient_variance: Number(variance.toFixed(2)), has_alpha: metadata.hasAlpha === true };
 }
 
-function buildOverlay(identity: BrandMaterialIdentity, brief: Json, dimension: Dimension, attempt: number): { svg: Buffer; finalText: Json; contrast: number } {
-  const padding = Math.round(Math.min(dimension.width, dimension.height) * 0.06);
+function buildOverlay(identity: BrandMaterialIdentity, brief: Json, dimension: Dimension, attempt: number, layout:Json={}): { svg: Buffer; finalText: Json; contrast: number } {
+  const configuredPadding=Number(layout.padding||0.06);
+  const padding = Math.round(Math.min(dimension.width, dimension.height) * Math.max(0.03,Math.min(0.15,configuredPadding)));
   const panelHeight = Math.round(dimension.height * 0.48);
   const panelY = dimension.height - panelHeight;
   const headline = truncate(brief.headline || brief.hook || brief.message || brief.purpose, 115);
@@ -266,7 +268,8 @@ function buildOverlay(identity: BrandMaterialIdentity, brief: Json, dimension: D
   }
   const safeTextColor = contrastingText('#111111', identity.text);
   const ctaTextColor = contrastingText(identity.primary, identity.text);
-  const panelOpacity = attempt === 1 ? '0.86' : '0.78';
+  const configuredOpacity=Number(asObject(layout.overlay).opacity||0.78);
+  const panelOpacity = String(attempt === 1 ? Math.min(0.95,configuredOpacity+0.08) : Math.max(0.5,Math.min(0.95,configuredOpacity)));
   const headlineLines = wrapText(headline, Math.max(22, Math.floor(dimension.width / 38)), 3);
   const bodyLines = wrapText(body, Math.max(30, Math.floor(dimension.width / 48)), 3);
   const headlineSize = Math.max(32, Math.round(dimension.width * 0.047));
@@ -356,7 +359,7 @@ export async function composeCampaignMaterial(runId: string, orgId: string, user
             generation.options AS generation_options
        FROM campaign_asset_runs run
        JOIN campaign_plans plan ON plan.id=run.campaign_plan_id AND plan.organization_id=run.organization_id
-       JOIN studio_generations generation ON generation.id=run.studio_generation_id AND generation.organization_id=run.organization_id
+       LEFT JOIN studio_generations generation ON generation.id=run.studio_generation_id AND generation.organization_id=run.organization_id
       WHERE run.id=$1 AND run.organization_id=$2`,
     [runId, orgId]
   );
@@ -367,7 +370,8 @@ export async function composeCampaignMaterial(runId: string, orgId: string, user
     return { runId, assetId: asset.id, assetUrl: asset.url, contentId: String(run.content_id), qa: asObject(run.material_qa), tracking: asObject(run.material_metadata).tracking || {} };
   }
 
-  const generationOptions = asObject(run.generation_options);
+  const generationOptions = Object.keys(asObject(run.generation_options)).length
+    ? asObject(run.generation_options) : asObject(asObject(run.material_metadata).library_generation_options);
   const route = getDeliverableRoute(generationOptions.deliverable_kind);
   if (route.composition !== 'branded_static') {
     throw new AppError(409, 'This campaign run requires its dedicated material composition route', 'MATERIAL_COMPOSITION_ROUTE_REQUIRED');
@@ -377,9 +381,9 @@ export async function composeCampaignMaterial(runId: string, orgId: string, user
   const generationAsset = await query(
     `SELECT asset.* FROM studio_assets asset
       WHERE asset.organization_id=$1 AND asset.deleted_at IS NULL
-        AND (asset.metadata->>'generation_id'=$2::text OR asset.id::text=(SELECT metadata->>'studio_asset_id' FROM studio_generations WHERE id=$3::uuid))
+        AND (asset.id=$2::uuid OR asset.metadata->>'generation_id'=$3::text OR asset.id::text=(SELECT metadata->>'studio_asset_id' FROM studio_generations WHERE id=$3::uuid))
       ORDER BY asset.created_at DESC LIMIT 1`,
-    [orgId, String(run.studio_generation_id), String(run.studio_generation_id)]
+    [orgId, run.ingredient_asset_id || null, run.studio_generation_id || null]
   );
   if (!generationAsset.rows[0]?.storage_path) {
     await failMaterialRun(run, new AppError(409, 'No durable image ingredient is available for composition', 'MATERIAL_INGREDIENT_UNAVAILABLE'));
@@ -404,9 +408,12 @@ export async function composeCampaignMaterial(runId: string, orgId: string, user
 
     const identity = await resolveBrandIdentity(orgId);
     const resolvedLogo = await loadLogo(identity.logoUrl, orgId);
-    const dimension = dimensionFor(route.defaultDimensions);
+    const libraryLayout=asObject(generationOptions.library_layout||asObject(run.material_metadata).library_layout);
+    const layoutCanvas=asObject(libraryLayout.canvas);
+    const libraryDimensions=Number(layoutCanvas.width)&&Number(layoutCanvas.height)?`${layoutCanvas.width}x${layoutCanvas.height}`:route.defaultDimensions;
+    const dimension = dimensionFor(libraryDimensions);
     const attempt = Math.min(1, Number(run.material_attempt_count || 0));
-    const overlay = buildOverlay(identity, brief, dimension, attempt);
+    const overlay = buildOverlay(identity, brief, dimension, attempt,libraryLayout);
     const directory = path.join(process.cwd(), 'uploads', 'marketing-materials', orgId, String(run.campaign_plan_id), runId);
     await fs.mkdir(directory, { recursive: true });
     const filename = `final-${crypto.randomUUID()}.png`;
@@ -495,6 +502,7 @@ export async function composeCampaignMaterial(runId: string, orgId: string, user
         WHERE id=$5 AND organization_id=$6`,
       [content.id, asset.id, JSON.stringify(materialMetadata), JSON.stringify(qa), runId, orgId]
     );
+    await saveFinalMaterialToLibrary(orgId,userId,{studioAssetId:asset.id,contentId:content.id,name:`${String(run.campaign_name)} — ${route.label}`,description:'Final governed campaign material pending exact-version owner review.',tags:[route.kind,'campaign-material'],platforms:[String(brief.platform || route.primaryChannel)]});
     return { runId, assetId: asset.id, assetUrl: asset.url, contentId: content.id, qa, tracking };
   } catch (error) {
     try { await recordQuality(run, 'final_material', 'failed', { error: error instanceof Error ? error.message : String(error) }); } catch { /* preserve original failure */ }
@@ -539,7 +547,7 @@ export async function composeCampaignVideoMaterial(runId: string, orgId: string,
             generation.options AS generation_options
        FROM campaign_asset_runs run
        JOIN campaign_plans plan ON plan.id=run.campaign_plan_id AND plan.organization_id=run.organization_id
-       JOIN studio_generations generation ON generation.id=run.studio_generation_id AND generation.organization_id=run.organization_id
+       LEFT JOIN studio_generations generation ON generation.id=run.studio_generation_id AND generation.organization_id=run.organization_id
       WHERE run.id=$1 AND run.organization_id=$2`,
     [runId, orgId]
   );
@@ -549,7 +557,8 @@ export async function composeCampaignVideoMaterial(runId: string, orgId: string,
     const asset = await studioService.getAsset(String(run.final_material_asset_id));
     return { runId, assetId: asset.id, assetUrl: asset.url, contentId: String(run.content_id), qa: asObject(run.material_qa), tracking: asObject(run.material_metadata).tracking || {} };
   }
-  const generationOptions = asObject(run.generation_options);
+  const generationOptions = Object.keys(asObject(run.generation_options)).length
+    ? asObject(run.generation_options) : asObject(asObject(run.material_metadata).library_generation_options);
   const route = getDeliverableRoute(generationOptions.deliverable_kind);
   if (route.composition !== 'branded_video') {
     throw new AppError(409, 'This campaign run does not use the economical promotional-video route', 'VIDEO_MATERIAL_ROUTE_REQUIRED');
@@ -563,13 +572,14 @@ export async function composeCampaignVideoMaterial(runId: string, orgId: string,
     throw new AppError(409, 'Economical video duration is outside its approved 5–15 second range', 'VIDEO_DURATION_INVALID');
   }
   const requirements = Array.isArray(run.asset_requirements) ? run.asset_requirements : JSON.parse(String(run.asset_requirements || '[]'));
-  const brief: Json = { ...asObject(requirements.find((item: Json) => String(item?.brief_id) === String(run.brief_id))), organization_id: orgId };
+  const libraryVideoRecipe=asObject(generationOptions.library_video_recipe||asObject(run.material_metadata).library_video_recipe);
+  const brief: Json = { ...asObject(requirements.find((item: Json) => String(item?.brief_id) === String(run.brief_id))), organization_id: orgId, library_video_recipe:libraryVideoRecipe };
   const generationAsset = await query(
     `SELECT asset.* FROM studio_assets asset
       WHERE asset.organization_id=$1 AND asset.deleted_at IS NULL
-        AND (asset.metadata->>'generation_id'=$2::text OR asset.id::text=(SELECT metadata->>'studio_asset_id' FROM studio_generations WHERE id=$3::uuid))
+        AND (asset.id=$2::uuid OR asset.metadata->>'generation_id'=$3::text OR asset.id::text=(SELECT metadata->>'studio_asset_id' FROM studio_generations WHERE id=$3::uuid))
       ORDER BY asset.created_at DESC LIMIT 1`,
-    [orgId, String(run.studio_generation_id), String(run.studio_generation_id)]
+    [orgId, run.ingredient_asset_id || null, run.studio_generation_id || null]
   );
   if (!generationAsset.rows[0]?.storage_path) {
     await failMaterialRun(run, new AppError(409, 'No durable still ingredient is available for economical video composition', 'VIDEO_INGREDIENT_UNAVAILABLE'));
@@ -636,7 +646,7 @@ export async function composeCampaignVideoMaterial(runId: string, orgId: string,
       brand_end_card_present: true,
       captions_present: true,
       cta_present: true,
-      scene_count: Math.min(5, 2 + approvedScenes.rows.length),
+      scene_count: Math.min(Math.max(2,Array.isArray(libraryVideoRecipe.scenes)?libraryVideoRecipe.scenes.length:5), 2 + approvedScenes.rows.length),
       scene_strategy: supportingStills.length > 0 ? 'approved_stills_multiscene' : 'single_governed_still_fallback',
     };
     await recordQuality(run, 'final_material', 'passed', finalQa, 100);
@@ -666,6 +676,7 @@ export async function composeCampaignVideoMaterial(runId: string, orgId: string,
       tracking,
       qa: finalQa,
       economical_video_cost_plan: costPlan,
+      library_video_recipe: libraryVideoRecipe,
     };
     await query('UPDATE studio_assets SET metadata=COALESCE(metadata,\'{}\'::jsonb) || $1::jsonb,updated_at=NOW() WHERE id=$2 AND organization_id=$3', [JSON.stringify(materialMetadata), asset.id, orgId]);
     const reviewBody = reviewCopy(endCard.final_text.headline, endCard.final_text.cta);
@@ -699,6 +710,7 @@ export async function composeCampaignVideoMaterial(runId: string, orgId: string,
         WHERE id=$5 AND organization_id=$6`,
       [content.id, asset.id, JSON.stringify(materialMetadata), JSON.stringify(qa), runId, orgId]
     );
+    await saveFinalMaterialToLibrary(orgId,userId,{studioAssetId:asset.id,contentId:content.id,name:`${String(run.campaign_name)} — ${route.label}`,description:'Final governed campaign video pending exact-version owner review.',tags:[route.kind,'campaign-material','video'],platforms:[String(brief.platform || route.primaryChannel)]});
     return { runId, assetId: asset.id, assetUrl: asset.url, contentId: content.id, qa, tracking };
   } catch (error) {
     try { await recordQuality(run, 'final_material', 'failed', { error: error instanceof Error ? error.message : String(error) }); } catch { /* preserve original failure */ }

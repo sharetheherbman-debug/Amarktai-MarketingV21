@@ -421,6 +421,7 @@ export interface CreateContentData {
   campaign_id?: string;
   project_id?: string;
   template_id?: string;
+  library_item_id?: string;
   metadata?: Record<string, unknown>;
   scheduled_at?: string;
   assigned_to?: string;
@@ -1073,6 +1074,7 @@ export interface GenerateContentRequest {
   title?: string;
   prompt: string;
   template_id?: string;
+  library_item_id?: string;
   variables?: Record<string, string>;
   campaign_id?: string;
   campaign_plan_id?: string;

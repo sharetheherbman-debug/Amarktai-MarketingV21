@@ -5,6 +5,7 @@ const owner = {
   password: 'E2e-owner-password-24!',
   recoveryCode: 'E2E-OWNER-RECOVERY-24',
 };
+const whiteLabelOwner={email:'white-label-owner.e2e@example.test',password:owner.password,recoveryCode:'E2E-WHITELABEL-RECOVERY-24'};
 
 test('real customer journey, auth refresh, controls, desktop and mobile navigation', async ({ context, page }) => {
   // The customer-visible batch includes deterministic FFmpeg video composition.
@@ -62,6 +63,17 @@ test('real customer journey, auth refresh, controls, desktop and mobile navigati
   expect(authCookies.find((cookie) => cookie.name === 'accessToken')?.httpOnly).toBe(true);
   expect(authCookies.find((cookie) => cookie.name === 'refreshToken')?.httpOnly).toBe(true);
   expect(await page.evaluate(() => ({ access: localStorage.getItem('auth_token'), refresh: localStorage.getItem('refresh_token') }))).toEqual({ access: null, refresh: null });
+
+  await page.goto('/library');
+  await expect(page.getByText('332 available')).toBeVisible();
+  await expect(page.getByText('EquiProfile Marketing Starter Pack')).toBeVisible();
+  for(const tab of ['Images','Videos','Templates','Campaign Packs']){
+    await page.getByRole('tab',{name:tab,exact:true}).click();
+    await expect(page.locator('article').first()).toBeVisible();
+  }
+  await page.getByRole('tab',{name:'Templates',exact:true}).click();
+  await page.getByLabel('Search Marketing Library').fill('horse care');
+  await expect(page.locator('article').first()).toBeVisible();
 
   await page.goto('/settings');
   await page.getByLabel('Brand name').fill('Acceptance White Label');
@@ -137,5 +149,24 @@ test('real customer journey, auth refresh, controls, desktop and mobile navigati
   // channel restrictions, spend limits, and duplicate-schedule prevention remain
   // covered by their focused API regressions; no external channel is configured.
   await expect(page.getByText('Creative rotation', { exact: true })).toBeVisible();
+
+  const secondContext=await context.browser()!.newContext();
+  const whitePage=await secondContext.newPage();
+  await whitePage.goto('/login');
+  await whitePage.getByLabel('Email').fill(whiteLabelOwner.email);
+  await whitePage.locator('#password').fill(whiteLabelOwner.password);
+  await whitePage.getByLabel('Authenticator or recovery code').fill(whiteLabelOwner.recoveryCode);
+  await whitePage.getByRole('button',{name:'Sign In'}).click();
+  await whitePage.waitForURL('**/dashboard');
+  await whitePage.goto('/library');
+  await expect(whitePage.getByText('0 available')).toBeVisible();
+  await expect(whitePage.getByText('EquiProfile Marketing Starter Pack')).toHaveCount(0);
+  const safePack=whitePage.getByText('Safe Test Pack',{exact:true}).locator('..').locator('..');
+  await safePack.getByRole('button',{name:'Install'}).click();
+  await expect(whitePage.getByText('1 available')).toBeVisible();
+  await whitePage.getByRole('tab',{name:'Templates',exact:true}).click();
+  await expect(whitePage.getByText('Private welcome structure',{exact:true})).toBeVisible();
+  await expect(whitePage.getByText(/EquiProfile/i)).toHaveCount(0);
+  await secondContext.close();
   expect(browserErrors, browserErrors.join('\n')).toEqual([]);
 });

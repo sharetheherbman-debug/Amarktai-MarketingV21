@@ -6,6 +6,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import {
   BarChart3,
   CalendarRange,
+  Library,
   LayoutDashboard,
   LogOut,
   Megaphone,
@@ -24,6 +25,7 @@ const navigation: NavItem[] = [
   { label: 'Home', href: '/dashboard', icon: LayoutDashboard },
   { label: 'Campaigns', href: '/campaigns', icon: Megaphone },
   { label: 'Create', href: '/create', icon: Sparkles },
+  { label: 'Library', href: '/library', icon: Library },
   { label: 'Calendar', href: '/content-studio/calendar', icon: CalendarRange },
   { label: 'Results', href: '/analytics', icon: BarChart3 },
   { label: 'Settings', href: '/settings', icon: Settings },

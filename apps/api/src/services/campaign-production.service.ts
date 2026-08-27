@@ -8,6 +8,8 @@ import { getDeliverableRoute, type MarketingGenerationOperation } from './market
 import { routeMarketingGeneration } from './marketing-generation-policy.service';
 import { composeCampaignMaterial, composeCampaignVideoMaterial } from './marketing-material-compositor.service';
 import { buildEconomicalVideoCostPlan } from './economical-video-policy.service';
+import { findReusableStudioAsset, useLibraryItem } from './library-tools.service';
+import { getItem as getLibraryItem } from './marketing-library.service';
 
 function asObject(value: unknown): Record<string, any> {
   if (value && typeof value === 'object') return value as Record<string, any>;
@@ -133,6 +135,9 @@ export async function queueCampaignProduction(planId: string, orgId: string, use
             : undefined;
           const premiumPermitted = brief.premium_permitted === true
             && asObject(plan.constraints).premium_generation_approved === true;
+          const requestedLibraryId=String(brief.library_item_id||brief.library_layout_id||brief.library_video_recipe_id||'');
+          const requestedLibraryItem=requestedLibraryId?await getLibraryItem(orgId,requestedLibraryId):null;
+          if(requestedLibraryItem&&requestedLibraryItem.approval_status!=='approved') throw new AppError(409,'The selected Marketing Library item requires owner approval','LIBRARY_ITEM_APPROVAL_REQUIRED');
           const modelRoute = await routeMarketingGeneration({
             organizationId: orgId,
             operation: operation as MarketingGenerationOperation,
@@ -142,6 +147,28 @@ export async function queueCampaignProduction(planId: string, orgId: string, use
             premiumPermitted,
             requiredFormat: canonicalRoute?.defaultDimensions || String(brief.default_dimensions || brief.dimensions_or_length || ''),
           });
+          const recipeDuration=Number(asObject(requestedLibraryItem?.definition).duration_seconds||0);
+          const reusableDuration=operation==='text_to_video'?Math.max(5,Math.min(15,requestedDuration||recipeDuration||15)):undefined;
+          const libraryVideoCostPlan=canonicalRoute?.composition==='branded_video'?buildEconomicalVideoCostPlan(reusableDuration||brief.duration_seconds,modelRoute):null;
+          const reusable = await findReusableStudioAsset(orgId,{
+            platform:String(brief.platform || canonicalRoute?.primaryChannel || '') || undefined,
+            tags:[String(brief.purpose || ''),String(brief.format || ''),canonicalRoute?.kind || ''].filter(Boolean),
+          });
+          if (reusable && (canonicalRoute?.composition === 'branded_static' || canonicalRoute?.composition === 'branded_video')) {
+            const libraryGenerationOptions = {
+              deliverable_kind:canonicalRoute.kind,material_type:canonicalRoute.materialType,composition_mode:canonicalRoute.composition,
+              duration_seconds:reusableDuration,economical_video_cost_plan:libraryVideoCostPlan,
+            };
+            await query(
+              `UPDATE campaign_asset_runs SET ingredient_asset_id=$1,status='processing',material_status='ingredient_validating',
+                 material_metadata=COALESCE(material_metadata,'{}'::jsonb) || $2::jsonb,updated_at=NOW() WHERE id=$3 AND organization_id=$4`,
+              [reusable.studio_asset_id,JSON.stringify({library_item_id:reusable.id,library_reused:true,library_generation_options:libraryGenerationOptions,library_layout:requestedLibraryItem?.kind?.includes('layout')?requestedLibraryItem.definition:null,library_video_recipe:requestedLibraryItem?.kind==='video_recipe'?requestedLibraryItem.definition:null}),run.id,orgId]
+            );
+            await useLibraryItem(orgId,String(reusable.id),{campaignPlanId:planId,campaignRunId:String(run.id)});
+            if(canonicalRoute.composition === 'branded_video') await composeCampaignVideoMaterial(String(run.id),orgId,userId);
+            else await composeCampaignMaterial(String(run.id),orgId,userId);
+            continue;
+          }
           const economicalVideoCostPlan = canonicalRoute?.composition === 'branded_video'
             ? buildEconomicalVideoCostPlan(boundedVideoDuration || brief.duration_seconds, modelRoute)
             : null;
@@ -180,6 +207,9 @@ export async function queueCampaignProduction(planId: string, orgId: string, use
                 composition_mode: canonicalRoute?.composition || null,
                 model_routing: modelRoute,
                 economical_video_cost_plan: economicalVideoCostPlan,
+                library_item_id: requestedLibraryItem?.id || null,
+                library_layout: requestedLibraryItem?.kind?.includes('layout') ? requestedLibraryItem.definition : null,
+                library_video_recipe: requestedLibraryItem?.kind === 'video_recipe' ? requestedLibraryItem.definition : null,
               },
             });
           await query(

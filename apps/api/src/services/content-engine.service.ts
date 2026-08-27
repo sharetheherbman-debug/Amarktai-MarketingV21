@@ -13,6 +13,7 @@ import {
   ContentGenerationJob,
   QualityReport,
 } from '../types';
+import { getItem as getLibraryItem, recordUsage as recordLibraryUsage } from './marketing-library.service';
 import * as brandDnaService from './brand-dna.service';
 import * as promptService from './prompt.service';
 import * as knowledgeService from './knowledge.service';
@@ -446,6 +447,15 @@ export async function generateContent(
         systemPrompt = template.system_prompt || '';
       }
     }
+    let libraryTemplate: Record<string,any> | null = null;
+    if (request.library_item_id) {
+      const selectedLibraryTemplate = await getLibraryItem(orgId,request.library_item_id);
+      if (selectedLibraryTemplate.approval_status !== 'approved' || !['copy_template','social_post_template','social_ad_template','email_template','landing_page_template','article_template','offer_template','retargeting_template'].includes(String(selectedLibraryTemplate.kind))) {
+        throw new AppError(409,'Select an approved content-capable Marketing Library template','LIBRARY_TEMPLATE_NOT_USABLE');
+      }
+      libraryTemplate=selectedLibraryTemplate;
+      prompt = `${prompt}\n\nAPPROVED MARKETING LIBRARY STRUCTURE:\n${JSON.stringify(selectedLibraryTemplate.definition,null,2)}\nUse this as structure only. Resolve placeholders exclusively from verified context or explicit owner input.`;
+    }
 
     // 5. Prefer an approved high-quality asset as adaptation context before
     // asking for net-new ideation. Approval is never inherited by the output.
@@ -501,6 +511,7 @@ export async function generateContent(
       template_id: request.template_id,
       metadata: {
         generation_request: request,
+        library_item_id: request.library_item_id || null,
         campaign_plan_id: request.campaign_plan_id || null,
         brief_id: request.brief_id || null,
         alt_text: request.alt_text || null,
@@ -524,6 +535,7 @@ export async function generateContent(
         reuse_source: reuseSource ? { content_id: reuseSource.id, version: reuseSource.version } : null,
       },
     }, userId);
+    if(libraryTemplate) await recordLibraryUsage(orgId,String(libraryTemplate.id),{eventType:'used',metrics:{content_id:content.id}});
 
     if (reuseSource) {
       const linked = await query(

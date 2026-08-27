@@ -10,8 +10,8 @@ const required = (name) => {
 
 const freshUrl = required('MIGRATION_FRESH_DATABASE_URL');
 const upgradeUrl = required('MIGRATION_UPGRADE_DATABASE_URL');
-const productionHistoryMaximum = '039_campaign_material_approval_sync.sql';
-const forwardMigration = '040_social_oauth_onboarding.sql';
+const productionHistoryMaximum = '040_social_oauth_onboarding.sql';
+const forwardMigration = '041_tenant_marketing_library.sql';
 
 function assertDisposable(url, suffix) {
   const database = new URL(url).pathname.replace(/^\//, '');
@@ -57,6 +57,11 @@ async function assertSchema(databaseUrl) {
       to_regclass('public.idx_video_renders_idempotency') IS NOT NULL AS has_render_idempotency,
       to_regclass('public.social_oauth_sessions') IS NOT NULL AS has_social_oauth_sessions,
       to_regclass('public.idx_social_oauth_sessions_tenant') IS NOT NULL AS has_social_oauth_tenant_index,
+      to_regclass('public.library_packs') IS NOT NULL AS has_library_packs,
+      to_regclass('public.marketing_library_items') IS NOT NULL AS has_marketing_library_items,
+      to_regclass('public.asset_provenance_ledger') IS NOT NULL AS has_asset_provenance,
+      to_regclass('public.brand_bootstrap_runs') IS NOT NULL AS has_brand_bootstrap,
+      to_regclass('public.idx_marketing_library_tenant_kind') IS NOT NULL AS has_library_tenant_index,
       EXISTS (
         SELECT 1 FROM information_schema.columns
         WHERE table_schema='public' AND table_name='autonomous_growth_cycles'
@@ -94,7 +99,7 @@ async function main() {
   await assertSchema(freshUrl);
 
   // This is a genuine production-history fixture: the repository migrator
-  // executes and journals every SQL file through 039 in filename order. This
+  // executes and journals every SQL file through 040 in filename order. This
   // proves historical migration 036 remains journalled and untouched, while
   // only the new forward migration is applied by the upgrade.
   migrate(upgradeUrl, productionHistoryMaximum);

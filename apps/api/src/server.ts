@@ -59,6 +59,7 @@ import longformVideoRoutes from './routes/longform-video';
 import longformProductionRoutes from './routes/longform-production';
 import longformSceneProductionRoutes from './routes/longform-scene-production';
 import growthDirectorRoutes from './routes/growth-director';
+import marketingLibraryRoutes from './routes/marketing-library';
 import emailUnsubscribeRoutes from './routes/email-unsubscribe';
 import scheduler from './services/scheduler.service';
 import { verifyStripeWebhook } from './services/stripe-client.service';
@@ -179,6 +180,7 @@ app.use('/api/v1/longform-video', longformSceneProductionRoutes);
 app.use('/api/v1/longform-video', longformVideoRoutes);
 app.use('/api/v1/longform-video', longformProductionRoutes);
 app.use('/api/v1/growth-director', ...tenant, growthDirectorRoutes);
+app.use('/api/v1/library', ...tenant, marketingLibraryRoutes);
 
 app.use((_req: Request, res: Response) => res.status(404).json({ success: false, error: { message: 'Route not found', code: 'NOT_FOUND' } }));
 app.use(errorHandler);

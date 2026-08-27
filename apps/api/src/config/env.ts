@@ -127,6 +127,14 @@ export const env = {
   GENX_FX_RATES_TO_GBP: getEnv('GENX_FX_RATES_TO_GBP', '{}'),
   GENERATION_RESERVATION_TTL_MINUTES: getEnvNumber('GENERATION_RESERVATION_TTL_MINUTES', 60),
 
+  // Optional stock-media providers. Missing credentials are a supported,
+  // customer-visible configuration state and never prevent Marketing startup.
+  PEXELS_API_KEY: getEnv('PEXELS_API_KEY'),
+  PIXABAY_API_KEY: getEnv('PIXABAY_API_KEY'),
+  UNSPLASH_ACCESS_KEY: getEnv('UNSPLASH_ACCESS_KEY'),
+  OPENVERSE_CLIENT_ID: getEnv('OPENVERSE_CLIENT_ID'),
+  OPENVERSE_CLIENT_SECRET: getEnv('OPENVERSE_CLIENT_SECRET'),
+
   // Fixed launch commercial model: 100 credits represent GBP 1.00 retail value.
   BILLING_CURRENCY: billingCurrency as 'GBP',
   GENERATION_CREDITS_PER_GBP: getEnvNumber('GENERATION_CREDITS_PER_GBP', 100),

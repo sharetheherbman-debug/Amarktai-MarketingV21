@@ -610,3 +610,22 @@ UPDATE ai_providers
 SET usage_stats = '{}'
 WHERE id = 'provider-uuid';
 ```
+
+## Marketing Library stock providers
+
+The tenant Marketing Library can search Pexels, Pixabay, Unsplash, Openverse,
+and Wikimedia Commons. Pexels, Pixabay, and Unsplash require their server-side
+keys (`PEXELS_API_KEY`, `PIXABAY_API_KEY`, and `UNSPLASH_ACCESS_KEY`). Openverse
+works anonymously; `OPENVERSE_CLIENT_ID` and `OPENVERSE_CLIENT_SECRET` are
+optional. Wikimedia Commons works anonymously. Freesound is intentionally not
+part of this gateway.
+
+The customer UI reports each adapter as `AVAILABLE`,
+`EXTERNAL_CONFIGURATION_REQUIRED`, `RATE_LIMITED`, or
+`PROVIDER_UNAVAILABLE`. Searches are not bulk mirrored. A customer must select
+an item before it is saved, and each saved item keeps its source page, creator,
+license, attribution, commercial-use and derivatives eligibility in the tenant
+provenance ledger. Unsplash results remain hotlinked and call the returned
+download-tracking endpoint on selection. Other selected media is copied into
+private tenant storage so temporary provider URLs are not used as a permanent
+asset host.
