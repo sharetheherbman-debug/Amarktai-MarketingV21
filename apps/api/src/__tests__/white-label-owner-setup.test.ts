@@ -15,6 +15,7 @@ describe('owner white-label setup contract', () => {
     expect(page).toContain('Explicit workspace settings take priority, then Business Brain Brand DNA');
     expect(page).toContain('resolveBrandAssetUrl(brandLogo)');
     expect(page).toContain("value.slice('/api/v1'.length)");
+    expect(page).toContain('crossOrigin="use-credentials"');
   });
 
   it('validates logo ownership/public URL safety and never performs an unscoped tenant asset lookup', () => {
