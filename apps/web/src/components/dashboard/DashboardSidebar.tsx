@@ -17,7 +17,12 @@ import {
 import { useAuthStore } from '@/stores/auth.store';
 import { useUIStore } from '@/stores/ui.store';
 import { cn, getInitials } from '@/lib/utils';
-import { MARKETING_BRAND_LOGO_URL, MARKETING_BRAND_NAME } from '@/lib/branding';
+import {
+  MARKETING_BRAND_LOGO_URL,
+  MARKETING_BRAND_NAME,
+  MARKETING_EMBEDDED_SSO_ONLY,
+  MARKETING_HOST_RETURN_URL,
+} from '@/lib/branding';
 
 type NavItem = { label: string; href: string; icon: ComponentType<{ className?: string }> };
 
@@ -53,6 +58,10 @@ export function DashboardSidebar() {
 
   const signOut = async () => {
     await logout();
+    if (MARKETING_EMBEDDED_SSO_ONLY) {
+      window.location.assign(MARKETING_HOST_RETURN_URL);
+      return;
+    }
     router.replace('/login');
   };
 
@@ -160,7 +169,8 @@ export function DashboardSidebar() {
                 type="button"
                 onClick={() => void signOut()}
                 className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-white/55 transition hover:bg-white/10 hover:text-white"
-                aria-label="Sign out"
+                aria-label={MARKETING_EMBEDDED_SSO_ONLY ? 'Exit Marketing' : 'Sign out'}
+                title={MARKETING_EMBEDDED_SSO_ONLY ? 'Exit Marketing' : 'Sign out'}
               >
                 <LogOut className="h-4 w-4" />
               </button>
