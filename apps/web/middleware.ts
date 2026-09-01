@@ -15,6 +15,35 @@ const OWNER_ONLY_REDIRECT_PREFIXES = [
   '/integrations',
 ];
 
+const EMBEDDED_AUTH_PREFIXES = [
+  '/login',
+  '/register',
+  '/forgot-password',
+  '/reset-password',
+  '/verify-email',
+  '/mfa',
+];
+
+function booleanFlag(value: string | undefined): boolean {
+  return ['1', 'true', 'yes', 'on'].includes(String(value || '').trim().toLowerCase());
+}
+
+function embeddedHostReturnUrl(): URL {
+  const fallback = new URL('https://equiprofile.online/admin');
+  const candidate = String(process.env.NEXT_PUBLIC_MARKETING_HOST_RETURN_URL || '').trim();
+  if (!candidate) return fallback;
+  try {
+    const parsed = new URL(candidate);
+    return parsed.protocol === 'https:' ? parsed : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function matchesPrefix(pathname: string, prefixes: string[]): boolean {
+  return prefixes.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
+}
+
 function isLegacyPublicMarketingPath(pathname: string): boolean {
   if (pathname === '/') return true;
   return OWNER_ONLY_REDIRECT_PREFIXES
@@ -23,9 +52,17 @@ function isLegacyPublicMarketingPath(pathname: string): boolean {
 }
 
 export function middleware(request: NextRequest) {
-  if (isLegacyPublicMarketingPath(request.nextUrl.pathname)) {
+  const embeddedSsoOnly = booleanFlag(process.env.NEXT_PUBLIC_MARKETING_EMBEDDED_SSO_ONLY);
+  const pathname = request.nextUrl.pathname;
+
+  if (embeddedSsoOnly && (isLegacyPublicMarketingPath(pathname) || matchesPrefix(pathname, EMBEDDED_AUTH_PREFIXES))) {
+    return NextResponse.redirect(embeddedHostReturnUrl());
+  }
+
+  if (!embeddedSsoOnly && isLegacyPublicMarketingPath(pathname)) {
     return NextResponse.redirect(new URL('/login', request.url));
   }
+
   return NextResponse.next();
 }
 
