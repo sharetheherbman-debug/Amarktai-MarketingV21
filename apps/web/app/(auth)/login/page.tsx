@@ -1,12 +1,13 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Mail, Lock, Eye, EyeOff, Loader2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { AuthCard } from '@/components/auth/AuthCard';
 import { useAuthStore } from '@/stores/auth.store';
+import { MARKETING_EMBEDDED_SSO_ONLY, MARKETING_HOST_APPLICATION_NAME, MARKETING_HOST_RETURN_URL } from '@/lib/branding';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -17,6 +18,21 @@ export default function LoginPage() {
   const [mfaCode, setMfaCode] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [errors, setErrors] = useState<{ email?: string; password?: string }>({});
+
+  useEffect(() => {
+    if (MARKETING_EMBEDDED_SSO_ONLY) {
+      window.location.replace(MARKETING_HOST_RETURN_URL);
+    }
+  }, []);
+
+  if (MARKETING_EMBEDDED_SSO_ONLY) {
+    return (
+      <div className="flex min-h-screen flex-col items-center justify-center gap-3 bg-[var(--color-surface-1)] text-white">
+        <Loader2 className="h-7 w-7 animate-spin text-brand-400" />
+        <p className="text-sm text-zinc-400">Returning to {MARKETING_HOST_APPLICATION_NAME}…</p>
+      </div>
+    );
+  }
 
   function validate(): boolean {
     const newErrors: typeof errors = {};
