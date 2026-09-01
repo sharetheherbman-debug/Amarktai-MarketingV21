@@ -10,6 +10,7 @@ import { useUIStore } from '@/stores/ui.store';
 import { DashboardSidebar } from '@/components/dashboard/DashboardSidebar';
 import { DashboardHeader } from '@/components/dashboard/DashboardHeader';
 import { cn } from '@/lib/utils';
+import { MARKETING_EMBEDDED_SSO_ONLY, MARKETING_HOST_RETURN_URL } from '@/lib/branding';
 
 type MobileNavItem = { label: string; href: string; icon: ComponentType<{ className?: string }> };
 
@@ -51,7 +52,12 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   }, [checkAuth]);
 
   useEffect(() => {
-    if (authChecked && !isLoading && !isAuthenticated) router.replace('/login');
+    if (!authChecked || isLoading || isAuthenticated) return;
+    if (MARKETING_EMBEDDED_SSO_ONLY) {
+      window.location.replace(MARKETING_HOST_RETURN_URL);
+      return;
+    }
+    router.replace('/login');
   }, [authChecked, isLoading, isAuthenticated, router]);
 
   if (!authChecked || isLoading) {
