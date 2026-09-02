@@ -32,7 +32,7 @@ const DEFAULT_OPTIONS: Required<CrawlOptions> = {
 const REQUEST_TIMEOUT_MS = 15000;
 const MAX_PAGE_BYTES = 2 * 1024 * 1024;
 const CHUNK_MAX_TOKENS = 500;
-const CRAWLER_USER_AGENT = 'EquiProfile-Marketing-KnowledgeBot/1.0';
+const CRAWLER_USER_AGENT = 'AmarktAI-Marketing-KnowledgeBot/1.0';
 
 function normalizeUrl(value: string): string {
   const url = new URL(value);

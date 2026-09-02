@@ -1,3 +1,5 @@
+import { MARKETING_BRAND_NAME } from '@/lib/branding';
+
 export default function PrivacyPage() {
   return (
     <>
@@ -21,7 +23,7 @@ export default function PrivacyPage() {
             <div className="space-y-12 text-sm leading-relaxed text-zinc-400">
               <div>
                 <p>
-                  EquiProfile Marketing (&quot;we,&quot; &quot;our,&quot; or
+                  {MARKETING_BRAND_NAME} (&quot;we,&quot; &quot;our,&quot; or
                   &quot;us&quot;) is committed to protecting your privacy. This
                   Privacy Policy explains how we collect, use, disclose, and
                   safeguard your information when you use our platform and

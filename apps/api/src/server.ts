@@ -14,6 +14,7 @@ import { csrfProtection } from './middleware/csrf';
 import { requireAuth } from './middleware/auth';
 import { requireOrganizationMembership } from './middleware/organization-access';
 import { providerRouter } from './providers/provider-router';
+import { refreshGenXCataloguePricing } from './services/genx-pricing.service';
 
 import healthRoutes from './routes/health';
 import authRoutes from './routes/auth';
@@ -192,6 +193,17 @@ async function startServer() {
     await ensureConfiguredApplicationConnector();
     await hardenLegacyEmailProviderConfigs();
     await providerRouter.loadProviders();
+    try {
+      const pricing = await refreshGenXCataloguePricing();
+      logger.info(
+        `GenX startup refresh complete: catalogue=${pricing.catalogueTotal}, ` +
+        `priced=${pricing.priced}, unpriced=${pricing.unpriced}`
+      );
+    } catch (error) {
+      // Startup remains available for non-generation work. Quote-time refresh
+      // still fails closed until the provider catalogue becomes trustworthy.
+      logger.warn('GenX startup pricing refresh unavailable; generation remains fail-closed', error);
+    }
 
     const server = app.listen(env.PORT, () => {
       logger.info(`Server running on port ${env.PORT}`);

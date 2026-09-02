@@ -5,10 +5,12 @@ import {
   MARKETING_BRAND_DESCRIPTION,
   MARKETING_BRAND_NAME,
   MARKETING_BRAND_PRIMARY_COLOR,
+  MARKETING_PUBLIC_URL,
 } from '@/lib/branding';
 import './globals.css';
 
 export const metadata: Metadata = {
+  metadataBase: new URL(MARKETING_PUBLIC_URL),
   title: MARKETING_BRAND_NAME,
   description: MARKETING_BRAND_DESCRIPTION,
   keywords: ['AI marketing', 'marketing automation', 'campaign management', 'analytics'],

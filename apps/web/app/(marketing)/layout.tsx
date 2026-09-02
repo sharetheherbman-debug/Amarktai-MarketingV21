@@ -1,18 +1,18 @@
 import type { Metadata } from 'next';
 import { MarketingHeader } from '@/components/marketing/MarketingHeader';
 import { MarketingFooter } from '@/components/marketing/MarketingFooter';
+import { MARKETING_BRAND_DESCRIPTION, MARKETING_BRAND_NAME } from '@/lib/branding';
 
 export const metadata: Metadata = {
   title: {
-    default: 'EquiProfile Marketing - Autonomous Growth Operating System',
-    template: '%s | EquiProfile Marketing',
+    default: `${MARKETING_BRAND_NAME} - Autonomous Growth Operating System`,
+    template: `%s | ${MARKETING_BRAND_NAME}`,
   },
-  description:
-    'Deploy an autonomous AI workforce that creates content, manages campaigns, optimizes SEO, and grows your business — all from one platform.',
+  description: MARKETING_BRAND_DESCRIPTION,
   openGraph: {
     type: 'website',
     locale: 'en_US',
-    siteName: 'EquiProfile Marketing',
+    siteName: MARKETING_BRAND_NAME,
   },
 };
 

@@ -128,7 +128,7 @@ export default function SocialPageClient() {
     const key = configKey(platform);
     const config: Record<string, unknown> = {};
     if (key && platformValue.trim()) config[key] = platformValue.trim();
-    if (platform === 'reddit') config.user_agent = 'EquiProfileMarketing/1.0';
+    if (platform === 'reddit') config.user_agent = 'AmarktAIMarketing/1.0';
     setSaving(true);
     setError(null);
     try {

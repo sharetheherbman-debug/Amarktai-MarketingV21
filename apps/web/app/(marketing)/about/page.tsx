@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { MARKETING_BRAND_NAME } from '@/lib/branding';
 
 const values = [
   {
@@ -90,7 +91,7 @@ export default function AboutPage() {
               <span className="text-gradient">Marketing</span>
             </h1>
             <p className="mt-6 text-lg leading-relaxed text-zinc-400 sm:text-xl">
-              EquiProfile Marketing is building governed, evidence-led
+              {MARKETING_BRAND_NAME} is building governed, evidence-led
               automation that gives growing businesses a capable marketing
               operating system without giving up owner control.
             </p>
@@ -107,7 +108,7 @@ export default function AboutPage() {
             </h2>
             <div className="mt-8 space-y-6 text-base leading-relaxed text-zinc-400">
               <p>
-                EquiProfile Marketing starts from a simple observation: marketing
+                {MARKETING_BRAND_NAME} starts from a simple observation: marketing
                 teams spend too much time on repetitive tasks and not enough
                 time on strategy and creativity. We saw talented marketers
                 drowning in content calendars, social media scheduling, and

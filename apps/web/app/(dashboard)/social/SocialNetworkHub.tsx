@@ -251,7 +251,7 @@ export default function SocialNetworkHub() {
     const config: Record<string, unknown> = {};
     if (setup.configKey && configValue.trim()) config[setup.configKey] = configValue.trim();
     if (setup.secondaryConfigKey && secondaryConfigValue.trim()) config[setup.secondaryConfigKey] = secondaryConfigValue.trim();
-    if (platform === 'reddit') config.user_agent = 'EquiProfileMarketing/1.0';
+    if (platform === 'reddit') config.user_agent = 'AmarktAIMarketing/1.0';
     if (platform === 'tiktok') {
       config.creator_consent_confirmed = true;
       config.brand_organic_toggle = true;

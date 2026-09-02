@@ -7,6 +7,7 @@ describe('owner white-label setup contract', () => {
   const page = fs.readFileSync(path.join(root, 'apps/web/app/(dashboard)/settings/page.tsx'), 'utf8');
   const service = fs.readFileSync(path.join(root, 'apps/api/src/services/white-label.service.ts'), 'utf8');
   const material = fs.readFileSync(path.join(root, 'apps/api/src/services/marketing-material-compositor.service.ts'), 'utf8');
+  const studioRoute = fs.readFileSync(path.join(root, 'apps/api/src/routes/studio.ts'), 'utf8');
 
   it('offers one previewable owner workflow for identity, logo, colours, typography and domain state', () => {
     for (const text of ['Brand name','Support email','Brand logo','Primary colour','Accent colour','Brand typography','Preview before save','DNS:','SSL:']) {
@@ -18,11 +19,21 @@ describe('owner white-label setup contract', () => {
     expect(page).toContain('crossOrigin="use-credentials"');
   });
 
+  it('does not reload the form and erase confirmation when a saved brand renames the active organization', () => {
+    expect(page).toContain("useAuthStore.getState().currentOrganization?.name");
+    expect(page).toContain("}, [currentOrganization?.id]);");
+    expect(page).not.toContain("[currentOrganization?.id, currentOrganization?.name]");
+  });
+
   it('validates logo ownership/public URL safety and never performs an unscoped tenant asset lookup', () => {
     expect(service).toContain('validatePublicHttpUrl');
     expect(service).toContain('safeFetch');
     expect(service).toContain('id=$1 AND organization_id=$2');
     expect(service).not.toMatch(/SELECT 1 FROM studio_assets WHERE id=\$1\s+AND deleted_at/);
+    expect(studioRoute).toContain("res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin')");
+    expect(studioRoute.indexOf("verifyOrgMembership(asset.organization_id, req.user!.userId)")).toBeLessThan(
+      studioRoute.indexOf("res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin')")
+    );
   });
 
   it('uses explicit white-label values before Brand DNA without EquiProfile hard-coding', () => {

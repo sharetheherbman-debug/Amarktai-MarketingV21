@@ -345,5 +345,5 @@ export async function summary(organizationId: string, userId: string) {
       WHERE organization_id=$1 AND deleted_at IS NULL GROUP BY kind ORDER BY kind`, [organizationId]
   );
   const total = counts.rows.reduce((sum,row)=>sum+Number(row.count),0);
-  return { total, empty: total === 0, equiprofileStarterInstalled: await isEquiprofileOrganization(organizationId), counts: counts.rows };
+  return { total, empty: total === 0, tenantStarterInstalled: await isEquiprofileOrganization(organizationId), counts: counts.rows };
 }

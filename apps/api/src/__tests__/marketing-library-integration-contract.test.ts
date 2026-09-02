@@ -36,6 +36,13 @@ describe('Marketing Library integration and tenant boundary contract',()=>{
     expect(reuse).toBeGreaterThan(0);expect(create).toBeGreaterThan(reuse);
     expect(production).toContain('library_reused:true');
   });
+  test('campaign acquisition is library first, licensed stock second and generation last',()=>{
+    const reuse=production.indexOf('findReusableStudioAsset');
+    const stock=production.indexOf('findOrImportCampaignStockAsset',reuse);
+    const generate=production.indexOf('studioService.createGeneration',stock);
+    expect(reuse).toBeGreaterThan(0);expect(stock).toBeGreaterThan(reuse);expect(generate).toBeGreaterThan(stock);
+    expect(production).toContain("stock_first:reusable.source_kind==='stock_provider'");
+  });
   test('pack lifecycle includes structured import/export, duplicate, activation and versioned install',()=>{
     for(const marker of ['exportPack','importPack','duplicatePack','setPackStatus','installed_version=EXCLUDED.installed_version'])expect(library).toContain(marker);
   });

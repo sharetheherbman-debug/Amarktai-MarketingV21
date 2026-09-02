@@ -8,7 +8,7 @@ import {
   AlertCircle,
   X,
   Globe,
-  Image,
+  ImageIcon,
   Type,
   Mail,
   CheckCircle2,
@@ -137,7 +137,7 @@ export default function WhiteLabelPage() {
       {/* Brand Identity */}
       <div className="rounded-xl border border-white/[0.06] bg-surface-100 p-6">
         <h2 className="flex items-center gap-2 text-lg font-semibold text-white">
-          <Image className="h-5 w-5 text-brand-400" />
+          <ImageIcon className="h-5 w-5 text-brand-400" />
           Brand Identity
         </h2>
         <div className="mt-4 grid gap-4 sm:grid-cols-2">
@@ -273,8 +273,8 @@ export default function WhiteLabelPage() {
         <div className="mt-4 space-y-4">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm font-medium text-white">Remove EquiProfile Marketing branding</p>
-              <p className="text-xs text-zinc-500">Hide &quot;Powered by EquiProfile Marketing&quot; from client-facing pages</p>
+              <p className="text-sm font-medium text-white">Remove platform branding</p>
+              <p className="text-xs text-zinc-500">Hide the powered-by label from client-facing pages</p>
             </div>
             <button
               onClick={() => updateConfig('removed_branding', !config?.removed_branding)}

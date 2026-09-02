@@ -525,8 +525,8 @@ export async function createGeneration(
       },
       {
         jobId: `studio-${generation.id}`,
-        attempts: 60,
-        backoff: { type: 'fixed', delay: 30_000 },
+        attempts: 4,
+        backoff: { type: 'exponential', delay: 15_000 },
         removeOnComplete: { age: 86400 },
         removeOnFail: { age: 604800 },
       }
@@ -579,7 +579,7 @@ export async function retryGeneration(id: string, orgId: string, userId: string)
     negativePrompt: row.negative_prompt, options,
   }, {
     jobId: `studio-${id}-retry-${Number(row.attempt_count || 0) + 1}`,
-    attempts: 60, backoff: { type: 'fixed', delay: 30_000 },
+    attempts: 4, backoff: { type: 'exponential', delay: 15_000 },
     removeOnComplete: { age: 86400 }, removeOnFail: { age: 604800 },
   });
   await query(

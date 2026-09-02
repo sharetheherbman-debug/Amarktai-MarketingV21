@@ -319,7 +319,7 @@ export default function RelaunchControlPage() {
       </div>
 
       <section className="rounded-xl border border-white/[0.06] bg-surface-100 p-6">
-        <h2 className="text-lg font-semibold text-white">Recent conversion signals</h2><p className="mt-1 text-sm text-zinc-500">Consent-safe events received from connected applications such as EquiProfile.</p>
+        <h2 className="text-lg font-semibold text-white">Recent conversion signals</h2><p className="mt-1 text-sm text-zinc-500">Consent-safe events received from authorized connected applications.</p>
         <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-3">{data.conversion_events.length === 0 ? <div className="col-span-full rounded-lg border border-dashed border-white/10 py-10 text-center text-sm text-zinc-500">No conversion events have been received yet.</div> : data.conversion_events.map((event) => <div key={event.event_type} className="rounded-lg border border-white/10 p-4"><p className="text-sm font-medium text-white">{event.event_type.replace(/_/g, ' ')}</p><p className="mt-2 text-2xl font-bold text-brand-300">{Number(event.count).toLocaleString('en-GB')}</p><p className="mt-1 text-xs text-zinc-500">Last {new Date(event.last_occurred_at).toLocaleString('en-GB')}</p></div>)}</div>
       </section>
     </div>

@@ -12,7 +12,7 @@ import { useAuthStore } from '@/stores/auth.store';
 type Envelope<T>={success:boolean;data:T};
 type Item={id:string;kind:string;category:string;name:string;description?:string;tags:string[];platforms:string[];approval_status:string;is_favourite:boolean;preview?:{url?:string;attribution?:string};definition?:Record<string,unknown>;source_kind:string;provider?:string;provider_page_url?:string;attribution_text?:string};
 type Pack={id:string;name:string;description?:string;is_system:boolean;install_status?:string;item_count:number};
-type Summary={total:number;empty:boolean;equiprofileStarterInstalled:boolean;counts:Array<{kind:string;count:number}>};
+type Summary={total:number;empty:boolean;tenantStarterInstalled:boolean;counts:Array<{kind:string;count:number}>};
 type Provider={provider:string;state:string;message?:string};
 type Stock=Item&{providerAssetId:string;previewUrl:string;providerPageUrl:string;creatorName:string;attributionText:string;saveToken:string;licenseIdentifier:string};
 
@@ -25,7 +25,7 @@ export default function MarketingLibraryPage(){
   const [search,setSearch]=useState('');const [platform,setPlatform]=useState('');const [loading,setLoading]=useState(true);const [busy,setBusy]=useState<string|null>(null);const [error,setError]=useState<string|null>(null);const [selected,setSelected]=useState<Item|null>(null);
   const [website,setWebsite]=useState('');const [bootstrap,setBootstrap]=useState<Record<string,unknown>|null>(null);const [stockQuery,setStockQuery]=useState('');const [stock,setStock]=useState<Stock[]>([]);const [providers,setProviders]=useState<Provider[]>([]);
   const load=useCallback(async()=>{if(!orgId)return;setLoading(true);setError(null);try{
-    // Summary performs the idempotent EquiProfile auto-install before the
+    // Summary completes any tenant-configured starter install before the
     // customer-visible item and pack reads, avoiding a first-load race.
     const summaryResponse=await api.get<Envelope<Summary>>('/library/summary',{params:{organization_id:orgId}});
     const [itemResponse,packResponse,providerResponse]=await Promise.all([

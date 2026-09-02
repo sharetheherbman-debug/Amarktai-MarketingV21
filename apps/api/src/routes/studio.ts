@@ -278,6 +278,7 @@ router.get('/assets/:id', async (req: AuthRequest, res: Response, next: NextFunc
     res.setHeader('Accept-Ranges', 'bytes');
     res.setHeader('Cache-Control', 'private, max-age=3600');
     res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
 
     const range = req.headers.range;
     if (range) {

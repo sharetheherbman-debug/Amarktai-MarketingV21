@@ -7,7 +7,11 @@ import { ChevronDown, LogOut, Menu, Settings, User } from 'lucide-react';
 import { useAuthStore } from '@/stores/auth.store';
 import { useUIStore } from '@/stores/ui.store';
 import { cn, getInitials } from '@/lib/utils';
-import { MARKETING_BRAND_NAME } from '@/lib/branding';
+import {
+  MARKETING_BRAND_NAME,
+  MARKETING_EMBEDDED_SSO_ONLY,
+  MARKETING_HOST_RETURN_URL,
+} from '@/lib/branding';
 
 const pageNames: Record<string, string> = {
   dashboard: 'Home',
@@ -50,6 +54,10 @@ export function DashboardHeader() {
   const signOut = async () => {
     setProfileOpen(false);
     await logout();
+    if (MARKETING_EMBEDDED_SSO_ONLY) {
+      window.location.assign(MARKETING_HOST_RETURN_URL);
+      return;
+    }
     router.replace('/login');
   };
 
@@ -97,7 +105,7 @@ export function DashboardHeader() {
               <Settings className="h-4 w-4" /> Workspace settings
             </Link>
             <button type="button" onClick={() => void signOut()} className="flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-sm font-medium text-[var(--ep-danger)] hover:bg-[var(--ep-danger-soft)]">
-              <LogOut className="h-4 w-4" /> Sign out
+              <LogOut className="h-4 w-4" /> {MARKETING_EMBEDDED_SSO_ONLY ? 'Exit Marketing' : 'Sign out'}
             </button>
           </div>
         )}

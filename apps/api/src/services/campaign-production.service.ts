@@ -8,7 +8,7 @@ import { getDeliverableRoute, type MarketingGenerationOperation } from './market
 import { routeMarketingGeneration } from './marketing-generation-policy.service';
 import { composeCampaignMaterial, composeCampaignVideoMaterial } from './marketing-material-compositor.service';
 import { buildEconomicalVideoCostPlan } from './economical-video-policy.service';
-import { findReusableStudioAsset, useLibraryItem } from './library-tools.service';
+import { findOrImportCampaignStockAsset, findReusableStudioAsset, useLibraryItem } from './library-tools.service';
 import { getItem as getLibraryItem } from './marketing-library.service';
 
 function asObject(value: unknown): Record<string, any> {
@@ -150,10 +150,20 @@ export async function queueCampaignProduction(planId: string, orgId: string, use
           const recipeDuration=Number(asObject(requestedLibraryItem?.definition).duration_seconds||0);
           const reusableDuration=operation==='text_to_video'?Math.max(5,Math.min(15,requestedDuration||recipeDuration||15)):undefined;
           const libraryVideoCostPlan=canonicalRoute?.composition==='branded_video'?buildEconomicalVideoCostPlan(reusableDuration||brief.duration_seconds,modelRoute):null;
-          const reusable = await findReusableStudioAsset(orgId,{
+          const existingLibraryAsset = requestedLibraryItem?.studio_asset_id ? requestedLibraryItem : await findReusableStudioAsset(orgId,{
             platform:String(brief.platform || canonicalRoute?.primaryChannel || '') || undefined,
             tags:[String(brief.purpose || ''),String(brief.format || ''),canonicalRoute?.kind || ''].filter(Boolean),
           });
+          const stockSearchText=[brief.visual_direction,brief.subject,brief.purpose,brief.message,brief.format]
+            .map((value)=>String(value||'').trim()).filter(Boolean).join(' ').slice(0,160);
+          const reusable = existingLibraryAsset || ((canonicalRoute?.composition === 'branded_static' || canonicalRoute?.composition === 'branded_video')
+            ? await findOrImportCampaignStockAsset(orgId,userId,{
+                query:stockSearchText || String(asObject(plan.brief).offer || plan.goal || plan.name),
+                platform:String(brief.platform || canonicalRoute?.primaryChannel || '') || undefined,
+                tags:[String(brief.purpose || ''),String(brief.format || ''),canonicalRoute?.kind || ''].filter(Boolean),
+                mediaType:'photo',
+              })
+            : null);
           if (reusable && (canonicalRoute?.composition === 'branded_static' || canonicalRoute?.composition === 'branded_video')) {
             const libraryGenerationOptions = {
               deliverable_kind:canonicalRoute.kind,material_type:canonicalRoute.materialType,composition_mode:canonicalRoute.composition,
@@ -162,7 +172,7 @@ export async function queueCampaignProduction(planId: string, orgId: string, use
             await query(
               `UPDATE campaign_asset_runs SET ingredient_asset_id=$1,status='processing',material_status='ingredient_validating',
                  material_metadata=COALESCE(material_metadata,'{}'::jsonb) || $2::jsonb,updated_at=NOW() WHERE id=$3 AND organization_id=$4`,
-              [reusable.studio_asset_id,JSON.stringify({library_item_id:reusable.id,library_reused:true,library_generation_options:libraryGenerationOptions,library_layout:requestedLibraryItem?.kind?.includes('layout')?requestedLibraryItem.definition:null,library_video_recipe:requestedLibraryItem?.kind==='video_recipe'?requestedLibraryItem.definition:null}),run.id,orgId]
+              [reusable.studio_asset_id,JSON.stringify({library_item_id:reusable.id,library_reused:true,stock_first:reusable.source_kind==='stock_provider',library_generation_options:libraryGenerationOptions,library_layout:requestedLibraryItem?.kind?.includes('layout')?requestedLibraryItem.definition:null,library_video_recipe:requestedLibraryItem?.kind==='video_recipe'?requestedLibraryItem.definition:null}),run.id,orgId]
             );
             await useLibraryItem(orgId,String(reusable.id),{campaignPlanId:planId,campaignRunId:String(run.id)});
             if(canonicalRoute.composition === 'branded_video') await composeCampaignVideoMaterial(String(run.id),orgId,userId);

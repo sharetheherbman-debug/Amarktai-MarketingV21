@@ -3,12 +3,13 @@ import path from 'path';
 import { promises as fs } from 'fs';
 import { query, transaction } from '../config/database';
 import { AppError, NotFoundError } from '../middleware/errorHandler';
-import { safeFetch, validatePublicHttpUrl } from '../utils/safe-fetch';
+import { safeFetch } from '../utils/safe-fetch';
 import { createPack, addPackItem, installPack } from './marketing-library.service';
 import * as brandDnaService from './brand-dna.service';
 import * as knowledgeService from './knowledge.service';
 import * as studioService from './studio.service';
 import { searchStock } from './stock-media.service';
+import { collectWebsiteDocuments } from './knowledge-ingestion.service';
 
 export type FactState = 'VERIFIED_FIRST_PARTY' | 'OWNER_SUPPLIED' | 'INFERRED' | 'UNVERIFIED' | 'DISALLOWED';
 export type BootstrapFact = { key: string; value: unknown; state: FactState; sourceUrl?: string; evidence?: Record<string, unknown> };
@@ -128,43 +129,12 @@ export function build30DayPlan(facts: BootstrapFact[], start = new Date()): Arra
   });
 }
 
-function robotsAllows(robots: string, path: string): boolean {
-  let applies = false;
-  for (const raw of robots.split(/\r?\n/)) {
-    const line = raw.replace(/#.*/, '').trim();
-    const [field, ...rest] = line.split(':');
-    const value = rest.join(':').trim();
-    if (field?.toLowerCase() === 'user-agent') applies = value === '*';
-    if (applies && field?.toLowerCase() === 'disallow' && value && path.startsWith(value)) return false;
-  }
-  return true;
-}
-
 export async function crawlFirstPartyWebsite(value: string): Promise<WebsitePage[]> {
-  const root = await validatePublicHttpUrl(value);
-  const robotsUrl = new URL('/robots.txt', root).toString();
-  let robots = '';
-  try { const response = await safeFetch(robotsUrl, { maxResponseBytes: 256_000 }); if (response.ok) robots = await response.text(); } catch { /* Missing robots is not a crawl prohibition. */ }
-  const pending = [root.toString()];
-  const visited = new Set<string>();
-  const pages: WebsitePage[] = [];
-  while (pending.length && pages.length < 8) {
-    const current = new URL(pending.shift()!);
-    current.hash = '';
-    if (visited.has(current.toString()) || current.origin !== root.origin || !robotsAllows(robots, current.pathname)) continue;
-    visited.add(current.toString());
-    const response = await safeFetch(current.toString(), { maxRedirects: 3, maxResponseBytes: 2_000_000, headers: { 'User-Agent': 'AmarktAI-BrandBootstrap/1.0' } });
-    if (!response.ok || new URL(response.url).origin !== root.origin || !(response.headers.get('content-type') || '').includes('text/html')) continue;
-    const html = await response.text();
-    pages.push({ url: current.toString(), html });
-    for (const match of html.matchAll(/href=["']([^"'#]+)["']/gi)) {
-      const linked = absoluteUrl(match[1], current.toString());
-      if (!linked) continue;
-      const candidate = new URL(linked); candidate.hash = '';
-      if (candidate.origin === root.origin && !visited.has(candidate.toString()) && pending.length < 24) pending.push(candidate.toString());
-    }
-  }
-  if (!pages.length) throw new AppError(422, 'No authorized first-party HTML pages could be read', 'BRAND_BOOTSTRAP_NO_PAGES');
+  const documents = await collectWebsiteDocuments(value, { maxPages: 12 });
+  const pages = documents.flatMap((document) => document.rawHtml && document.url
+    ? [{ url: document.url, html: document.rawHtml }]
+    : []);
+  if (!pages.length) throw new AppError(422, 'We could not read useful public website pages.', 'BRAND_BOOTSTRAP_NO_PAGES');
   return pages;
 }
 

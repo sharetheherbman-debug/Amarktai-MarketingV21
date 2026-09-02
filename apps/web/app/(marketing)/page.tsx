@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { useState } from 'react';
+import { MARKETING_BRAND_NAME } from '@/lib/branding';
 
 const benefits = [
   {
@@ -114,9 +115,9 @@ const launchSafeguards = [
 
 const faqs = [
   {
-    question: 'What is EquiProfile Marketing?',
+    question: `What is ${MARKETING_BRAND_NAME}?`,
     answer:
-      'EquiProfile Marketing is an autonomous growth operating system for campaign planning, governed content creation, SEO, social distribution, email, and analytics.',
+      `${MARKETING_BRAND_NAME} is an autonomous growth operating system for campaign planning, governed content creation, SEO, social distribution, email, and analytics.`,
   },
   {
     question: 'How does the AI workforce work?',
@@ -282,7 +283,7 @@ export default function LandingPage() {
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
           <div className="mx-auto max-w-2xl text-center">
             <h2 className="text-3xl font-bold tracking-tight text-white sm:text-4xl">
-              Why marketers choose EquiProfile Marketing
+              Why marketers choose {MARKETING_BRAND_NAME}
             </h2>
             <p className="mt-4 text-lg text-zinc-400">
               Stop juggling tools. Start deploying agents.

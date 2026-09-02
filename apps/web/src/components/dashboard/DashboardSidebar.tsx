@@ -5,28 +5,41 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import {
   BarChart3,
+  BrainCircuit,
   CalendarRange,
+  CheckCircle2,
   Library,
   LayoutDashboard,
   LogOut,
   Megaphone,
   PanelLeft,
+  PlugZap,
   Settings,
   Sparkles,
+  UsersRound,
 } from 'lucide-react';
 import { useAuthStore } from '@/stores/auth.store';
 import { useUIStore } from '@/stores/ui.store';
 import { cn, getInitials } from '@/lib/utils';
-import { MARKETING_BRAND_LOGO_URL, MARKETING_BRAND_NAME } from '@/lib/branding';
+import {
+  MARKETING_BRAND_LOGO_URL,
+  MARKETING_BRAND_NAME,
+  MARKETING_EMBEDDED_SSO_ONLY,
+  MARKETING_HOST_RETURN_URL,
+} from '@/lib/branding';
 
 type NavItem = { label: string; href: string; icon: ComponentType<{ className?: string }> };
 
 const navigation: NavItem[] = [
   { label: 'Home', href: '/dashboard', icon: LayoutDashboard },
+  { label: 'Business Brain', href: '/business-brain', icon: BrainCircuit },
   { label: 'Campaigns', href: '/campaigns', icon: Megaphone },
   { label: 'Create', href: '/create', icon: Sparkles },
   { label: 'Library', href: '/library', icon: Library },
   { label: 'Calendar', href: '/content-studio/calendar', icon: CalendarRange },
+  { label: 'Approvals', href: '/approvals', icon: CheckCircle2 },
+  { label: 'Connections', href: '/connections', icon: PlugZap },
+  { label: 'Marketing Team', href: '/marketing-team', icon: UsersRound },
   { label: 'Results', href: '/analytics', icon: BarChart3 },
   { label: 'Settings', href: '/settings', icon: Settings },
 ];
@@ -46,6 +59,8 @@ export function DashboardSidebar() {
   const router = useRouter();
   const { user, logout, currentOrganization } = useAuthStore();
   const { sidebarOpen, toggleSidebar, setSidebarOpen } = useUIStore();
+  const brandLogo = currentOrganization?.logo || MARKETING_BRAND_LOGO_URL;
+  const brandName = currentOrganization?.name || MARKETING_BRAND_NAME;
 
   const closeOnMobile = () => {
     if (typeof window !== 'undefined' && window.innerWidth < 1024) setSidebarOpen(false);
@@ -53,6 +68,10 @@ export function DashboardSidebar() {
 
   const signOut = async () => {
     await logout();
+    if (MARKETING_EMBEDDED_SSO_ONLY) {
+      window.location.assign(MARKETING_HOST_RETURN_URL);
+      return;
+    }
     router.replace('/login');
   };
 
@@ -85,10 +104,9 @@ export function DashboardSidebar() {
 
           {sidebarOpen && (
             <Link href="/dashboard" onClick={closeOnMobile} className="ml-3 flex min-w-0 items-center gap-2.5">
-              <img src={MARKETING_BRAND_LOGO_URL} alt={MARKETING_BRAND_NAME} className="h-10 w-auto max-w-[118px] shrink-0 object-contain" />
+              <img src={brandLogo} alt={brandName} className="h-10 w-auto max-w-[148px] shrink-0 object-contain" />
               <div className="min-w-0 leading-tight">
-                <p className="truncate text-[15px] font-semibold tracking-tight text-white">{MARKETING_BRAND_NAME}</p>
-                <p className="truncate text-[10px] font-semibold uppercase tracking-[0.13em] text-white/45">Marketing workspace</p>
+                <p className="truncate text-[10px] font-semibold uppercase tracking-[0.13em] text-white/55">Marketing</p>
               </div>
             </Link>
           )}
@@ -129,13 +147,6 @@ export function DashboardSidebar() {
             })}
           </div>
 
-          {sidebarOpen && (
-            <div className="mt-5 border-t border-white/10 px-3 pt-4">
-              <p className="text-[10px] leading-5 text-white/45">
-                Advanced studios, provider tools and operational controls remain available by direct route for administrators, but are intentionally hidden from the everyday client navigation.
-              </p>
-            </div>
-          )}
         </nav>
 
         <div className="shrink-0 border-t border-white/10 p-3">
@@ -151,7 +162,7 @@ export function DashboardSidebar() {
             {sidebarOpen && (
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-medium leading-none text-white">{user?.name || 'Workspace owner'}</p>
-                <p className="mt-1.5 truncate text-[11px] text-white/55">{currentOrganization?.name || MARKETING_BRAND_NAME}</p>
+                <p className="mt-1.5 truncate text-[11px] text-white/55">{brandName}</p>
               </div>
             )}
 
@@ -160,7 +171,8 @@ export function DashboardSidebar() {
                 type="button"
                 onClick={() => void signOut()}
                 className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-white/55 transition hover:bg-white/10 hover:text-white"
-                aria-label="Sign out"
+                aria-label={MARKETING_EMBEDDED_SSO_ONLY ? 'Exit Marketing' : 'Sign out'}
+                title={MARKETING_EMBEDDED_SSO_ONLY ? 'Exit Marketing' : 'Sign out'}
               >
                 <LogOut className="h-4 w-4" />
               </button>

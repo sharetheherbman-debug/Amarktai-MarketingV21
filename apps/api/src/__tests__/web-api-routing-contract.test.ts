@@ -30,7 +30,7 @@ describe('Web/API routing contract', () => {
     expect(apiClient).toContain('return `${url.pathname}${url.search}${url.hash}`;');
   });
 
-  it('establishes the owner session before entering the dashboard', () => {
+  it('establishes authentication before entering the dashboard and honors embedded SSO mode', () => {
     const loginPage = fs.readFileSync(
       path.join(repoRoot, 'apps/web/app/(auth)/login/page.tsx'),
       'utf8'
@@ -47,7 +47,9 @@ describe('Web/API routing contract', () => {
     expect(loginPage).not.toContain('Sign up');
 
     expect(dashboardLayout).toContain('const [authChecked, setAuthChecked] = useState(false);');
-    expect(dashboardLayout).toContain('if (authChecked && !isLoading && !isAuthenticated)');
+    expect(dashboardLayout).toContain('if (!authChecked || isLoading || isAuthenticated) return;');
+    expect(dashboardLayout).toContain('if (MARKETING_EMBEDDED_SSO_ONLY)');
+    expect(dashboardLayout).toContain('window.location.replace(MARKETING_HOST_RETURN_URL);');
     expect(dashboardLayout).toContain("router.replace('/login');");
     expect(dashboardLayout).toContain('if (!authChecked || isLoading)');
   });
