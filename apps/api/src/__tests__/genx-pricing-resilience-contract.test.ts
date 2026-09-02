@@ -21,6 +21,12 @@ describe('GenX pricing and render resilience contract', () => {
     expect(pricing.match(/await refreshGenXCataloguePricing\(\)/g)?.length).toBeGreaterThanOrEqual(2);
   });
 
+  test('preserves the last known-good paid catalogue when a refresh request fails', () => {
+    expect(pricing).toContain('UPDATE genx_models SET pricing_error=$2 WHERE id=$1');
+    expect(pricing).not.toContain("UPDATE genx_models SET retail_enabled=FALSE,pricing_status='error',\n           pricing_last_synced_at=NOW(),pricing_error=$2 WHERE id=$1");
+    expect(pricing).toContain('Date.now() - pricingLastSyncedAt.getTime() > maximumAgeMs');
+  });
+
   test('keeps the canonical render runtime as the only routed implementation', () => {
     expect(longformRoute).toContain("../services/render-runtime.service");
     expect(fs.existsSync(path.resolve(root, 'apps/api/src/services/render-queue.service.ts'))).toBe(false);

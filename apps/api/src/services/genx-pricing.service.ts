@@ -585,8 +585,7 @@ export async function syncPricingFromModels(models: GenXModel[]): Promise<{
     const message = error instanceof Error ? error.message : String(error);
     for (const model of models) {
       await query(
-        `UPDATE genx_models SET retail_enabled=FALSE,pricing_status='error',
-           pricing_last_synced_at=NOW(),pricing_error=$2 WHERE id=$1`,
+        `UPDATE genx_models SET pricing_error=$2 WHERE id=$1`,
         [model.id, `Authenticated GenX account pricing unavailable: ${message}`.slice(0, 2000)]
       );
     }
