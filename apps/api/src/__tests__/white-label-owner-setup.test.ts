@@ -18,6 +18,12 @@ describe('owner white-label setup contract', () => {
     expect(page).toContain('crossOrigin="use-credentials"');
   });
 
+  it('does not reload the form and erase confirmation when a saved brand renames the active organization', () => {
+    expect(page).toContain("useAuthStore.getState().currentOrganization?.name");
+    expect(page).toContain("}, [currentOrganization?.id]);");
+    expect(page).not.toContain("[currentOrganization?.id, currentOrganization?.name]");
+  });
+
   it('validates logo ownership/public URL safety and never performs an unscoped tenant asset lookup', () => {
     expect(service).toContain('validatePublicHttpUrl');
     expect(service).toContain('safeFetch');

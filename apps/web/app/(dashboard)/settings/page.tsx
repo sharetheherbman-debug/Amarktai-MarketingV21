@@ -63,7 +63,7 @@ export default function SettingsPage() {
       const nextConfig = configResponse.data || {};
       setConfig(nextConfig);
       setDomains(domainsResponse.data || []);
-      setBrandName(String(nextConfig.brand_name || currentOrganization.name || ''));
+      setBrandName(String(nextConfig.brand_name || useAuthStore.getState().currentOrganization?.name || ''));
       setSupportEmail(String(nextConfig.support_email || ''));
       const colors = nextConfig.brand_colors || {};
       setPrimaryColor(typeof colors.primary === 'string' ? colors.primary : '#2e6da4');
@@ -75,7 +75,7 @@ export default function SettingsPage() {
     } finally {
       setLoading(false);
     }
-  }, [currentOrganization?.id, currentOrganization?.name]);
+  }, [currentOrganization?.id]);
 
   useEffect(() => { void loadWhiteLabel(); }, [loadWhiteLabel]);
 
