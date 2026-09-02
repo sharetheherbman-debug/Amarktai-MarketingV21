@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { MARKETING_BRAND_NAME } from '@/lib/branding';
 
 const categories = [
   'All',
@@ -102,7 +103,7 @@ export default function BlogPage() {
               Blog
             </h1>
             <p className="mt-6 text-lg leading-relaxed text-zinc-400 sm:text-xl">
-              Insights, tutorials, and news from EquiProfile Marketing.
+              Insights, tutorials, and news from {MARKETING_BRAND_NAME}.
             </p>
           </div>
         </div>

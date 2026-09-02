@@ -271,6 +271,10 @@ async function processRender(job: Job): Promise<void> {
       fadeOutSeconds: Number(musicSettings.fade_out_seconds ?? 2),
     });
     if (!renderResult.success) throw new Error(renderResult.error || 'Final FFmpeg composition failed');
+    const visualContent = await ffmpegService.inspectVideoVisualContent(finalPath);
+    if (!visualContent.visible) {
+      throw new Error('Rendered video contains no visible picture content. Check the source scene clips, then retry the render.');
+    }
     await query(
       `UPDATE video_renders SET progress = 88, heartbeat_at = NOW(), updated_at = NOW() WHERE id = $1`,
       [renderId]
@@ -319,6 +323,7 @@ async function processRender(job: Job): Promise<void> {
       soundtrack: Boolean(soundtrackPath),
       captions: Boolean(srtAsset),
       transitions,
+      visual_content: visualContent,
       srt_asset_id: srtAsset?.id || null,
       srt_url: srtAsset?.url || null,
       vtt_asset_id: vttAsset?.id || null,

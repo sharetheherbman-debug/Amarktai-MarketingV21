@@ -8,6 +8,47 @@ import {
 } from '../providers/genx-multimodal.provider';
 import type { GenXModel } from './genx-model-registry.service';
 
+let pricingRefreshInFlight: Promise<GenXPricingRefreshResult> | null = null;
+let pricingRefreshLastFailureAt = 0;
+const PRICING_REFRESH_FAILURE_COOLDOWN_MS = 60_000;
+
+export type GenXPricingRefreshResult = {
+  catalogueTotal: number;
+  priced: number;
+  unpriced: number;
+  snapshotsCreated: number;
+  refreshedAt: string;
+};
+
+export async function refreshGenXCataloguePricing(): Promise<GenXPricingRefreshResult> {
+  if (pricingRefreshInFlight) return pricingRefreshInFlight;
+  if (Date.now() - pricingRefreshLastFailureAt < PRICING_REFRESH_FAILURE_COOLDOWN_MS) {
+    throw new AppError(503, 'GenX pricing refresh is cooling down after a failed provider request', 'GENX_PRICE_REFRESH_COOLDOWN');
+  }
+  pricingRefreshInFlight = (async () => {
+    try {
+      const registry = await import('./genx-model-registry.service');
+      const models = await registry.fetchLiveModelCatalogue();
+      if (models.length === 0) throw new AppError(502, 'GenX returned an empty model catalogue', 'GENX_CATALOGUE_EMPTY');
+      const catalogue = await registry.syncModelsToDatabase(models);
+      const pricing = await syncPricingFromModels(models);
+      return {
+        catalogueTotal: catalogue.total,
+        priced: pricing.priced,
+        unpriced: pricing.unpriced,
+        snapshotsCreated: pricing.snapshotsCreated,
+        refreshedAt: new Date().toISOString(),
+      };
+    } catch (error) {
+      pricingRefreshLastFailureAt = Date.now();
+      throw error;
+    } finally {
+      pricingRefreshInFlight = null;
+    }
+  })();
+  return pricingRefreshInFlight;
+}
+
 export interface ExtractedPriceComponent {
   operation: string;
   billableUnit: string;
@@ -679,7 +720,7 @@ export async function quoteGeneration(input: {
     throw new AppError(400, 'Quantity must be positive', 'GENX_QUOTE_QUANTITY_INVALID');
   }
 
-  const result = await query(
+  let result = await query(
     `SELECT gps.*,gm.retail_enabled,gm.pricing_status,gm.pricing_last_synced_at
      FROM genx_price_snapshots gps
      JOIN genx_models gm ON gm.id=gps.model_id
@@ -687,9 +728,20 @@ export async function quoteGeneration(input: {
      LIMIT 1`,
     [input.modelId, input.operation]
   );
+  if (!result.rows[0]) {
+    await refreshGenXCataloguePricing();
+    result = await query(
+      `SELECT gps.*,gm.retail_enabled,gm.pricing_status,gm.pricing_last_synced_at
+       FROM genx_price_snapshots gps
+       JOIN genx_models gm ON gm.id=gps.model_id
+       WHERE gps.model_id=$1 AND gps.operation=$2 AND gps.effective_to IS NULL
+       LIMIT 1`,
+      [input.modelId, input.operation]
+    );
+  }
   if (!result.rows[0]) throw new NotFoundError('Active GenX price');
 
-  const row = result.rows[0];
+  let row = result.rows[0];
   if (row.retail_enabled !== true || String(row.pricing_status) !== 'priced') {
     throw new AppError(
       503,
@@ -698,18 +750,31 @@ export async function quoteGeneration(input: {
     );
   }
 
-  const effectiveFrom = new Date(row.effective_from);
+  let effectiveFrom = new Date(row.effective_from);
   const pricingLastSyncedAt = new Date(row.pricing_last_synced_at);
   const maximumAgeMs = env.GENX_PRICE_MAX_AGE_MINUTES * 60_000;
   if (
     !Number.isFinite(pricingLastSyncedAt.getTime()) ||
     Date.now() - pricingLastSyncedAt.getTime() > maximumAgeMs
   ) {
-    throw new AppError(
-      503,
-      'The GenX price is stale and must be refreshed',
-      'GENX_PRICE_STALE'
+    await refreshGenXCataloguePricing();
+    result = await query(
+      `SELECT gps.*,gm.retail_enabled,gm.pricing_status,gm.pricing_last_synced_at
+       FROM genx_price_snapshots gps
+       JOIN genx_models gm ON gm.id=gps.model_id
+       WHERE gps.model_id=$1 AND gps.operation=$2 AND gps.effective_to IS NULL
+       LIMIT 1`,
+      [input.modelId, input.operation]
     );
+    row = result.rows[0];
+    const refreshedAt = new Date(row?.pricing_last_synced_at);
+    if (!row || !Number.isFinite(refreshedAt.getTime()) || Date.now() - refreshedAt.getTime() > maximumAgeMs) {
+      throw new AppError(503, 'GenX pricing could not be refreshed safely', 'GENX_PRICE_STALE');
+    }
+    if (row.retail_enabled !== true || String(row.pricing_status) !== 'priced') {
+      throw new AppError(503, 'This GenX model is not enabled for paid generation', 'GENX_MODEL_UNPRICED');
+    }
+    effectiveFrom = new Date(row.effective_from);
   }
 
   const billableUnit = String(row.billable_unit);
@@ -740,7 +805,7 @@ export async function quoteGeneration(input: {
     target_margin_bps: Number(row.target_margin_bps),
     price_snapshot_id: String(row.id),
     price_effective_from: effectiveFrom.toISOString(),
-    pricing_last_synced_at: pricingLastSyncedAt.toISOString(),
+    pricing_last_synced_at: new Date(row.pricing_last_synced_at).toISOString(),
   };
 }
 

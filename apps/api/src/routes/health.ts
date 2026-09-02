@@ -14,7 +14,7 @@ function getVersionInfo() {
     return JSON.parse(raw);
   } catch {
     return {
-      name: 'EquiProfile Marketing',
+      name: 'AmarktAI Marketing Engine',
       version: process.env.npm_package_version || '0.3.0',
       tag: 'unknown',
       milestone: 'unknown',

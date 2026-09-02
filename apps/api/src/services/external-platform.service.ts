@@ -417,7 +417,7 @@ export async function publishSocialPost(
     const title = stringValue(config.title || input.body.split('\n')[0].slice(0, 300), 'title');
     const raw = await requestJson('https://oauth.reddit.com/api/submit', {
       method: 'POST',
-      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': stringValue(config.user_agent || 'EquiProfileMarketing/1.0', 'user_agent') },
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': stringValue(config.user_agent || 'AmarktAIMarketing/1.0', 'user_agent') },
       body: new URLSearchParams({ api_type: 'json', kind: input.mediaUrls[0] ? 'link' : 'self', sr: subreddit, title, text: input.mediaUrls[0] ? '' : message, url: input.mediaUrls[0] || '' }),
     });
     const json = raw.json as Record<string, unknown> || {};
@@ -433,7 +433,7 @@ export async function publishSocialPost(
     const mediaBlob = new Blob([await mediaResponse.bytes()]);
     const metadata = {
       snippet: {
-        title: String(config.title || input.body.split('\n')[0] || 'EquiProfile Marketing upload').slice(0, 100),
+        title: String(config.title || input.body.split('\n')[0] || 'Marketing upload').slice(0, 100),
         description: message,
         tags: input.hashtags.map((tag) => tag.replace(/^#/, '')).filter(Boolean),
         categoryId: String(config.category_id || '22'),

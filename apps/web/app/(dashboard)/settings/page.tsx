@@ -36,7 +36,7 @@ function resolveBrandAssetUrl(value: string): string {
 }
 
 export default function SettingsPage() {
-  const { user, currentOrganization } = useAuthStore();
+  const { user, currentOrganization, setCurrentOrganization } = useAuthStore();
   const [config, setConfig] = useState<WhiteLabelConfig | null>(null);
   const [domains, setDomains] = useState<CustomDomain[]>([]);
   const [brandName, setBrandName] = useState('');
@@ -92,8 +92,16 @@ export default function SettingsPage() {
           brand_colors: { ...(config?.brand_colors || {}), primary: primaryColor, accent: accentColor },
         },
       });
-      setConfig(response.data || config);
-      setMessage('Brand settings saved. Active customer experiences will use the configured identity where supported.');
+      const saved = response.data || config;
+      setConfig(saved);
+      if (currentOrganization) {
+        setCurrentOrganization({
+          ...currentOrganization,
+          name: String(saved?.brand_name || currentOrganization.name),
+          logo: saved?.brand_logo ? resolveBrandAssetUrl(saved.brand_logo) : currentOrganization.logo,
+        });
+      }
+      setMessage('Brand settings saved. Your workspace identity has been updated.');
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'Brand settings could not be saved. No configuration was changed.');
     } finally {

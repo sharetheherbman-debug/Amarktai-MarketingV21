@@ -55,7 +55,7 @@ async function webSearch(input: Record<string, unknown>): Promise<unknown> {
   if (!searchText) throw new AppError(400, 'query is required', 'VALIDATION_ERROR');
   const limit = Math.max(1, Math.min(Number(input.limit || 8), 20));
   const response = await fetch(`https://www.bing.com/search?format=rss&q=${encodeURIComponent(searchText)}`, {
-    headers: { 'User-Agent': 'EquiProfile-Marketing-Agent/1.0' },
+    headers: { 'User-Agent': 'AmarktAI-Marketing-Agent/1.0' },
     signal: AbortSignal.timeout(15000),
   });
   if (!response.ok) throw new AppError(response.status, `Web search returned HTTP ${response.status}`, 'WEB_SEARCH_FAILED');
@@ -89,7 +89,7 @@ async function analyzeSeo(input: Record<string, unknown>): Promise<unknown> {
   let text = content;
   let title = String(input.title || '').trim();
   if (!text && url) {
-    const response = await safeFetch(url, { headers: { 'User-Agent': 'EquiProfile-SEO/1.0' }, timeoutMs: 15000, maxResponseBytes: 2 * 1024 * 1024 });
+    const response = await safeFetch(url, { headers: { 'User-Agent': 'AmarktAI-Marketing-SEO/1.0' }, timeoutMs: 15000, maxResponseBytes: 2 * 1024 * 1024 });
     if (!response.ok) throw new AppError(response.status, `SEO URL returned HTTP ${response.status}`, 'SEO_FETCH_FAILED');
     const html = await response.text();
     title = title || (html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] || '').replace(/<[^>]+>/g, '').trim();

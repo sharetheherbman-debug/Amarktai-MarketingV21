@@ -18,6 +18,13 @@ export interface FFmpegResult {
   error?: string;
 }
 
+export interface VideoVisualContentReport {
+  visible: boolean;
+  sampledPixels: number;
+  meanLuma: number;
+  lumaStandardDeviation: number;
+}
+
 export interface FinalCompositionOptions {
   narrationPath?: string;
   soundtrackPath?: string;
@@ -63,6 +70,34 @@ export async function getVideoInfo(filePath: string): Promise<Record<string, unk
     logger.error(`ffprobe failed for ${filePath}: ${error}`);
     throw error;
   }
+}
+
+/**
+ * Samples small grayscale frames and rejects effectively uniform output. Codec,
+ * duration and file-size checks alone can mistakenly accept a black placeholder.
+ * Static branded cards remain valid because their pixels still contain visible
+ * spatial detail.
+ */
+export async function inspectVideoVisualContent(filePath: string): Promise<VideoVisualContentReport> {
+  const result = await execFileAsync('ffmpeg', [
+    '-v', 'error', '-i', filePath,
+    '-vf', 'fps=1,scale=64:64:flags=area,format=gray',
+    '-frames:v', '120', '-f', 'rawvideo', 'pipe:1',
+  ], { timeout: 120000, maxBuffer: 8 * 1024 * 1024, encoding: 'buffer' });
+  const bytes = Buffer.isBuffer(result.stdout) ? result.stdout : Buffer.from(result.stdout);
+  if (bytes.length === 0) return { visible:false,sampledPixels:0,meanLuma:0,lumaStandardDeviation:0 };
+  let sum = 0;
+  let squared = 0;
+  for (const value of bytes) { sum += value; squared += value * value; }
+  const mean = sum / bytes.length;
+  const variance = Math.max(0, squared / bytes.length - mean * mean);
+  const standardDeviation = Math.sqrt(variance);
+  return {
+    visible: standardDeviation >= 2,
+    sampledPixels: bytes.length,
+    meanLuma: Number(mean.toFixed(2)),
+    lumaStandardDeviation: Number(standardDeviation.toFixed(2)),
+  };
 }
 
 export async function extractFrame(videoPath: string, outputPath: string, timeSeconds: number): Promise<string> {

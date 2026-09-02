@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { MARKETING_BRAND_LOGO_URL, MARKETING_BRAND_NAME } from '@/lib/branding';
 
 const navLinks = [
   { href: '/features', label: 'Features' },
@@ -38,24 +39,8 @@ export function MarketingHeader() {
     >
       <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8">
         <Link href="/" className="flex items-center gap-2">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-500/20">
-            <svg
-              className="h-5 w-5 text-brand-400"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-              strokeWidth={2}
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d="M13 10V3L4 14h7v7l9-11h-7z"
-              />
-            </svg>
-          </div>
-          <span className="text-lg font-bold text-white">
-            EquiProfile <span className="text-brand-400">Marketing</span>
-          </span>
+          <img src={MARKETING_BRAND_LOGO_URL} alt="" className="h-8 w-8 rounded-lg object-contain" />
+          <span className="text-lg font-bold text-white">{MARKETING_BRAND_NAME}</span>
         </Link>
 
         <nav className="hidden items-center gap-1 md:flex">

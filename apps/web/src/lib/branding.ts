@@ -29,6 +29,10 @@ export const MARKETING_BRAND_DESCRIPTION = trimmed(process.env.NEXT_PUBLIC_MARKE
 export const MARKETING_SUPPORT_EMAIL = trimmed(process.env.NEXT_PUBLIC_MARKETING_SUPPORT_EMAIL);
 export const MARKETING_BRAND_LOGO_URL = trimmed(process.env.NEXT_PUBLIC_MARKETING_BRAND_LOGO_URL) || '/logo.svg';
 export const MARKETING_HOST_APPLICATION_NAME = trimmed(process.env.NEXT_PUBLIC_MARKETING_HOST_APPLICATION_NAME) || 'Host application';
+export const MARKETING_PUBLIC_URL = safeHttpsUrl(
+  process.env.NEXT_PUBLIC_MARKETING_PUBLIC_URL,
+  'https://marketing.amarktai.co.za',
+);
 export const MARKETING_BRAND_PRIMARY_COLOR = colour(process.env.NEXT_PUBLIC_MARKETING_BRAND_PRIMARY_COLOR, '#052b57');
 export const MARKETING_BRAND_ACCENT_COLOR = colour(process.env.NEXT_PUBLIC_MARKETING_BRAND_ACCENT_COLOR, '#167cc1');
 
@@ -40,7 +44,7 @@ export const MARKETING_BRAND_ACCENT_COLOR = colour(process.env.NEXT_PUBLIC_MARKE
 export const MARKETING_EMBEDDED_SSO_ONLY = booleanFlag(process.env.NEXT_PUBLIC_MARKETING_EMBEDDED_SSO_ONLY);
 export const MARKETING_HOST_RETURN_URL = safeHttpsUrl(
   process.env.NEXT_PUBLIC_MARKETING_HOST_RETURN_URL,
-  'https://equiprofile.online/admin',
+  'https://amarktai.co.za',
 );
 
 /** Canonical parent-network attribution. White-label deployments may override it. */

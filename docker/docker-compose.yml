@@ -246,6 +246,7 @@ services:
       dockerfile: apps/web/Dockerfile
       args:
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-/api}
+        NEXT_PUBLIC_MARKETING_PUBLIC_URL: ${NEXT_PUBLIC_MARKETING_PUBLIC_URL:-https://marketing.amarktai.co.za}
         NEXT_PUBLIC_MARKETING_BRAND_NAME: ${NEXT_PUBLIC_MARKETING_BRAND_NAME:-Marketing Workspace}
         NEXT_PUBLIC_MARKETING_BRAND_DESCRIPTION: ${NEXT_PUBLIC_MARKETING_BRAND_DESCRIPTION:-AI-powered marketing automation, analytics, campaign management and growth operations.}
         NEXT_PUBLIC_MARKETING_SUPPORT_EMAIL: ${NEXT_PUBLIC_MARKETING_SUPPORT_EMAIL:-}
@@ -256,6 +257,7 @@ services:
     environment:
       NODE_ENV: production
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-/api}
+      NEXT_PUBLIC_MARKETING_PUBLIC_URL: ${NEXT_PUBLIC_MARKETING_PUBLIC_URL:-https://marketing.amarktai.co.za}
       NEXT_PUBLIC_MARKETING_BRAND_NAME: ${NEXT_PUBLIC_MARKETING_BRAND_NAME:-Marketing Workspace}
       NEXT_PUBLIC_MARKETING_BRAND_DESCRIPTION: ${NEXT_PUBLIC_MARKETING_BRAND_DESCRIPTION:-AI-powered marketing automation, analytics, campaign management and growth operations.}
       NEXT_PUBLIC_MARKETING_SUPPORT_EMAIL: ${NEXT_PUBLIC_MARKETING_SUPPORT_EMAIL:-}

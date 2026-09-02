@@ -118,7 +118,7 @@ export async function checkCompetitor(id: string, orgId: string): Promise<void> 
   let snapshotData: Record<string, unknown>;
   try {
     const response = await safeFetch(competitor.url, {
-      headers: { 'User-Agent': 'EquiProfile-Marketing-Competitor-Monitor/1.0', Accept: 'text/html,application/xhtml+xml' },
+      headers: { 'User-Agent': 'AmarktAI-Marketing-Competitor-Monitor/1.0', Accept: 'text/html,application/xhtml+xml' },
       timeoutMs: 20000,
       maxResponseBytes: 5 * 1024 * 1024,
     });

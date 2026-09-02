@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { Mail, Lock, User, Eye, EyeOff, Loader2, CheckCircle, XCircle } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { AuthCard } from '@/components/auth/AuthCard';
+import { MARKETING_BRAND_NAME } from '@/lib/branding';
 
 type InviteState = 'loading' | 'existing-user' | 'new-user' | 'already-member' | 'error';
 
@@ -183,7 +184,7 @@ export default function InvitePage({ params }: { params: Promise<{ token: string
     return (
       <AuthCard
         title="You've been invited!"
-        subtitle={`Join ${inviteData?.organizationName} on EquiProfile Marketing`}
+        subtitle={`Join ${inviteData?.organizationName} on ${MARKETING_BRAND_NAME}`}
       >
         <div className="flex flex-col items-center text-center">
           <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-brand-500/10">
@@ -211,7 +212,7 @@ export default function InvitePage({ params }: { params: Promise<{ token: string
   return (
     <AuthCard
       title="You've been invited!"
-      subtitle={`Join ${inviteData?.organizationName} on EquiProfile Marketing`}
+      subtitle={`Join ${inviteData?.organizationName} on ${MARKETING_BRAND_NAME}`}
     >
       <form onSubmit={handleRegisterAndAccept} className="space-y-5">
         <div className="rounded-lg border border-white/[0.06] bg-white/[0.02] px-4 py-3 text-center text-sm text-zinc-400">

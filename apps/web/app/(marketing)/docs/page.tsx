@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { MARKETING_BRAND_NAME } from '@/lib/branding';
 
 const quickStartCards = [
   {
@@ -38,7 +39,7 @@ const quickStartCards = [
       </svg>
     ),
     title: 'Webhooks',
-    description: 'Set up webhooks to receive real-time events from EquiProfile Marketing.',
+    description: `Set up webhooks to receive real-time events from ${MARKETING_BRAND_NAME}.`,
     href: '/docs/webhooks',
   },
 ];
@@ -124,7 +125,7 @@ export default function DocsPage() {
               Documentation
             </h1>
             <p className="mt-6 text-lg leading-relaxed text-zinc-400 sm:text-xl">
-              Everything you need to build with EquiProfile Marketing.
+              Everything you need to build with {MARKETING_BRAND_NAME}.
             </p>
             <div className="mx-auto mt-8 max-w-xl">
               <div className="relative">

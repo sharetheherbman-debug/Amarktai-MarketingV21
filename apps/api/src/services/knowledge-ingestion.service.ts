@@ -2,7 +2,7 @@ import { query, transaction } from '../config/database';
 import { AppError } from '../middleware/errorHandler';
 import { logger } from '../utils/logger';
 import * as vectorService from './vector.service';
-import { safeFetch } from '../utils/safe-fetch';
+import { safeFetch, validatePublicHttpUrl } from '../utils/safe-fetch';
 import crypto from 'crypto';
 
 interface SourceRow extends Record<string, unknown> {
@@ -14,11 +14,12 @@ interface SourceRow extends Record<string, unknown> {
   config: Record<string, unknown> | string;
 }
 
-interface DocumentInput {
+export interface DocumentInput {
   title: string;
   content: string;
   url?: string;
   metadata?: Record<string, unknown>;
+  rawHtml?: string;
 }
 
 function objectValue(value: unknown): Record<string, unknown> {
@@ -56,6 +57,73 @@ function htmlToText(html: string): string {
 function htmlTitle(html: string, fallback: string): string {
   const match = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
   return match ? htmlToText(match[1]).slice(0, 500) : fallback;
+}
+
+function firstMetaContent(html: string, names: string[]): string {
+  for (const name of names) {
+    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const forward = html.match(new RegExp(`<meta[^>]+(?:name|property)=["']${escaped}["'][^>]+content=["']([^"']+)["']`, 'i'));
+    const reverse = html.match(new RegExp(`<meta[^>]+content=["']([^"']+)["'][^>]+(?:name|property)=["']${escaped}["']`, 'i'));
+    const value = htmlToText(forward?.[1] || reverse?.[1] || '');
+    if (value) return value;
+  }
+  return '';
+}
+
+function structuredDataText(html: string): string[] {
+  const values: string[] = [];
+  for (const match of html.matchAll(/<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)) {
+    try {
+      const parsed = JSON.parse(match[1]);
+      const queue = Array.isArray(parsed) ? parsed : [parsed];
+      for (const entry of queue) {
+        const records = Array.isArray(entry?.['@graph']) ? entry['@graph'] : [entry];
+        for (const record of records) {
+          for (const key of ['name', 'description', 'slogan', 'serviceType', 'category']) {
+            if (typeof record?.[key] === 'string') values.push(record[key]);
+          }
+        }
+      }
+    } catch { /* Invalid first-party structured data is ignored. */ }
+  }
+  return values;
+}
+
+function metadataText(html: string, fallback: string): string {
+  return [...new Set([
+    htmlTitle(html, fallback),
+    firstMetaContent(html, ['description', 'og:description', 'twitter:description']),
+    firstMetaContent(html, ['og:site_name']),
+    ...structuredDataText(html),
+  ].map((value) => value.trim()).filter(Boolean))].join('\n\n');
+}
+
+function canonicalFromHtml(html: string, fallback: URL): URL {
+  const match = html.match(/<link[^>]+rel=["']canonical["'][^>]+href=["']([^"']+)["']/i)
+    || html.match(/<link[^>]+href=["']([^"']+)["'][^>]+rel=["']canonical["']/i);
+  try { return new URL(match?.[1] || fallback.toString(), fallback); } catch { return fallback; }
+}
+
+function robotsAllows(robots: string, path: string): boolean {
+  let applies = false;
+  for (const raw of robots.split(/\r?\n/)) {
+    const line = raw.replace(/#.*/, '').trim();
+    const [field, ...rest] = line.split(':');
+    const value = rest.join(':').trim();
+    if (field?.toLowerCase() === 'user-agent') applies = value === '*';
+    if (applies && field?.toLowerCase() === 'allow' && value && path.startsWith(value)) return true;
+    if (applies && field?.toLowerCase() === 'disallow' && value && path.startsWith(value)) return false;
+  }
+  return true;
+}
+
+function sitemapLocations(xml: string, root: URL): string[] {
+  return [...xml.matchAll(/<loc[^>]*>([\s\S]*?)<\/loc>/gi)].flatMap((match) => {
+    try {
+      const url = new URL(decodeHtml(match[1].trim()), root);
+      return url.origin === root.origin ? [url.toString()] : [];
+    } catch { return []; }
+  });
 }
 
 function linksFromHtml(html: string, baseUrl: URL): string[] {
@@ -96,7 +164,7 @@ function chunkText(text: string, maxChars = 6000, overlap = 500): string[] {
 async function fetchText(url: string, headers: Record<string, string> = {}): Promise<{ finalUrl: string; contentType: string; text: string }> {
   const response = await safeFetch(url, {
     headers: {
-      'User-Agent': 'EquiProfile-Marketing-KnowledgeBot/1.0',
+      'User-Agent': 'AmarktAI-Marketing-KnowledgeBot/1.0',
       Accept: 'text/html,application/json,text/plain,application/xml;q=0.9,*/*;q=0.8',
       ...headers,
     },
@@ -106,6 +174,64 @@ async function fetchText(url: string, headers: Record<string, string> = {}): Pro
   const text = await response.text();
   if (!response.ok) throw new AppError(502, `Knowledge source returned HTTP ${response.status}: ${text.slice(0, 300)}`, 'KNOWLEDGE_FETCH_FAILED');
   return { finalUrl: response.url, contentType: response.headers.get('content-type') || '', text };
+}
+
+export async function collectWebsiteDocuments(
+  sourceUrl: string,
+  options: { maxPages?: number; includeSubdomains?: boolean } = {}
+): Promise<DocumentInput[]> {
+  const validated = await validatePublicHttpUrl(sourceUrl);
+  const root = new URL(validated.toString());
+  const maxPages = Math.max(1, Math.min(Number(options.maxPages || 10), 50));
+  let robots = '';
+  try { robots = (await fetchText(new URL('/robots.txt', root).toString())).text; } catch { /* Missing robots does not prohibit crawling. */ }
+  const queue = [root.toString()];
+  try {
+    const sitemap = await fetchText(new URL('/sitemap.xml', root).toString());
+    queue.push(...sitemapLocations(sitemap.text, root));
+  } catch { /* A sitemap is useful but optional. */ }
+  const visited = new Set<string>();
+  const documents: DocumentInput[] = [];
+
+  while (queue.length > 0 && documents.length < maxPages && visited.size < maxPages * 3) {
+    const current = queue.shift()!;
+    if (visited.has(current)) continue;
+    visited.add(current);
+    const requested = new URL(current);
+    if (!robotsAllows(robots, requested.pathname)) continue;
+    const response = await fetchText(current);
+    const currentUrl = new URL(response.finalUrl);
+    const sameHost = currentUrl.hostname === root.hostname || (options.includeSubdomains === true && currentUrl.hostname.endsWith(`.${root.hostname}`));
+    if (!sameHost) continue;
+    if (response.contentType.includes('html') || /<html\b/i.test(response.text)) {
+      const canonical = canonicalFromHtml(response.text, currentUrl);
+      if (canonical.origin !== root.origin) continue;
+      const visible = htmlToText(response.text);
+      const metadata = metadataText(response.text, currentUrl.pathname || 'Home');
+      const content = [metadata, visible].filter(Boolean).join('\n\n').trim();
+      if (content.length >= 40) documents.push({
+        title: htmlTitle(response.text, currentUrl.pathname || 'Home'),
+        content,
+        url: canonical.toString(),
+        rawHtml: response.text,
+        metadata: {
+          source_type: 'website',
+          canonical_url: canonical.toString(),
+          rendered_fallback_needed: visible.length < 80,
+          extraction: visible.length >= 80 ? 'visible_html_and_metadata' : 'metadata_and_structured_data',
+        },
+      });
+      for (const link of linksFromHtml(response.text, currentUrl)) {
+        const next = new URL(link);
+        const allowedHost = next.hostname === root.hostname || (options.includeSubdomains === true && next.hostname.endsWith(`.${root.hostname}`));
+        if (allowedHost && !visited.has(next.toString()) && !queue.includes(next.toString())) queue.push(next.toString());
+      }
+    } else if (/^(text\/plain|application\/json)/i.test(response.contentType)) {
+      documents.push({ title: currentUrl.pathname.split('/').filter(Boolean).pop() || 'Website', content: response.text, url: response.finalUrl, metadata: { source_type: 'website', content_type: response.contentType } });
+    }
+  }
+  if (documents.length === 0) throw new AppError(422, 'We could not read useful public information from this website.', 'KNOWLEDGE_EMPTY_SOURCE');
+  return documents;
 }
 
 function parseRss(xml: string, sourceUrl: string): DocumentInput[] {
@@ -156,33 +282,8 @@ async function collectDocuments(source: SourceRow): Promise<DocumentInput[]> {
 
   if (source.type === 'website') {
     if (!source.url) throw new AppError(400, 'Website sources require a URL', 'KNOWLEDGE_URL_REQUIRED');
-    const root = new URL(source.url);
     const maxPages = Math.max(1, Math.min(Number(config.max_pages || 10), 50));
-    const includeSubdomains = config.include_subdomains === true;
-    const queue = [root.toString()];
-    const visited = new Set<string>();
-    const documents: DocumentInput[] = [];
-
-    while (queue.length > 0 && visited.size < maxPages) {
-      const current = queue.shift()!;
-      if (visited.has(current)) continue;
-      visited.add(current);
-      const response = await fetchText(current);
-      const currentUrl = new URL(response.finalUrl);
-      if (response.contentType.includes('html') || /<html\b/i.test(response.text)) {
-        const content = htmlToText(response.text);
-        if (content.length >= 80) documents.push({ title: htmlTitle(response.text, currentUrl.pathname || source.name), content, url: response.finalUrl, metadata: { source_type: 'website' } });
-        for (const link of linksFromHtml(response.text, currentUrl)) {
-          const next = new URL(link);
-          const sameHost = next.hostname === root.hostname || (includeSubdomains && next.hostname.endsWith(`.${root.hostname}`));
-          if (sameHost && !visited.has(next.toString()) && !queue.includes(next.toString())) queue.push(next.toString());
-        }
-      } else {
-        documents.push({ title: currentUrl.pathname.split('/').filter(Boolean).pop() || source.name, content: response.text, url: response.finalUrl, metadata: { source_type: 'website', content_type: response.contentType } });
-      }
-    }
-    if (documents.length === 0) throw new AppError(400, 'Website crawl produced no indexable content', 'KNOWLEDGE_EMPTY_SOURCE');
-    return documents;
+    return collectWebsiteDocuments(source.url, { maxPages, includeSubdomains: config.include_subdomains === true });
   }
 
   throw new AppError(400, `Unsupported knowledge source type: ${source.type}`, 'KNOWLEDGE_TYPE_UNSUPPORTED');

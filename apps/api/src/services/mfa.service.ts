@@ -6,7 +6,7 @@ import { decrypt, encrypt } from '../utils/encryption';
 import { env } from '../config/env';
 import { AppError, UnauthorizedError } from '../middleware/errorHandler';
 
-const issuer = 'EquiProfile Marketing';
+const issuer = String(process.env.HOST_APP_NAME || 'AmarktAI Marketing');
 const recoveryHash = (code: string) => crypto.createHmac('sha256', env.JWT_SECRET).update(code.replace(/\s/g, '').toUpperCase()).digest('hex');
 const newRecoveryCodes = () => Array.from({ length: 10 }, () => `${crypto.randomBytes(4).toString('hex')}-${crypto.randomBytes(4).toString('hex')}`.toUpperCase());
 

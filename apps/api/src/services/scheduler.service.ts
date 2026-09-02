@@ -9,7 +9,6 @@ import { refreshDueSources } from './knowledge.service';
 import { runGrowthDirector } from './growth-director.service';
 import { syncPublishedSocialPerformance } from './social-performance.service';
 import { syncCampaignCreativeRotationResults } from './campaign-creative-rotation.service';
-import * as genxRegistry from './genx-model-registry.service';
 import * as genxPricing from './genx-pricing.service';
 
 interface ScheduledTask {
@@ -139,13 +138,10 @@ class SchedulerService {
       )
     );
     this.scheduleTask('refresh-genx-catalogue-pricing', pricingRefreshMinutes * 60 * 1000, async () => {
-      const models = await genxRegistry.fetchLiveModelCatalogue();
-      if (models.length === 0) throw new Error('GenX returned no catalogue models during scheduled refresh');
-      const catalogue = await genxRegistry.syncModelsToDatabase(models);
-      const pricing = await genxPricing.syncPricingFromModels(models);
+      const pricing = await genxPricing.refreshGenXCataloguePricing();
       logger.info(
-        `GenX scheduled refresh: catalogue=${catalogue.total}, priced=${pricing.priced}, ` +
-        `unpriced=${pricing.unpriced}, snapshots=${pricing.snapshotsCreated}, errors=${pricing.errors.length}`
+        `GenX scheduled refresh: catalogue=${pricing.catalogueTotal}, priced=${pricing.priced}, ` +
+        `unpriced=${pricing.unpriced}, snapshots=${pricing.snapshotsCreated}`
       );
     });
 

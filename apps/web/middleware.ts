@@ -29,7 +29,7 @@ function booleanFlag(value: string | undefined): boolean {
 }
 
 function embeddedHostReturnUrl(): URL {
-  const fallback = new URL('https://equiprofile.online/admin');
+  const fallback = new URL('https://amarktai.co.za');
   const candidate = String(process.env.NEXT_PUBLIC_MARKETING_HOST_RETURN_URL || '').trim();
   if (!candidate) return fallback;
   try {

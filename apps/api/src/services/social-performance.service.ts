@@ -139,7 +139,7 @@ async function fetchNativeMetrics(
   if (platform === 'reddit') {
     const fullname = externalId.startsWith('t3_') ? externalId : `t3_${externalId}`;
     const raw = await jsonRequest(`https://oauth.reddit.com/api/info?id=${encodeURIComponent(fullname)}&raw_json=1`, bearer(token, {
-      'User-Agent': String(config.user_agent || 'EquiProfileMarketing/1.0'),
+      'User-Agent': String(config.user_agent || 'AmarktAIMarketing/1.0'),
     }));
     const post = raw.data?.children?.[0]?.data || {};
     return {

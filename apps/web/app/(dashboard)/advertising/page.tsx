@@ -168,7 +168,7 @@ export default function AdvertisingPage() {
   const [canvasReady, setCanvasReady] = useState(false);
 
   useEffect(() => {
-    if (organizationName && brandName === 'EquiProfile') setBrandName(organizationName);
+    if (organizationName && !brandName.trim()) setBrandName(organizationName);
   }, [organizationName, brandName]);
 
   const selectedModel = useMemo(() => chooseModel(imageModels, tier), [imageModels, tier]);

@@ -1,3 +1,5 @@
+import { MARKETING_BRAND_NAME } from '@/lib/branding';
+
 export default function TermsPage() {
   return (
     <>
@@ -21,7 +23,7 @@ export default function TermsPage() {
             <div>
               <p>
                 These Terms of Service (&quot;Terms&quot;) govern your access to
-                and use of the EquiProfile Marketing platform and services. By
+                and use of the {MARKETING_BRAND_NAME} platform and services. By
                 accessing or using our services, you agree to be bound by these
                 Terms.
               </p>
@@ -50,7 +52,7 @@ export default function TermsPage() {
                 2. Description of Service
               </h2>
               <p className="mt-4">
-                EquiProfile Marketing provides an AI-powered marketing operating
+                {MARKETING_BRAND_NAME} provides an AI-powered marketing operating
                 system that includes autonomous AI agents for content creation,
                 SEO optimization, social media management, email marketing,
                 analytics, and related marketing functions. Our services include:
@@ -147,7 +149,7 @@ export default function TermsPage() {
                     Our Intellectual Property
                   </h3>
                   <p className="mt-2">
-                    The EquiProfile Marketing platform, including its design,
+                    The {MARKETING_BRAND_NAME} platform, including its design,
                     features, algorithms, and documentation, is owned by us and
                     protected by intellectual property laws. You may not copy,
                     modify, or reverse-engineer any part of our platform.
