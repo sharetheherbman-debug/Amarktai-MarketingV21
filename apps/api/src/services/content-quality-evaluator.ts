@@ -61,6 +61,7 @@ export function evaluateContentQuality(input: QualityEvaluationInput): QualityDi
   });
 
   const allowedClaims = asStringArray(brief.allowed_claims);
+  const approvedPrices = asStringArray(brief.approved_prices);
   const riskyClaims = [
     /\bguarantee(?:d|s)?\b/gi,
     /\b(?:number|no\.?)[ -]?1\b/gi,
@@ -72,9 +73,42 @@ export function evaluateContentQuality(input: QualityEvaluationInput): QualityDi
   const complianceIssues: QualityDimension['issues'] = unsupported.map((claim) => ({
     type: 'unsupported_claim', message: `Potentially unsupported claim requires owner evidence: ${claim}`, severity: 'error',
   }));
+
+  const priceClaims = text.match(/(?:R|ZAR|£|GBP|\$|USD|€|EUR)\s?\d[\d,.]*(?:\.\d{1,2})?|\d[\d,.]*(?:\.\d{1,2})?\s?(?:ZAR|GBP|USD|EUR)\b/gi) || [];
+  for (const price of priceClaims) {
+    if (!approvedPrices.some((approved) => includesNormalised(approved, price)) && !allowedClaims.some((allowed) => includesNormalised(allowed, price))) {
+      complianceIssues.push({ type: 'unsupported_price', message: `Price or monetary claim is not present in the approved campaign evidence: ${price}`, severity: 'error' });
+    }
+  }
+
+  const lifecycle = String(brief.lifecycle_status || metadata.lifecycle_status || '').trim().toLowerCase();
+  const unavailableLifecycle = ['coming_soon', 'paused', 'retired', 'internal'].includes(lifecycle);
+  if (unavailableLifecycle) {
+    const purchasePatterns = [
+      /\bbuy now\b/i,
+      /\bshop now\b/i,
+      /\border now\b/i,
+      /\bcheckout\b/i,
+      /\badd to cart\b/i,
+      /\bavailable now\b/i,
+      /\bpurchase (?:now|today)\b/i,
+    ];
+    for (const pattern of purchasePatterns) {
+      const match = text.match(pattern)?.[0];
+      if (match) {
+        complianceIssues.push({
+          type: 'product_lifecycle_conflict',
+          message: `This product/service is ${lifecycle}; active-purchase wording is not allowed: ${match}`,
+          severity: 'error',
+        });
+      }
+    }
+  }
+
   dimensions.push({
     type: 'compliance', score: Math.max(0, 100 - complianceIssues.length * 30), passed: complianceIssues.length === 0,
-    issues: complianceIssues, suggestions: complianceIssues.length ? ['Remove the claim or attach approved evidence before publication.'] : [],
+    issues: complianceIssues,
+    suggestions: complianceIssues.length ? ['Remove unsupported factual/commercial claims or attach approved evidence before publication. Respect the current product lifecycle.'] : [],
   });
 
   const platform = String(input.platform || '').toLowerCase();
