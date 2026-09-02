@@ -1,17 +1,6 @@
 import { logger } from '../utils/logger';
 import * as knowledgeService from './knowledge.service';
-import * as vectorService from './vector.service';
-import { AppError } from '../middleware/errorHandler';
-import { safeFetch, validatePublicHttpUrl } from '../utils/safe-fetch';
-
-interface CrawlResult {
-  url: string;
-  title: string;
-  content: string;
-  links: string[];
-  statusCode: number;
-  contentType: string;
-}
+import { ingestSource, normalizeKnowledgeUrl } from './knowledge-ingestion.service';
 
 interface CrawlOptions {
   maxPages?: number;
@@ -21,345 +10,104 @@ interface CrawlOptions {
   followLinks?: boolean;
 }
 
-const DEFAULT_OPTIONS: Required<CrawlOptions> = {
-  maxPages: 50,
-  maxDepth: 3,
-  includePatterns: [],
-  excludePatterns: [],
-  followLinks: true,
-};
-
-const REQUEST_TIMEOUT_MS = 15000;
-const MAX_PAGE_BYTES = 2 * 1024 * 1024;
 const CHUNK_MAX_TOKENS = 500;
-const CRAWLER_USER_AGENT = 'AmarktAI-Marketing-KnowledgeBot/1.0';
 
-function normalizeUrl(value: string): string {
-  const url = new URL(value);
-  url.hash = '';
-  for (const key of [...url.searchParams.keys()]) {
-    if (/^(utm_|fbclid$|gclid$|msclkid$)/i.test(key)) url.searchParams.delete(key);
-  }
-  return url.toString();
-}
-
-function boundedOptions(options?: CrawlOptions): Required<CrawlOptions> {
-  return {
-    maxPages: Math.max(1, Math.min(Number(options?.maxPages ?? DEFAULT_OPTIONS.maxPages), 100)),
-    maxDepth: Math.max(0, Math.min(Number(options?.maxDepth ?? DEFAULT_OPTIONS.maxDepth), 6)),
-    includePatterns: Array.isArray(options?.includePatterns) ? options!.includePatterns.slice(0, 50) : [],
-    excludePatterns: Array.isArray(options?.excludePatterns) ? options!.excludePatterns.slice(0, 50) : [],
-    followLinks: options?.followLinks ?? DEFAULT_OPTIONS.followLinks,
-  };
-}
-
-// ─── Public API ──────────────────────────────────────────────────────────────
-
+/**
+ * Compatibility entry point retained for older callers.
+ *
+ * There is intentionally no independent website traversal here. Every website
+ * sync is delegated to knowledge-ingestion.service.ts so robots, sitemap,
+ * canonical, SSRF, deduplication, versioning and partial-failure rules have one
+ * source of truth.
+ */
 export async function crawlWebsite(
   sourceId: string,
   orgId: string,
   url: string,
   options?: CrawlOptions
 ): Promise<void> {
-  const opts = boundedOptions(options);
-  const validatedRoot = await validatePublicHttpUrl(url);
-  const rootUrl = normalizeUrl(validatedRoot.toString());
-  const visited = new Set<string>();
-  const queued = new Set<string>([rootUrl]);
-  const queue: { url: string; depth: number }[] = [{ url: rootUrl, depth: 0 }];
-  let totalChunks = 0;
-
-  try {
-    await knowledgeService.updateSourceStatus(sourceId, 'crawling');
-    await knowledgeService.deleteItemsBySource(sourceId);
-
-    const baseDomain = validatedRoot.hostname.toLowerCase();
-
-    while (queue.length > 0 && visited.size < opts.maxPages) {
-      const { url: currentUrl, depth } = queue.shift()!;
-      queued.delete(currentUrl);
-
-      if (visited.has(currentUrl)) continue;
-      if (depth > opts.maxDepth) continue;
-
-      if (opts.excludePatterns.length > 0 && matchesPatterns(currentUrl, opts.excludePatterns)) continue;
-      if (opts.includePatterns.length > 0 && !matchesPatterns(currentUrl, opts.includePatterns)) continue;
-
-      visited.add(currentUrl);
-
-      try {
-        const result = await fetchPage(currentUrl);
-
-        if (result.statusCode >= 400) {
-          logger.warn(`Crawl skipped ${currentUrl}: HTTP ${result.statusCode}`);
-          continue;
-        }
-
-        const isHtml = /(?:text\/html|application\/xhtml\+xml)/i.test(result.contentType) || /<html\b/i.test(result.content);
-        const isPlainText = /^text\/plain/i.test(result.contentType);
-        if (!isHtml && !isPlainText) {
-          logger.warn(`Crawl skipped ${currentUrl}: unsupported content type ${result.contentType || 'unknown'}`);
-          continue;
-        }
-
-        const { title, content, links } = isHtml
-          ? await extractText(result.content, result.url)
-          : { title: result.url, content: result.content.trim(), links: [] as string[] };
-
-        if (!content || content.trim().length < 40) continue;
-
-        const chunks = chunkText(content, CHUNK_MAX_TOKENS);
-
-        for (let i = 0; i < chunks.length; i++) {
-          const chunk = chunks[i];
-          const tokens = countTokens(chunk);
-
-          await knowledgeService.createItem(orgId, sourceId, {
-            title: chunks.length > 1 ? `${title} [${i + 1}/${chunks.length}]` : title,
-            content: chunk,
-            content_type: 'webpage',
-            url: result.url,
-            metadata: {
-              depth,
-              chunkIndex: i,
-              totalChunks: chunks.length,
-              contentType: result.contentType,
-              fetchedAt: new Date().toISOString(),
-            },
-            tokens,
-            chunk_index: i,
-          });
-
-          totalChunks++;
-        }
-
-        if (opts.followLinks && depth < opts.maxDepth) {
-          for (const rawLink of links) {
-            try {
-              const link = normalizeUrl(rawLink);
-              const parsed = new URL(link);
-              if (parsed.hostname.toLowerCase() !== baseDomain) continue;
-              if (visited.has(link) || queued.has(link)) continue;
-              queued.add(link);
-              queue.push({ url: link, depth: depth + 1 });
-            } catch {
-              // Invalid URL, skip.
-            }
-          }
-        }
-      } catch (error) {
-        logger.warn(`Failed to crawl ${currentUrl}: ${error}`);
-      }
-    }
-
-    await knowledgeService.updateSourceStatus(sourceId, 'completed');
-    logger.info(`Crawl completed for source ${sourceId}: ${totalChunks} chunks from ${visited.size} pages`);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : 'Unknown crawl error';
-    await knowledgeService.updateSourceStatus(sourceId, 'failed', message);
-    logger.error(`Crawl failed for source ${sourceId}: ${message}`);
-    throw new AppError(500, `Crawl failed: ${message}`, 'CRAWL_ERROR');
-  }
+  const source = await knowledgeService.getById(sourceId, orgId);
+  const maxPages = Math.max(1, Math.min(Number(options?.maxPages ?? 50), 100));
+  const requestedDepth = options?.followLinks === false ? 0 : Number(options?.maxDepth ?? 3);
+  const maxDepth = Math.max(0, Math.min(requestedDepth, 8));
+  const normalizedUrl = normalizeKnowledgeUrl(url);
+  await knowledgeService.update(sourceId, orgId, {
+    url: normalizedUrl,
+    config: {
+      ...(source.config || {}),
+      max_pages: maxPages,
+      max_depth: maxDepth,
+      legacy_include_patterns: Array.isArray(options?.includePatterns) ? options!.includePatterns.slice(0, 50) : [],
+      legacy_exclude_patterns: Array.isArray(options?.excludePatterns) ? options!.excludePatterns.slice(0, 50) : [],
+    },
+  });
+  const result = await ingestSource(sourceId, orgId, 'manual');
+  logger.info(`Legacy crawler entry point delegated to canonical ingestion for ${sourceId}: ${result.documents} document(s), ${result.changes} change(s)`);
 }
 
 export async function parsePdf(buffer: Buffer): Promise<{ title: string; content: string }[]> {
   const text = extractPdfText(buffer);
-  const title = 'Imported PDF';
   const chunks = chunkText(text, CHUNK_MAX_TOKENS);
-  return chunks.map((chunk) => ({ title, content: chunk }));
+  return chunks.map((chunk) => ({ title: 'Imported PDF', content: chunk }));
 }
 
-export async function parseDocument(
-  content: string,
-  filename: string
-): Promise<{ title: string; content: string }[]> {
+export async function parseDocument(content: string, filename: string): Promise<{ title: string; content: string }[]> {
   const title = filename.replace(/\.[^/.]+$/, '');
-  const chunks = chunkText(content, CHUNK_MAX_TOKENS);
-  return chunks.map((chunk) => ({ title, content: chunk }));
+  return chunkText(content, CHUNK_MAX_TOKENS).map((chunk) => ({ title, content: chunk }));
 }
 
-// ─── Internal: HTTP fetching ─────────────────────────────────────────────────
-
-async function fetchPage(url: string): Promise<CrawlResult> {
-  const response = await safeFetch(url, {
-    headers: {
-      'User-Agent': CRAWLER_USER_AGENT,
-      Accept: 'text/html,application/xhtml+xml,text/plain;q=0.9',
-    },
-    timeoutMs: REQUEST_TIMEOUT_MS,
-    maxRedirects: 5,
-    maxResponseBytes: MAX_PAGE_BYTES,
-  });
-
-  const contentType = response.headers.get('content-type') || '';
-  const content = await response.text();
-  return {
-    url: normalizeUrl(response.url || url),
-    title: '',
-    content,
-    links: [],
-    statusCode: response.status,
-    contentType,
-  };
-}
-
-// ─── Internal: HTML parsing (regex-based, no dependencies) ───────────────────
-
-async function extractText(
-  html: string,
-  url: string
-): Promise<{ title: string; content: string; links: string[] }> {
-  const titleMatch = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
-  const title = titleMatch ? decodeEntities(titleMatch[1].trim()) : url;
-
-  const links: string[] = [];
-  const linkRegex = /<a\s+(?:[^>]*?\s+)?href=["']([^"']*)["'][^>]*>/gi;
-  let linkMatch: RegExpExecArray | null;
-  while ((linkMatch = linkRegex.exec(html)) !== null) {
-    try {
-      const href = linkMatch[1];
-      if (href.startsWith('#') || href.startsWith('javascript:') || href.startsWith('mailto:') || href.startsWith('tel:')) continue;
-      const absoluteUrl = new URL(href, url);
-      if (!['http:', 'https:'].includes(absoluteUrl.protocol)) continue;
-      links.push(absoluteUrl.toString());
-    } catch {
-      // Invalid URL, skip.
-    }
-  }
-
-  let content = html;
-  content = content.replace(/<(script|style|noscript|svg)[\s\S]*?<\/\1>/gi, '');
-  content = content.replace(/<nav[\s\S]*?<\/nav>/gi, '');
-  content = content.replace(/<footer[\s\S]*?<\/footer>/gi, '');
-  content = content.replace(/<header[\s\S]*?<\/header>/gi, '');
-  content = content.replace(/<br\s*\/?>/gi, '\n');
-  content = content.replace(/<\/(p|article|section)>/gi, '\n\n');
-  content = content.replace(/<\/(div|li)>/gi, '\n');
-  content = content.replace(/<\/h[1-6]>/gi, '\n\n');
-  content = content.replace(/<hr\s*\/?>/gi, '\n\n');
-  content = content.replace(/<[^>]+>/g, ' ');
-  content = decodeEntities(content);
-  content = content.replace(/[ \t]+/g, ' ');
-  content = content.replace(/\n{3,}/g, '\n\n');
-  content = content.replace(/^\s+|\s+$/gm, '');
-  content = content.trim();
-
-  return { title, content, links: [...new Set(links)] };
-}
-
-// ─── Internal: Text chunking ─────────────────────────────────────────────────
-
-function chunkText(text: string, maxTokens: number = CHUNK_MAX_TOKENS): string[] {
+function chunkText(text: string, maxTokens: number): string[] {
   if (!text || text.trim().length === 0) return [];
-
-  const paragraphs = text.split(/\n{2,}/).filter((p) => p.trim().length > 0);
-  const chunks: string[] = [];
-  let currentChunk = '';
-  let currentTokens = 0;
-
-  for (const paragraph of paragraphs) {
-    const paragraphTokens = countTokens(paragraph);
-
-    if (paragraphTokens > maxTokens) {
-      if (currentChunk.trim().length > 0) {
-        chunks.push(currentChunk.trim());
-        currentChunk = '';
-        currentTokens = 0;
-      }
-      chunks.push(...splitIntoChunks(paragraph, maxTokens));
-      continue;
-    }
-
-    if (currentTokens + paragraphTokens > maxTokens && currentChunk.trim().length > 0) {
-      chunks.push(currentChunk.trim());
-      currentChunk = '';
-      currentTokens = 0;
-    }
-
-    currentChunk += (currentChunk ? '\n\n' : '') + paragraph;
-    currentTokens += paragraphTokens;
-  }
-
-  if (currentChunk.trim().length > 0) chunks.push(currentChunk.trim());
-  return chunks;
-}
-
-function splitIntoChunks(text: string, maxTokens: number): string[] {
-  const words = text.split(/\s+/);
+  const paragraphs = text.split(/\n{2,}/).filter((paragraph) => paragraph.trim().length > 0);
   const chunks: string[] = [];
   let current = '';
-
-  for (const word of words) {
-    const test = current ? `${current} ${word}` : word;
-    if (countTokens(test) > maxTokens && current) {
-      chunks.push(current);
-      current = word;
-    } else {
-      current = test;
+  for (const paragraph of paragraphs) {
+    const candidate = current ? `${current}\n\n${paragraph}` : paragraph;
+    if (countTokens(candidate) <= maxTokens) {
+      current = candidate;
+      continue;
     }
+    if (current) chunks.push(current.trim());
+    current = '';
+    if (countTokens(paragraph) <= maxTokens) {
+      current = paragraph;
+      continue;
+    }
+    let part = '';
+    for (const word of paragraph.split(/\s+/)) {
+      const next = part ? `${part} ${word}` : word;
+      if (countTokens(next) > maxTokens && part) {
+        chunks.push(part.trim());
+        part = word;
+      } else {
+        part = next;
+      }
+    }
+    current = part;
   }
-
-  if (current.trim().length > 0) chunks.push(current);
+  if (current.trim()) chunks.push(current.trim());
   return chunks;
 }
 
-// ─── Internal: Token counting (approximate) ──────────────────────────────────
-
 function countTokens(text: string): number {
-  if (!text) return 0;
-  return Math.ceil(text.length / 4);
-}
-
-// ─── Internal: Utilities ─────────────────────────────────────────────────────
-
-function matchesPatterns(url: string, patterns: string[]): boolean {
-  return patterns.some((pattern) => {
-    try {
-      const regex = new RegExp(pattern, 'i');
-      return regex.test(url);
-    } catch {
-      return url.includes(pattern);
-    }
-  });
-}
-
-function decodeEntities(text: string): string {
-  return text
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&#x27;/g, "'")
-    .replace(/&nbsp;/g, ' ')
-    .replace(/&#(\d+);/g, (_, code) => String.fromCharCode(parseInt(code, 10)))
-    .replace(/&#x([0-9a-fA-F]+);/g, (_, code) => String.fromCharCode(parseInt(code, 16)));
+  return text ? Math.ceil(text.length / 4) : 0;
 }
 
 function extractPdfText(buffer: Buffer): string {
   const text = buffer.toString('latin1');
   let content = '';
-
   const streamRegex = /stream\r?\n([\s\S]*?)\r?\nendstream/g;
   let match: RegExpExecArray | null;
   while ((match = streamRegex.exec(text)) !== null) {
-    const stream = match[1];
-    const textMatches = stream.match(/\(([^)]*)\)/g);
-    if (textMatches) {
-      for (const tm of textMatches) content += tm.slice(1, -1) + ' ';
-    }
+    const strings = match[1].match(/\(([^)]*)\)/g) || [];
+    for (const value of strings) content += `${value.slice(1, -1)} `;
   }
-
   const tjRegex = /\[(.*?)\]\s*TJ/g;
   let tjMatch: RegExpExecArray | null;
   while ((tjMatch = tjRegex.exec(text)) !== null) {
-    const inner = tjMatch[1];
-    const strMatches = inner.match(/\(([^)]*)\)/g);
-    if (strMatches) {
-      for (const sm of strMatches) content += sm.slice(1, -1) + ' ';
-    }
+    const strings = tjMatch[1].match(/\(([^)]*)\)/g) || [];
+    for (const value of strings) content += `${value.slice(1, -1)} `;
   }
-
-  content = content.replace(/\\n/g, '\n').replace(/\\r/g, '').replace(/\\t/g, ' ');
-  return content.trim() || 'Unable to extract PDF text content.';
+  content = content.replace(/\\n/g, '\n').replace(/\\r/g, '').replace(/\\t/g, ' ').trim();
+  return content || 'Unable to extract PDF text content.';
 }
