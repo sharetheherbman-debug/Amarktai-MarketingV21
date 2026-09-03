@@ -2,7 +2,7 @@ name: CI/CD Pipeline
 
 on:
   push:
-    branches: [master, development, phase-1/small-medium-completion, rescue/client-handover-marketing-2026-08-24, rescue/client-dashboard-2026-08-25, release-candidate/marketing-client-handover-2026-08-24]
+    branches: [master, development, phase-1/small-medium-completion, rescue/client-handover-marketing-2026-08-24, rescue/client-dashboard-2026-08-25, release-candidate/marketing-client-handover-2026-08-24, chatgpt/final-client-handover-2026-09-02]
   pull_request:
     branches: [master, development, phase-1/small-medium-completion, rescue/client-handover-marketing-2026-08-24, rescue/client-dashboard-2026-08-25, release-candidate/marketing-client-handover-2026-08-24]
 
