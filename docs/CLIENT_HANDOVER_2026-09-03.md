@@ -53,4 +53,3 @@ CI must therefore be green on the final pushed SHA before release approval, espe
 Do not deploy from this task. For a reviewed release: back up PostgreSQL, validate both fresh and upgrade migration paths, deploy API/workers before web, verify Redis/storage, then test connected-application SSO, Company Brain persistence, Management/Academy/combined/coming-soon scope isolation, exact material approval and emergency stop. Roll back application artifacts first; retain compatible additive schema unless a database restore is explicitly approved.
 
 Do not casually split the crawler, hard-code a host product, bypass site approval, change lifecycle into copy heuristics, allow client system prompts, reintroduce AI fallbacks, remove idempotency/credit reservations, or auto-publish without the exact governed approval state.
-
