@@ -274,6 +274,7 @@ async function selectOrCreateCampaignPlan(
     includeKnowledge: true,
     includeHistory: false,
     knowledgeQuery: `${String(cycle.objective || '')} ${opportunitySummary}`,
+    productScopes: opportunityScopes,
   });
   const ownerId = await getWorkspaceOwner(organizationId);
   const date = new Date().toISOString().slice(0, 10);

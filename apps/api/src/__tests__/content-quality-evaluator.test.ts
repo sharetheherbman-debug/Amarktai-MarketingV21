@@ -39,4 +39,31 @@ describe('content quality evaluator', () => {
     expect(result.find((item) => item.type === 'campaign_alignment')?.passed).toBe(false);
     expect(result.find((item) => item.type === 'platform')?.passed).toBe(false);
   });
+
+  it.each(['coming_soon', 'paused', 'retired', 'internal'])(
+    'blocks active purchase language for a %s product',
+    (lifecycle) => {
+      const result = evaluateContentQuality({
+        text: 'The new collection is available now. Shop now and add to cart.',
+        type: 'social',
+        platform: 'instagram',
+        metadata: { quality_brief: { lifecycle_status: lifecycle } },
+      });
+      const compliance = result.find((item) => item.type === 'compliance');
+      expect(compliance?.passed).toBe(false);
+      expect(compliance?.issues).toEqual(expect.arrayContaining([
+        expect.objectContaining({ type: 'product_lifecycle_conflict', severity: 'error' }),
+      ]));
+    },
+  );
+
+  it('allows evidenced purchase language after the same generic product becomes live', () => {
+    const result = evaluateContentQuality({
+      text: 'The collection is available now. Shop now.',
+      type: 'social',
+      platform: 'instagram',
+      metadata: { quality_brief: { lifecycle_status: 'live' } },
+    });
+    expect(result.find((item) => item.type === 'compliance')?.passed).toBe(true);
+  });
 });

@@ -222,6 +222,7 @@ export async function generatePlan(orgId: string, input: CampaignPlanInput, user
     agentId: '',
     includeBrandDna: true,
     includeKnowledge: true,
+    productScopes: productLines,
   });
 
   const factualInputs = {

@@ -186,9 +186,7 @@ export default function LongFormStudio({ studioClient }) {
     });
     setProject(result.project);
     await refreshScenes();
-    setMessage(result.generation?.method === "genx"
-      ? `Storyboard generated with ${result.generation.model_id}.`
-      : "Storyboard created with the deterministic fallback because no confirmed text model completed successfully.");
+    setMessage(`Storyboard generated with ${result.generation.model_id}.`);
     setActiveTab("Storyboard");
   });
 

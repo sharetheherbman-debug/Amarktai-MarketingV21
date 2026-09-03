@@ -22,6 +22,7 @@ import { contextEngine } from './context-engine.service';
 import * as contentQuality from './content-quality.service';
 import { generateGovernedText } from './governed-text-generation.service';
 import { env } from '../config/env';
+import { normalizeProductScopes } from '../utils/product-scope';
 
 // ─── Content CRUD ────────────────────────────────────────────────────────────
 
@@ -424,12 +425,14 @@ export async function generateContent(
     await updateJobStatus(job.id, 'planning');
 
     // 3. Build context using Context Engine
+    const productScopes = normalizeProductScopes(request.product_lines ?? request.product_line);
     const context = await contextEngine.assemble({
       orgId: orgId,
       agentId: '', // No specific agent for content generation
       includeBrandDna: true,
       includeKnowledge: true,
       includeHistory: false,
+      productScopes,
     });
 
     // 4. Select and render prompt

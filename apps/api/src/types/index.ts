@@ -1079,7 +1079,9 @@ export interface GenerateContentRequest {
   campaign_id?: string;
   campaign_plan_id?: string;
   brief_id?: string;
-  product_line?: 'management' | 'academy' | 'shop';
+  /** Tenant-declared product/service scope. Values are normalized by the API. */
+  product_line?: string;
+  product_lines?: string[];
   max_words?: number;
   tone?: string;
   language?: string;

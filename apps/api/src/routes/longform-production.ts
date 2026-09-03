@@ -91,27 +91,6 @@ function parseStoryboard(text: string): Array<Record<string, unknown>> {
   return parsed.filter((item): item is Record<string, unknown> => Boolean(item && typeof item === 'object'));
 }
 
-function fallbackStoryboard(script: string, targetDuration: number, sceneDuration: number) {
-  const sentences = script
-    .split(/(?<=[.!?])\s+|\n+/)
-    .map((item) => item.trim())
-    .filter(Boolean);
-  const desiredCount = Math.max(1, Math.ceil(targetDuration / sceneDuration));
-  const count = Math.max(desiredCount, Math.min(sentences.length || 1, 12));
-  return Array.from({ length: count }, (_, index) => {
-    const narration = sentences[index % Math.max(sentences.length, 1)] || script.trim();
-    return {
-      title: `Scene ${index + 1}`,
-      narration,
-      dialogue: '',
-      visual_prompt: narration || `Cinematic branded scene ${index + 1}`,
-      camera_instructions: 'Smooth cinematic movement, clear subject, consistent lighting',
-      transition: index === 0 ? 'cut' : 'crossfade',
-      duration_seconds: sceneDuration,
-    };
-  });
-}
-
 async function selectTextModel(requestedModelId?: string) {
   if (requestedModelId) {
     const requested = await query(
@@ -182,10 +161,19 @@ router.post('/projects/:id/storyboard/generate', async (
     const requestedModelId = req.body.model_id ? String(req.body.model_id) : undefined;
     const modelId = await selectTextModel(requestedModelId);
 
+    if (!modelId) {
+      return res.status(503).json({
+        success: false,
+        error: {
+          code: 'AI_PROVIDER_UNAVAILABLE',
+          message: 'No runtime-confirmed GenX text model is available. The storyboard was not changed.',
+        },
+      });
+    }
+
     let storyboard: Array<Record<string, unknown>>;
-    let generation: Record<string, unknown> = { method: 'deterministic_fallback' };
-    if (modelId) {
-      try {
+    let generation: Record<string, unknown>;
+    try {
         const prompt = [
           'Create a production-ready storyboard as strict JSON only.',
           `Target duration: ${targetDuration} seconds. Preferred scene duration: ${sceneDuration} seconds.`,
@@ -214,19 +202,31 @@ router.post('/projects/:id/storyboard/generate', async (
         }
         storyboard = parseStoryboard(extractText(resultData));
         generation = { method: 'genx', model_id: modelId, provider_job_id: providerJob.id };
-      } catch (error) {
-        storyboard = fallbackStoryboard(script, targetDuration, sceneDuration);
-        generation = {
-          method: 'deterministic_fallback',
-          model_id: modelId,
-          error: error instanceof Error ? error.message : String(error),
-        };
-      }
-    } else {
-      storyboard = fallbackStoryboard(script, targetDuration, sceneDuration);
+    } catch (error) {
+      console.error('[longform.storyboard] GenX generation failed', {
+        organizationId: auth.organizationId,
+        projectId: req.params.id,
+        modelId,
+        errorClass: error instanceof Error ? error.name : 'UnknownError',
+      });
+      return res.status(503).json({
+        success: false,
+        error: {
+          code: 'AI_PROVIDER_UNAVAILABLE',
+          message: 'GenX could not complete the storyboard. The project was not changed; please try again.',
+        },
+      });
     }
 
-    if (storyboard.length === 0) storyboard = fallbackStoryboard(script, targetDuration, sceneDuration);
+    if (storyboard.length === 0) {
+      return res.status(502).json({
+        success: false,
+        error: {
+          code: 'AI_OUTPUT_INVALID',
+          message: 'GenX returned an empty storyboard. The project was not changed; please try again.',
+        },
+      });
+    }
     if (req.body.replace_scenes !== false) {
       await query('BEGIN');
       try {

@@ -8,6 +8,7 @@ import * as usageService from './usage.service';
 import { v4 as uuidv4 } from 'uuid';
 import { ChatMessage, ToolCallResult } from '../types';
 import { env } from '../config/env';
+import { normalizeProductScopes } from '../utils/product-scope';
 
 export interface ExecuteOptions {
   agentId: string;
@@ -189,6 +190,7 @@ export async function execute(options: ExecuteOptions): Promise<AgentResponse> {
   if (agent.status !== 'active') throw new AppError(400, 'Agent is not active', 'AGENT_INACTIVE');
 
   const userMessage = task || (input ? JSON.stringify(input) : 'Please proceed with the task.');
+  const productScopes = normalizeProductScopes(input?.product_lines ?? input?.product_line);
   const context = await contextEngine.assemble({
     orgId,
     agentId,
@@ -197,6 +199,7 @@ export async function execute(options: ExecuteOptions): Promise<AgentResponse> {
     includeHistory: !!conversationId,
     historyLimit: 20,
     knowledgeQuery: userMessage,
+    productScopes,
   });
   const conversation = await getOrCreateConversation(conversationId, agentId, orgId, userMessage);
   const history = await getConversationMessages(conversation.id);

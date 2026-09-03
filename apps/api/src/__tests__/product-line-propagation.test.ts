@@ -58,6 +58,7 @@ describe('generic multi-product campaign propagation', () => {
   it('carries canonical multi-scope context through campaign planning and versioning', () => {
     expect(planner).toContain('product_lines?: string[]');
     expect(planner).toContain('const productLines = normalizeProductScopes');
+    expect(planner).toContain('productScopes: productLines');
     expect(planner).toContain('product_scopes: productLines.length > 0 ? productLines');
     expect(planner).toContain('planning_idempotency_key,product_line,product_lines');
     expect(planner).toContain('product_lines');
