@@ -1,9 +1,13 @@
 import path from 'path';
-import { stat } from 'fs/promises';
+import { readFile, stat } from 'fs/promises';
 import { AppError } from '../middleware/errorHandler';
-import { genxMultimodalProvider, type GenXVisualAssessment } from '../providers/genx-multimodal.provider';
+import { env } from '../config/env';
+import type { GenXVisualAssessment } from '../providers/genx-multimodal.provider';
 
 type Json = Record<string, any>;
+
+const MAX_VISUAL_QA_IMAGE_BYTES = 10 * 1024 * 1024;
+const DEFAULT_VISUAL_QA_MODEL = 'gemini-3-flash';
 
 export const MARKETING_VISUAL_QA_THRESHOLDS = {
   subject_relevance: 80,
@@ -75,6 +79,117 @@ function sourceInstructions(brief: Json): string {
     `Campaign brief: ${JSON.stringify({ objective: brief.objective, audience: brief.audience, offer: brief.offer, purpose: brief.purpose, product: brief.product, service: brief.service, platform: brief.platform, headline: brief.headline, cta: brief.cta })}`,
     'Return only the structured visual-QA contract requested by the caller.',
   ].join('\n');
+}
+
+function visualQaSchemaInstructions(): string {
+  return [
+    'Return JSON only, with exactly this object shape:',
+    JSON.stringify({
+      subject_relevance: 0,
+      campaign_relevance: 0,
+      commercial_usability: 0,
+      composition_quality: 0,
+      subject_integrity: 0,
+      negative_space_usability: 0,
+      unexpected_text: false,
+      unexpected_logo: false,
+      watermark: false,
+      obvious_ai_artifacts: false,
+      wrong_product: false,
+      wrong_subject: false,
+      brand_safety: true,
+      rejection_reasons: [],
+      repair_instructions: [],
+    }, null, 2),
+    'All six scores must be integers from 0 to 100.',
+    'All flags must be booleans.',
+    'rejection_reasons and repair_instructions must be arrays of strings.',
+  ].join('\n');
+}
+
+function extractChatContent(value: unknown): string {
+  if (typeof value === 'string') return value;
+  if (!Array.isArray(value)) return '';
+  return value.map((item) => {
+    if (typeof item === 'string') return item;
+    const record = object(item);
+    return String(record.text || record.content || '');
+  }).filter(Boolean).join('\n');
+}
+
+function parseJsonObjectFromText(value: string): Json {
+  let cleaned = value.trim()
+    .replace(/^```json\s*/i, '')
+    .replace(/^```\s*/i, '')
+    .replace(/\s*```$/i, '')
+    .trim();
+  try {
+    return object(JSON.parse(cleaned));
+  } catch {
+    const first = cleaned.indexOf('{');
+    const last = cleaned.lastIndexOf('}');
+    if (first >= 0 && last > first) {
+      return object(JSON.parse(cleaned.slice(first, last + 1)));
+    }
+    throw new Error('GenX visual QA response did not contain parseable JSON');
+  }
+}
+
+function genxBaseUrl(): string {
+  return env.GENX_BASE_URL.replace(/\/+$/, '').replace(/\/(?:api\/v1|v1)$/, '');
+}
+
+async function assessVisualWithGenxChat(input: MarketingVisualQaInput, absolutePath: string, mimeType: string): Promise<GenXVisualAssessment> {
+  const bytes = await readFile(absolutePath);
+  if (bytes.byteLength === 0 || bytes.byteLength > MAX_VISUAL_QA_IMAGE_BYTES) {
+    throw new AppError(409, 'Marketing visual QA ingredient size is invalid', 'MATERIAL_VISUAL_QA_MEDIA_INVALID');
+  }
+  const model = String(process.env.MARKETING_VISUAL_QA_MODEL || DEFAULT_VISUAL_QA_MODEL).trim() || DEFAULT_VISUAL_QA_MODEL;
+  const dataUrl = `data:${mimeType};base64,${bytes.toString('base64')}`;
+  const response = await fetch(`${genxBaseUrl()}/v1/chat/completions`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${env.GENX_API_KEY}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model,
+      stream: false,
+      temperature: 0,
+      max_tokens: 1200,
+      messages: [
+        {
+          role: 'system',
+          content: 'You are a strict visual quality auditor. Return structured JSON only.',
+        },
+        {
+          role: 'user',
+          content: [
+            {
+              type: 'text',
+              text: [sourceInstructions(input.brief), visualQaSchemaInstructions(), `Technical QA context: ${JSON.stringify(input.technicalQa || {})}`, `Acceptance thresholds: ${JSON.stringify(MARKETING_VISUAL_QA_THRESHOLDS)}`].join('\n\n'),
+            },
+            {
+              type: 'image_url',
+              image_url: { url: dataUrl },
+            },
+          ],
+        },
+      ],
+    }),
+    signal: AbortSignal.timeout(120000),
+  });
+  const responseText = await response.text();
+  if (!response.ok) {
+    throw new Error(`GenX multimodal visual QA error ${response.status}: ${responseText.slice(0, 500) || response.statusText}`);
+  }
+  const raw = object(JSON.parse(responseText));
+  const choices = Array.isArray(raw.choices) ? raw.choices : [];
+  const firstChoice = object(choices[0]);
+  const message = object(firstChoice.message);
+  const content = extractChatContent(message.content);
+  if (!content) throw new Error('GenX multimodal visual QA returned no message content');
+  return parseJsonObjectFromText(content) as unknown as GenXVisualAssessment;
 }
 
 export function validateMarketingVisualQa(value: unknown, reviewMode: MarketingVisualQaResult['review_mode'] = 'genx_multimodal'): MarketingVisualQaResult {
@@ -156,10 +271,11 @@ function imageMimeType(filePath: string): string {
 }
 
 /**
- * Uploads a trusted durable ingredient through the authenticated GenX file
- * boundary, then analyses by file ID. This prevents local file URLs, private
- * application routes, arbitrary remote URL fetches, and permanent public media
- * exposure. The temporary provider file is deleted on every terminal path.
+ * Sends only a trusted durable local Studio image to GenX's proven multimodal
+ * chat boundary as a bounded data URL. Marketing never exposes the ingredient
+ * publicly and never routes image media through the document-only /api/v1/files
+ * endpoint. The caller still validates every field and fails closed on any
+ * provider, transport, parsing, score, or contract error.
  */
 export async function assessMarketingIngredient(input: MarketingVisualQaInput): Promise<MarketingVisualQaResult> {
   if (process.env.MARKETING_VISUAL_QA_MODE === 'fixture') {
@@ -171,29 +287,12 @@ export async function assessMarketingIngredient(input: MarketingVisualQaInput): 
     throw new AppError(409, 'Marketing visual QA ingredient is unavailable as a durable local file', 'MATERIAL_VISUAL_QA_MEDIA_INVALID');
   }
   const mimeType = imageMimeType(absolutePath);
-  let temporaryFileId: string | null = null;
   try {
-    const uploaded = await genxMultimodalProvider.uploadFile(
-      absolutePath,
-      `marketing-qa-${path.basename(absolutePath).replace(/[^a-zA-Z0-9._-]/g, '_')}`,
-      mimeType
-    );
-    temporaryFileId = uploaded.id;
-    const response = await genxMultimodalProvider.assessVisual({
-      file_id: temporaryFileId,
-      brief: input.brief,
-      technical_qa: input.technicalQa,
-      instructions: sourceInstructions(input.brief),
-      thresholds: MARKETING_VISUAL_QA_THRESHOLDS,
-    });
+    const response = await assessVisualWithGenxChat(input, absolutePath, mimeType);
     return validateMarketingVisualQa(response, 'genx_multimodal');
   } catch (error) {
     if (error instanceof AppError) throw error;
     throw new AppError(503, 'Marketing visual QA is temporarily unavailable; the ingredient was not accepted or made ready for review', 'MATERIAL_VISUAL_QA_PROVIDER_UNAVAILABLE');
-  } finally {
-    if (temporaryFileId) {
-      await genxMultimodalProvider.deleteFile(temporaryFileId).catch(() => undefined);
-    }
   }
 }
 
