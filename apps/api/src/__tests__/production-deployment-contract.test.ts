@@ -70,16 +70,26 @@ describe('production deployment contract', () => {
     expect(webStage).not.toContain('render-worker');
   });
 
-  test('E2E web server can use an isolated port instead of colliding with a live host application', () => {
+  test('E2E web server mirrors the standalone Docker asset layout on an isolated port', () => {
     const playwright = read('playwright.config.ts');
+    const launcher = read('scripts/e2e-start-standalone-web.mjs');
+
     expect(playwright).toContain("const webUrl = process.env.E2E_WEB_URL || 'http://127.0.0.1:3000'");
     expect(playwright).toContain('const webPort =');
-    expect(playwright).toContain("command: 'node apps/web/.next/standalone/apps/web/server.js'");
+    expect(playwright).toContain("command: 'node scripts/e2e-start-standalone-web.mjs'");
     expect(playwright).toContain('PORT: webPort');
     expect(playwright).toContain('HOSTNAME: parsedWebUrl.hostname');
     expect(playwright).toContain('url: `${webUrl}/login`');
     expect(playwright).not.toContain("command: 'npm start --workspace=@amarktai/web -- -p 3000'");
-    expect(playwright).not.toContain('`npm start --workspace=@amarktai/web -- -p ${webPort}`');
+
+    expect(launcher).toContain("'.next', 'standalone', 'apps', 'web'");
+    expect(launcher).toContain("const sourceStatic = path.join(webRoot, '.next', 'static')");
+    expect(launcher).toContain("const targetStatic = path.join(standaloneWebRoot, '.next', 'static')");
+    expect(launcher).toContain("const sourcePublic = path.join(webRoot, 'public')");
+    expect(launcher).toContain("const targetPublic = path.join(standaloneWebRoot, 'public')");
+    expect(launcher).toContain('await cp(sourceStatic, targetStatic, { recursive: true })');
+    expect(launcher).toContain('await cp(sourcePublic, targetPublic, { recursive: true })');
+    expect(launcher).toContain('spawn(process.execPath, [standaloneServer]');
   });
 
   test('all application images use supported Node 22 LTS and the repo rejects Node 20', () => {
