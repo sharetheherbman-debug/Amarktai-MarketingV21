@@ -252,7 +252,7 @@ export async function queueCampaignProduction(planId: string, orgId: string, use
           const job = await getGenerationQueue().add('campaign-text', {
             kind: 'campaign-text', runId: run.id, organizationId: orgId, userId, request,
           }, {
-            jobId: `campaign-text:${run.id}:attempt:${attempt}`,
+            jobId: `campaign-text-${run.id}-attempt-${attempt}`,
             attempts: 60,
             backoff: { type: 'fixed', delay: 30_000 },
             removeOnComplete: { age: 86400 },
