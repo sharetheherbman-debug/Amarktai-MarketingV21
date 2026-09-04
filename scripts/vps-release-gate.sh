@@ -48,6 +48,15 @@ require_https_url() {
   [[ "${value}" == https://* ]] || fail "${key} must use HTTPS in production"
 }
 
+boolean_value() {
+  local value="${1:-}"
+  case "${value,,}" in
+    1|true|yes|on) printf 'true' ;;
+    0|false|no|off|'') printf 'false' ;;
+    *) return 1 ;;
+  esac
+}
+
 [[ "${SHARED_HOST_NGINX:-false}" =~ ^(1|true|yes|on)$ ]] || log "Standalone HTTPS edge selected; ensure this VPS is intended to own public ports 80/443"
 
 if [[ "${FIRST_RUN:-false}" == "true" ]]; then
@@ -62,6 +71,7 @@ require_value "DOMAIN" "${DOMAIN:-}"
 require_https_url "APP_URL" "${APP_URL:-}"
 require_https_url "API_URL" "${API_URL:-}"
 require_https_url "CORS_ORIGIN" "${CORS_ORIGIN:-}"
+require_https_url "NEXT_PUBLIC_MARKETING_PUBLIC_URL" "${NEXT_PUBLIC_MARKETING_PUBLIC_URL:-}"
 if [[ "${SHARED_HOST_NGINX:-false}" =~ ^(1|true|yes|on)$ ]]; then
   require_value "HOST_NGINX_CONFIG_PATH" "${HOST_NGINX_CONFIG_PATH:-}"
 else
@@ -106,6 +116,26 @@ done
 [[ "${HOST_APP_NAME}" != "Host Application" ]] || fail "HOST_APP_NAME still contains the generic template identity"
 [[ "${HOST_APP_URL}" == https://* ]] || fail "HOST_APP_URL must use HTTPS in production"
 
+# Browser-visible host identity and authentication mode are part of the deployment contract.
+# They are intentionally configurable so EquiProfile can be embedded/SSO-only while
+# standalone AmarktAI and future white-label deployments may retain local sign-in.
+require_value "NEXT_PUBLIC_MARKETING_HOST_APPLICATION_NAME" "${NEXT_PUBLIC_MARKETING_HOST_APPLICATION_NAME:-}"
+[[ "${NEXT_PUBLIC_MARKETING_HOST_APPLICATION_NAME}" == "${HOST_APP_NAME}" ]] || fail "NEXT_PUBLIC_MARKETING_HOST_APPLICATION_NAME must match HOST_APP_NAME"
+embedded_sso_only="$(boolean_value "${NEXT_PUBLIC_MARKETING_EMBEDDED_SSO_ONLY:-false}")" || fail "NEXT_PUBLIC_MARKETING_EMBEDDED_SSO_ONLY must be an explicit boolean value"
+
+if [[ "${HOST_APP_ID}" == "equiprofile" && "${embedded_sso_only}" != "true" ]]; then
+  fail "EquiProfile production must enable NEXT_PUBLIC_MARKETING_EMBEDDED_SSO_ONLY=true"
+fi
+
+if [[ "${embedded_sso_only}" == "true" ]]; then
+  require_https_url "NEXT_PUBLIC_MARKETING_HOST_RETURN_URL" "${NEXT_PUBLIC_MARKETING_HOST_RETURN_URL:-}"
+  normalized_host_url="${HOST_APP_URL%/}"
+  case "${NEXT_PUBLIC_MARKETING_HOST_RETURN_URL}" in
+    "${normalized_host_url}"|"${normalized_host_url}/"|"${normalized_host_url}/"*) ;;
+    *) fail "NEXT_PUBLIC_MARKETING_HOST_RETURN_URL must remain on HOST_APP_URL when embedded SSO is enabled" ;;
+  esac
+fi
+
 if [[ -n "${HOST_APP_CONNECTOR_KEY:-}" && -n "${EQUIPROFILE_CONNECTOR_KEY:-}" && "${HOST_APP_CONNECTOR_KEY}" != "${EQUIPROFILE_CONNECTOR_KEY}" ]]; then
   fail "HOST_APP_CONNECTOR_KEY conflicts with the legacy EQUIPROFILE_CONNECTOR_KEY compatibility alias"
 fi
@@ -126,4 +156,5 @@ fi
 log "Release gate passed"
 log "Reviewed Marketing SHA: ${reviewed_sha}"
 log "Host application: ${HOST_APP_ID} (${HOST_APP_URL})"
+log "Marketing authentication mode: $([[ "${embedded_sso_only}" == "true" ]] && printf 'embedded-sso-only' || printf 'standalone-capable')"
 log "Production runtime, connector and encrypted-backup prerequisites: configured"
