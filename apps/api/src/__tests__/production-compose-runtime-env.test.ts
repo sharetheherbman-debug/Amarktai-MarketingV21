@@ -6,6 +6,10 @@ const compose = fs.readFileSync(
   path.resolve(repositoryRoot, 'docker/docker-compose.yml'),
   'utf8'
 );
+const webDockerfile = fs.readFileSync(
+  path.resolve(repositoryRoot, 'apps/web/Dockerfile'),
+  'utf8'
+);
 
 describe('production compose runtime environment contract', () => {
   test('passes generic connector runtime settings and keeps EquiProfile aliases optional', () => {
@@ -28,6 +32,30 @@ describe('production compose runtime environment contract', () => {
     expect(compose).toContain(
       'APPLICATION_SSO_CODE_TTL_SECONDS: ${APPLICATION_SSO_CODE_TTL_SECONDS:-120}'
     );
+  });
+
+  test('propagates white-label browser identity and embedded SSO mode into both build and runtime', () => {
+    for (const expected of [
+      'NEXT_PUBLIC_MARKETING_PUBLIC_URL: ${NEXT_PUBLIC_MARKETING_PUBLIC_URL:-https://marketing.amarktai.co.za}',
+      'NEXT_PUBLIC_MARKETING_HOST_APPLICATION_NAME: ${NEXT_PUBLIC_MARKETING_HOST_APPLICATION_NAME:-Host application}',
+      'NEXT_PUBLIC_MARKETING_EMBEDDED_SSO_ONLY: ${NEXT_PUBLIC_MARKETING_EMBEDDED_SSO_ONLY:-false}',
+      'NEXT_PUBLIC_MARKETING_HOST_RETURN_URL: ${NEXT_PUBLIC_MARKETING_HOST_RETURN_URL:-https://amarktai.co.za}',
+      'NEXT_PUBLIC_AMARKTAI_NETWORK_URL: ${NEXT_PUBLIC_AMARKTAI_NETWORK_URL:-https://amarktai.co.za}',
+    ]) {
+      expect(compose).toContain(expected);
+      expect(compose.indexOf(expected)).not.toBe(compose.lastIndexOf(expected));
+    }
+
+    for (const expected of [
+      'ARG NEXT_PUBLIC_MARKETING_EMBEDDED_SSO_ONLY="false"',
+      'ARG NEXT_PUBLIC_MARKETING_HOST_RETURN_URL="https://amarktai.co.za"',
+      'ARG NEXT_PUBLIC_AMARKTAI_NETWORK_URL="https://amarktai.co.za"',
+      'ENV NEXT_PUBLIC_MARKETING_EMBEDDED_SSO_ONLY=${NEXT_PUBLIC_MARKETING_EMBEDDED_SSO_ONLY}',
+      'ENV NEXT_PUBLIC_MARKETING_HOST_RETURN_URL=${NEXT_PUBLIC_MARKETING_HOST_RETURN_URL}',
+      'ENV NEXT_PUBLIC_AMARKTAI_NETWORK_URL=${NEXT_PUBLIC_AMARKTAI_NETWORK_URL}',
+    ]) {
+      expect(webDockerfile).toContain(expected);
+    }
   });
 
   test('passes GBP Generation Credit and GenX pricing policy into runtime containers', () => {
