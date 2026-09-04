@@ -38,7 +38,11 @@ describe('reusable Application Connector release boundaries', () => {
     const template = read('.env.production.example');
     const releaseGate = read('scripts/vps-release-gate.sh');
 
+    expect(template).toContain('NEXT_PUBLIC_MARKETING_PUBLIC_URL=');
     expect(template).toContain('NEXT_PUBLIC_MARKETING_BRAND_NAME=');
+    expect(template).toContain('NEXT_PUBLIC_MARKETING_EMBEDDED_SSO_ONLY=false');
+    expect(template).toContain('NEXT_PUBLIC_MARKETING_HOST_RETURN_URL=https://app.example.com');
+    expect(template).toContain('NEXT_PUBLIC_AMARKTAI_NETWORK_URL=https://amarktai.co.za');
     expect(template).toContain('HOST_APP_CONNECTOR_KEY=');
     expect(template).toContain('HOST_APP_ID=host-app');
     expect(template).toContain('HOST_APP_URL=https://app.example.com');
@@ -54,6 +58,7 @@ describe('reusable Application Connector release boundaries', () => {
     expect(releaseGate).toContain('require_https_url "APP_URL"');
     expect(releaseGate).toContain('require_https_url "API_URL"');
     expect(releaseGate).toContain('require_https_url "CORS_ORIGIN"');
+    expect(releaseGate).toContain('require_https_url "NEXT_PUBLIC_MARKETING_PUBLIC_URL"');
     expect(releaseGate).toContain('require_secret_length "POSTGRES_PASSWORD" "${POSTGRES_PASSWORD:-}" 24');
     expect(releaseGate).toContain('require_secret_length "REDIS_PASSWORD" "${REDIS_PASSWORD:-}" 24');
     expect(releaseGate).toContain('require_secret_length "JWT_SECRET" "${JWT_SECRET:-}" 32');
@@ -73,6 +78,8 @@ describe('reusable Application Connector release boundaries', () => {
     expect(releaseGate).toContain('require_secret_length "HOST_APP_CONNECTOR_KEY" "${host_connector_key}" 32');
     expect(releaseGate).toContain('require_secret_length "BACKUP_ENCRYPTION_PASSPHRASE" "${BACKUP_ENCRYPTION_PASSPHRASE:-}" 24');
     expect(releaseGate).toContain('HOST_APP_ID still contains the generic template identity');
+    expect(releaseGate).toContain('EquiProfile production must enable NEXT_PUBLIC_MARKETING_EMBEDDED_SSO_ONLY=true');
+    expect(releaseGate).toContain('NEXT_PUBLIC_MARKETING_HOST_RETURN_URL must remain on HOST_APP_URL');
     expect(releaseGate).not.toContain('use the same EquiProfile connector secret');
   });
 
