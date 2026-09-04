@@ -2,7 +2,6 @@ import os from 'os';
 import path from 'path';
 import { mkdtemp, rm, writeFile } from 'fs/promises';
 import { assessMarketingIngredient } from '../services/marketing-visual-qa.service';
-import { genxMultimodalProvider } from '../providers/genx-multimodal.provider';
 
 const accepted = {
   subject_relevance: 90, campaign_relevance: 90, commercial_usability: 90,
@@ -18,57 +17,96 @@ const inputFor = (ingredientPath: string) => ({
   technicalQa: { format: 'png', width: 1080, height: 1920 },
 });
 
-describe('Marketing visual QA provider file transport', () => {
+function genxResponse(assessment: Record<string, unknown> = accepted) {
+  return {
+    ok: true,
+    status: 200,
+    statusText: 'OK',
+    text: async () => JSON.stringify({
+      choices: [{ message: { content: JSON.stringify(assessment) } }],
+    }),
+  } as Response;
+}
+
+describe('Marketing visual QA GenX multimodal chat transport', () => {
   let directory: string;
   let ingredientPath: string;
+  const originalFetch = global.fetch;
 
   beforeEach(async () => {
     directory = await mkdtemp(path.join(os.tmpdir(), 'marketing-visual-qa-'));
     ingredientPath = path.join(directory, 'ingredient.png');
     await writeFile(ingredientPath, 'fixture-image-bytes');
     delete process.env.MARKETING_VISUAL_QA_MODE;
+    process.env.MARKETING_VISUAL_QA_MODEL = 'gemini-3-flash';
     jest.restoreAllMocks();
   });
 
   afterEach(async () => {
+    global.fetch = originalFetch;
+    delete process.env.MARKETING_VISUAL_QA_MODEL;
     await rm(directory, { recursive: true, force: true });
   });
 
-  it('uploads a trusted local ingredient, assesses by temporary file ID, and cleans it up', async () => {
-    const upload = jest.spyOn(genxMultimodalProvider, 'uploadFile').mockResolvedValue({
-      id: 'temporary-provider-file', filename: 'ingredient.png', mime_type: 'image/png', size: 20, created_at: new Date().toISOString(),
-    });
-    const assess = jest.spyOn(genxMultimodalProvider, 'assessVisual').mockResolvedValue(accepted);
-    const cleanup = jest.spyOn(genxMultimodalProvider, 'deleteFile').mockResolvedValue();
+  it('sends a trusted local ingredient directly to GenX multimodal chat and never uses the document file boundary', async () => {
+    const fetchMock = jest.fn().mockResolvedValue(genxResponse());
+    global.fetch = fetchMock as unknown as typeof fetch;
 
-    await expect(assessMarketingIngredient(inputFor(ingredientPath))).resolves.toMatchObject({ accepted: true, review_mode: 'genx_multimodal' });
-    expect(upload).toHaveBeenCalledWith(ingredientPath, expect.stringContaining('marketing-qa-ingredient.png'), 'image/png');
-    expect(assess).toHaveBeenCalledWith(expect.objectContaining({ file_id: 'temporary-provider-file' }));
-    expect(JSON.stringify(assess.mock.calls[0][0])).not.toContain('file://');
-    expect(JSON.stringify(assess.mock.calls[0][0])).not.toContain('/api/v1/studio/assets/');
-    expect(cleanup).toHaveBeenCalledWith('temporary-provider-file');
+    await expect(assessMarketingIngredient(inputFor(ingredientPath)))
+      .resolves.toMatchObject({ accepted: true, review_mode: 'genx_multimodal' });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, options] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain('/v1/chat/completions');
+    expect(url).not.toContain('/api/v1/files');
+
+    const body = JSON.parse(String(options.body || '{}'));
+    expect(body.model).toBe('gemini-3-flash');
+    expect(body.stream).toBe(false);
+    expect(body.messages).toHaveLength(2);
+    const imagePart = body.messages[1].content.find((part: Record<string, unknown>) => part.type === 'image_url');
+    expect(String(imagePart?.image_url?.url || '')).toMatch(/^data:image\/png;base64,/);
+    expect(JSON.stringify(body)).not.toContain('file://');
+    expect(JSON.stringify(body)).not.toContain('/api/v1/studio/assets/');
   });
 
-  it('returns accepted and rejected semantic outcomes from the validated provider contract', async () => {
-    jest.spyOn(genxMultimodalProvider, 'uploadFile').mockResolvedValue({ id: 'temp-file', filename: 'x.png', mime_type: 'image/png', size: 1, created_at: '' });
-    jest.spyOn(genxMultimodalProvider, 'deleteFile').mockResolvedValue();
-    jest.spyOn(genxMultimodalProvider, 'assessVisual').mockResolvedValueOnce(accepted).mockResolvedValueOnce({
-      ...accepted, wrong_subject: true, rejection_reasons: ['wrong subject'], repair_instructions: ['Use the approved horse-care subject.'],
-    });
+  it('returns accepted and rejected semantic outcomes from the same strict validated contract', async () => {
+    const fetchMock = jest.fn()
+      .mockResolvedValueOnce(genxResponse())
+      .mockResolvedValueOnce(genxResponse({
+        ...accepted,
+        wrong_subject: true,
+        rejection_reasons: ['wrong subject'],
+        repair_instructions: ['Use the approved horse-care subject.'],
+      }));
+    global.fetch = fetchMock as unknown as typeof fetch;
 
-    await expect(assessMarketingIngredient(inputFor(ingredientPath))).resolves.toMatchObject({ accepted: true });
-    await expect(assessMarketingIngredient(inputFor(ingredientPath))).resolves.toMatchObject({ accepted: false, rejection_reasons: expect.arrayContaining(['wrong subject']) });
+    await expect(assessMarketingIngredient(inputFor(ingredientPath)))
+      .resolves.toMatchObject({ accepted: true });
+    await expect(assessMarketingIngredient(inputFor(ingredientPath)))
+      .resolves.toMatchObject({ accepted: false, rejection_reasons: expect.arrayContaining(['wrong subject']) });
   });
 
-  it('fails closed and never marks a provider failure as accepted', async () => {
-    jest.spyOn(genxMultimodalProvider, 'uploadFile').mockRejectedValue(new Error('provider unavailable'));
-    await expect(assessMarketingIngredient(inputFor(ingredientPath))).rejects.toMatchObject({ code: 'MATERIAL_VISUAL_QA_PROVIDER_UNAVAILABLE' });
+  it('fails closed and never marks a provider or parsing failure as accepted', async () => {
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: false,
+      status: 503,
+      statusText: 'Unavailable',
+      text: async () => JSON.stringify({ error: { message: 'provider unavailable' } }),
+    } as Response);
+    global.fetch = fetchMock as unknown as typeof fetch;
+
+    await expect(assessMarketingIngredient(inputFor(ingredientPath)))
+      .rejects.toMatchObject({ code: 'MATERIAL_VISUAL_QA_PROVIDER_UNAVAILABLE' });
   });
 
-  it('retains fixture mode without calling the provider file transport', async () => {
+  it('retains fixture mode without calling GenX', async () => {
     process.env.MARKETING_VISUAL_QA_MODE = 'fixture';
-    const upload = jest.spyOn(genxMultimodalProvider, 'uploadFile');
-    await expect(assessMarketingIngredient(inputFor(ingredientPath))).resolves.toMatchObject({ accepted: true, review_mode: 'fixture_contract' });
-    expect(upload).not.toHaveBeenCalled();
+    const fetchMock = jest.fn();
+    global.fetch = fetchMock as unknown as typeof fetch;
+
+    await expect(assessMarketingIngredient(inputFor(ingredientPath)))
+      .resolves.toMatchObject({ accepted: true, review_mode: 'fixture_contract' });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
