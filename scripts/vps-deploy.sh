@@ -7,8 +7,8 @@ source "${SCRIPT_DIR}/lib/vps-common.sh"
 
 stage="${1:-core}"
 case "${stage}" in
-  core|workers|full) ;;
-  *) fail "Usage: bash scripts/vps-deploy.sh [core|workers|full]" ;;
+  web|core|workers|full) ;;
+  *) fail "Usage: bash scripts/vps-deploy.sh [web|core|workers|full]" ;;
 esac
 
 bash "${SCRIPT_DIR}/vps-preflight.sh"
@@ -22,6 +22,38 @@ on_error() {
   if ! shared_host_nginx_enabled; then compose logs --tail=120 caddy 2>/dev/null || true; fi
 }
 trap on_error ERR
+
+if [[ "${stage}" == "web" ]]; then
+  log "Building the reviewed Marketing web image only"
+  compose build --pull web
+
+  log "Recreating only the stateless web service; API, workers and protected state remain untouched"
+  compose up -d --no-deps web
+
+  log "Waiting for the replacement web service to become healthy"
+  web_container="$(compose ps -q web)"
+  [[ -n "${web_container}" ]] || fail "Marketing web container is missing after recreation"
+  web_ready=0
+  for _attempt in $(seq 1 48); do
+    state="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "${web_container}" 2>/dev/null || true)"
+    if [[ "${state}" == "healthy" ]]; then
+      web_ready=1
+      break
+    fi
+    [[ "${state}" != "unhealthy" ]] || fail "Replacement Marketing web container became unhealthy"
+    sleep 5
+  done
+  [[ "${web_ready}" == "1" ]] || fail "Replacement Marketing web container did not become healthy within four minutes"
+
+  # The internal Nginx upstream resolves the Compose service name when its
+  # configuration is loaded. Reload it after a web-container replacement so
+  # it resolves the new container IP without recreating the proxy container.
+  log "Reloading internal Nginx configuration to resolve the replacement web service"
+  compose exec -T nginx nginx -t
+  compose exec -T nginx nginx -s reload
+
+  bash "${SCRIPT_DIR}/vps-smoke.sh" core
+fi
 
 if [[ "${stage}" == "core" || "${stage}" == "full" ]]; then
   log "Pulling pinned infrastructure images"
@@ -37,7 +69,7 @@ if [[ "${stage}" == "core" || "${stage}" == "full" ]]; then
   log "Starting PostgreSQL and Redis"
   compose up -d postgres redis
 
-  log "Running additive database migrations"
+  log "Running forward database migrations for an explicitly reviewed core/full deployment"
   compose run --rm migrate
 
   if shared_host_nginx_enabled; then
