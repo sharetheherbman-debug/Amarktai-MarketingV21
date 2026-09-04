@@ -74,9 +74,12 @@ describe('production deployment contract', () => {
     const playwright = read('playwright.config.ts');
     expect(playwright).toContain("const webUrl = process.env.E2E_WEB_URL || 'http://127.0.0.1:3000'");
     expect(playwright).toContain('const webPort =');
-    expect(playwright).toContain('`npm start --workspace=@amarktai/web -- -p ${webPort}`');
+    expect(playwright).toContain("command: 'node apps/web/.next/standalone/apps/web/server.js'");
+    expect(playwright).toContain('PORT: webPort');
+    expect(playwright).toContain('HOSTNAME: parsedWebUrl.hostname');
     expect(playwright).toContain('url: `${webUrl}/login`');
     expect(playwright).not.toContain("command: 'npm start --workspace=@amarktai/web -- -p 3000'");
+    expect(playwright).not.toContain('`npm start --workspace=@amarktai/web -- -p ${webPort}`');
   });
 
   test('all application images use supported Node 22 LTS and the repo rejects Node 20', () => {
