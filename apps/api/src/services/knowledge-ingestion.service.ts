@@ -178,23 +178,75 @@ function canonicalFromHtml(html: string, fallback: URL): URL {
   try { return new URL(match?.[1] || fallback.toString(), fallback); } catch { return fallback; }
 }
 
-function robotsAllows(robots: string, path: string): boolean {
-  let applies = false;
-  let bestMatch = -1;
-  let allowed = true;
+export function robotsAllows(robots: string, path: string): boolean {
+  type Rule = { directive: 'allow' | 'disallow'; value: string };
+  type Group = { agents: string[]; rules: Rule[] };
+
+  const groups: Group[] = [];
+  let current: Group | null = null;
+  let sawRule = false;
+
+  const flush = () => {
+    if (current && current.agents.length > 0) groups.push(current);
+    current = null;
+    sawRule = false;
+  };
+
   for (const raw of robots.split(/\r?\n/)) {
     const line = raw.replace(/#.*/, '').trim();
-    if (!line) continue;
+    if (!line) {
+      if (current && sawRule) flush();
+      continue;
+    }
+
     const [field, ...rest] = line.split(':');
     const value = rest.join(':').trim();
     const key = field?.toLowerCase();
-    if (key === 'user-agent') { applies = value === '*' || /amarktai-marketing-knowledgebot/i.test(value); continue; }
-    if (!applies || !['allow', 'disallow'].includes(key || '') || !value) continue;
-    if (path.startsWith(value) && value.length >= bestMatch) {
-      bestMatch = value.length;
-      allowed = key === 'allow';
+
+    if (key === 'user-agent') {
+      if (current && sawRule) flush();
+      if (!current) current = { agents: [], rules: [] };
+      if (value) current.agents.push(value.toLowerCase());
+      continue;
+    }
+
+    if (!current || !['allow', 'disallow'].includes(key || '')) continue;
+    sawRule = true;
+    current.rules.push({ directive: key as Rule['directive'], value });
+  }
+  flush();
+
+  const bot = 'amarktai-marketing-knowledgebot';
+  const scoreAgent = (agent: string): number => {
+    if (agent === '*') return 0;
+    return bot === agent || bot.startsWith(agent) ? agent.length : -1;
+  };
+
+  const scored = groups
+    .map((group) => ({ group, score: Math.max(...group.agents.map(scoreAgent), -1) }))
+    .filter((entry) => entry.score >= 0);
+
+  if (scored.length === 0) return true;
+
+  const bestAgentScore = Math.max(...scored.map((entry) => entry.score));
+  const rules = scored
+    .filter((entry) => entry.score === bestAgentScore)
+    .flatMap((entry) => entry.group.rules);
+
+  let bestPathLength = -1;
+  let allowed = true;
+
+  for (const rule of rules) {
+    if (!rule.value) continue;
+    if (!path.startsWith(rule.value)) continue;
+
+    const length = rule.value.length;
+    if (length > bestPathLength || (length === bestPathLength && rule.directive === 'allow')) {
+      bestPathLength = length;
+      allowed = rule.directive === 'allow';
     }
   }
+
   return allowed;
 }
 
