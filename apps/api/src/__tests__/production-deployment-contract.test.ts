@@ -70,6 +70,15 @@ describe('production deployment contract', () => {
     expect(webStage).not.toContain('render-worker');
   });
 
+  test('E2E web server can use an isolated port instead of colliding with a live host application', () => {
+    const playwright = read('playwright.config.ts');
+    expect(playwright).toContain("const webUrl = process.env.E2E_WEB_URL || 'http://127.0.0.1:3000'");
+    expect(playwright).toContain('const webPort =');
+    expect(playwright).toContain('`npm start --workspace=@amarktai/web -- -p ${webPort}`');
+    expect(playwright).toContain('url: `${webUrl}/login`');
+    expect(playwright).not.toContain("command: 'npm start --workspace=@amarktai/web -- -p 3000'");
+  });
+
   test('all application images use supported Node 22 LTS and the repo rejects Node 20', () => {
     const web = read('apps/web/Dockerfile');
     const api = read('apps/api/Dockerfile');
