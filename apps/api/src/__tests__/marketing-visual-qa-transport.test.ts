@@ -60,11 +60,12 @@ describe('Marketing visual QA GenX multimodal chat transport', () => {
     expect(url).toContain('/v1/chat/completions');
     expect(url).not.toContain('/api/v1/files');
 
-    const body = JSON.parse(String(options.body || '{}'));
+    const body = JSON.parse(String(options.body || '{}')) as Record<string, any>;
     expect(body.model).toBe('gemini-3-flash');
     expect(body.stream).toBe(false);
     expect(body.messages).toHaveLength(2);
-    const imagePart = body.messages[1].content.find((part: Record<string, unknown>) => part.type === 'image_url');
+    const imagePart = (body.messages[1].content as Array<Record<string, any>>)
+      .find((part) => part.type === 'image_url');
     expect(String(imagePart?.image_url?.url || '')).toMatch(/^data:image\/png;base64,/);
     expect(JSON.stringify(body)).not.toContain('file://');
     expect(JSON.stringify(body)).not.toContain('/api/v1/studio/assets/');
