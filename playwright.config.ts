@@ -45,9 +45,16 @@ export default defineConfig({
       timeout: 60_000,
     },
     {
-      command: `npm start --workspace=@amarktai/web -- -p ${webPort}`,
+      // The production web app is built with Next.js output: 'standalone'.
+      // Start the exact standalone server rather than `next start`, and bind it
+      // to the isolated E2E URL so the VPS suite can never reuse live Core.
+      command: 'node apps/web/.next/standalone/apps/web/server.js',
       url: `${webUrl}/login`,
-      env: { NODE_ENV: 'production' },
+      env: {
+        NODE_ENV: 'production',
+        PORT: webPort,
+        HOSTNAME: parsedWebUrl.hostname,
+      },
       reuseExistingServer: !process.env.CI,
       timeout: 60_000,
     },
