@@ -46,9 +46,9 @@ export default defineConfig({
     },
     {
       // The production web app is built with Next.js output: 'standalone'.
-      // Start the exact standalone server rather than `next start`, and bind it
-      // to the isolated E2E URL so the VPS suite can never reuse live Core.
-      command: 'node apps/web/.next/standalone/apps/web/server.js',
+      // The launcher copies the same public/static assets that the Dockerfile
+      // places beside server.js before starting the isolated E2E server.
+      command: 'node scripts/e2e-start-standalone-web.mjs',
       url: `${webUrl}/login`,
       env: {
         NODE_ENV: 'production',
