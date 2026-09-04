@@ -12,7 +12,6 @@ const OWNER_ONLY_REDIRECT_PREFIXES = [
   '/docs',
   '/compare',
   '/use-cases',
-  '/integrations',
 ];
 
 const EMBEDDED_AUTH_PREFIXES = [
