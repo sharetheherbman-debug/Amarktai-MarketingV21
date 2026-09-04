@@ -42,11 +42,32 @@ describe('production deployment contract', () => {
       'NEXT_PUBLIC_MARKETING_BRAND_NAME',
       'NEXT_PUBLIC_MARKETING_BRAND_DESCRIPTION',
       'NEXT_PUBLIC_MARKETING_SUPPORT_EMAIL',
+      'NEXT_PUBLIC_MARKETING_EMBEDDED_SSO_ONLY',
+      'NEXT_PUBLIC_MARKETING_HOST_RETURN_URL',
+      'NEXT_PUBLIC_AMARKTAI_NETWORK_URL',
     ]) {
       expect(compose).toContain(variable);
       expect(dockerfile).toContain(`ARG ${variable}`);
       expect(dockerfile).toContain(`ENV ${variable}=\${${variable}}`);
     }
+  });
+
+  test('web-only deployment cannot run migrations or recreate stateful/application services', () => {
+    const deploy = read('scripts/vps-deploy.sh');
+    const webStageStart = deploy.indexOf('if [[ "${stage}" == "web" ]]');
+    const coreStageStart = deploy.indexOf('if [[ "${stage}" == "core" || "${stage}" == "full" ]]');
+    expect(webStageStart).toBeGreaterThan(-1);
+    expect(coreStageStart).toBeGreaterThan(webStageStart);
+    const webStage = deploy.slice(webStageStart, coreStageStart);
+
+    expect(webStage).toContain('compose build --pull web');
+    expect(webStage).toContain('compose up -d --no-deps web');
+    expect(webStage).toContain('compose exec -T nginx nginx -s reload');
+    expect(webStage).not.toContain('compose run --rm migrate');
+    expect(webStage).not.toContain('compose up -d postgres');
+    expect(webStage).not.toContain('compose up -d api');
+    expect(webStage).not.toContain('generation-worker');
+    expect(webStage).not.toContain('render-worker');
   });
 
   test('all application images use supported Node 22 LTS and the repo rejects Node 20', () => {
@@ -85,5 +106,6 @@ describe('production deployment contract', () => {
     expect(gate).toContain('HOST_APP_ID HOST_APP_NAME HOST_APP_URL');
     expect(gate).toContain('HOST_APP_URL must use HTTPS in production');
     expect(gate).toContain('ALLOW_FIRST_RUN_BOOTSTRAP');
+    expect(gate).toContain('EquiProfile production must enable NEXT_PUBLIC_MARKETING_EMBEDDED_SSO_ONLY=true');
   });
 });
