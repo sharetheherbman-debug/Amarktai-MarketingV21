@@ -41,6 +41,13 @@ function planScopes(plan: Record<string, any>): string[] {
   return normalizeProductScopes(Array.isArray(raw) && raw.length > 0 ? raw : plan.product_line);
 }
 
+function isRepairableCampaignMaterialError(error: unknown): error is AppError {
+  return error instanceof AppError && [
+    'MATERIAL_VISUAL_QA_REJECTED',
+    'MATERIAL_INGREDIENT_TECHNICAL_QA_FAILED',
+  ].includes(error.code);
+}
+
 export type CampaignRunSpec = {
   brief: Record<string, any>;
   briefId: string;
@@ -264,6 +271,29 @@ export async function queueCampaignProduction(planId: string, orgId: string, use
           );
         }
       } catch (error) {
+        if (isRepairableCampaignMaterialError(error)) {
+          try {
+            const replacementGenerationId = await queueCampaignMaterialRepair({
+              runId: String(run.id),
+              organizationId: orgId,
+              userId,
+            });
+            if (replacementGenerationId) continue;
+          } catch (repairError) {
+            const message = repairError instanceof Error
+              ? repairError.message.slice(0, 2000)
+              : 'Governed repair could not be queued';
+            await query(
+              `UPDATE campaign_asset_runs
+                  SET status='failed',material_status='failed_after_bounded_retries',
+                      resolution_status='failed_after_bounded_retries',resolution_reason=$1,
+                      error_message=$1,updated_at=NOW()
+                WHERE id=$2 AND organization_id=$3`,
+              [message, run.id, orgId]
+            );
+            continue;
+          }
+        }
         await query(
           `UPDATE campaign_asset_runs SET status='failed',error_message=$1,updated_at=NOW() WHERE id=$2`,
           [error instanceof Error ? error.message.slice(0, 2000) : 'Asset could not be queued', run.id]
