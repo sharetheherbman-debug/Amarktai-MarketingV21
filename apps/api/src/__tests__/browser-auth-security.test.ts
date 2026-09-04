@@ -53,6 +53,17 @@ describe('Marketing browser authentication and white-label shell', () => {
     expect(store).not.toContain('isAuthenticated: state.isAuthenticated');
   });
 
+  test('embedded SSO redirects local auth/public marketing surfaces without shadowing dashboard integrations', () => {
+    const webMiddleware = read('apps/web/middleware.ts');
+
+    expect(webMiddleware).toContain('NEXT_PUBLIC_MARKETING_EMBEDDED_SSO_ONLY');
+    expect(webMiddleware).toContain('NEXT_PUBLIC_MARKETING_HOST_RETURN_URL');
+    expect(webMiddleware).toContain("'/login'");
+    expect(webMiddleware).toContain("'/forgot-password'");
+    expect(webMiddleware).toContain("'/reset-password'");
+    expect(webMiddleware).not.toContain("  '/integrations',");
+  });
+
   test('customer-facing shells have configurable branding and no EquiProfile deployment URLs', () => {
     const branding = read('apps/web/src/lib/branding.ts');
     const root = read('apps/web/app/layout.tsx');
