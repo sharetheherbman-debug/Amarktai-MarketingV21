@@ -126,7 +126,18 @@ test('real customer journey, auth refresh, controls, desktop and mobile navigati
   await expect(page.getByText('E2E Academy launch revised', { exact: true }).first()).toBeVisible();
   await page.getByRole('button', { name: 'Owner approve' }).click();
   await expect(page.getByRole('button', { name: 'Produce campaign assets' })).toBeVisible();
+
+  // Wait for the production command itself to finish before polling with page
+  // reloads. Reloading immediately after click can make Chromium cancel the
+  // in-flight POST and turn a healthy application into a false E2E failure.
+  const productionResponsePromise = page.waitForResponse((response) =>
+    response.request().method() === 'POST'
+    && /\/api\/v1\/campaign-ai\/plans\/[0-9a-f-]{36}\/production(?:\?|$)/i.test(response.url()),
+  { timeout: 60_000 });
   await page.getByRole('button', { name: 'Produce campaign assets' }).click();
+  const productionResponse = await productionResponsePromise;
+  expect(productionResponse.ok(), `campaign production returned ${productionResponse.status()}`).toBe(true);
+
   await expect.poll(async () => {
     await page.reload();
     const progress = page.getByText('Campaign progress', { exact: true }).locator('..').locator('..');
@@ -137,10 +148,26 @@ test('real customer journey, auth refresh, controls, desktop and mobile navigati
   await expect(page.getByText('Finished branded material persisted')).toHaveCount(6);
   await page.goto('/approvals');
   await expect.poll(async () => page.locator('article').filter({ hasText: 'E2E Academy launch revised' }).count(), { timeout: 30_000 }).toBe(6);
+
+  // Each approval triggers an API decision and then reloads the review queue.
+  // Wait until the queue has visibly removed that exact item before issuing the
+  // next decision so test navigation cannot abort the page's refresh request.
   for (let index = 0; index < 6; index += 1) {
+    const expectedRemaining = 5 - index;
     const candidate = page.locator('article').filter({ hasText: 'E2E Academy launch revised' }).first();
+    const approvalResponsePromise = page.waitForResponse((response) =>
+      response.request().method() === 'POST'
+      && /\/api\/v1\/content-studio\/[0-9a-f-]{36}\/approve(?:\?|$)/i.test(response.url()),
+    { timeout: 30_000 });
     await candidate.getByRole('button', { name: 'Approve' }).click();
+    const approvalResponse = await approvalResponsePromise;
+    expect(approvalResponse.ok(), `content approval returned ${approvalResponse.status()}`).toBe(true);
+    await expect.poll(async () => page.locator('article').filter({ hasText: 'E2E Academy launch revised' }).count(), {
+      timeout: 30_000,
+      intervals: [100, 250, 500],
+    }).toBe(expectedRemaining);
   }
+
   await page.goto('/campaigns');
   await page.getByText('E2E Academy launch revised', { exact: true }).first().click();
   await expect(page.getByText('No active social channel is configured. The finished materials remain ready for owner review; no external schedule has been created.')).toBeVisible();
