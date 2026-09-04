@@ -2,6 +2,9 @@ import { existsSync } from 'node:fs';
 import { defineConfig, devices } from '@playwright/test';
 
 const apiUrl = process.env.E2E_API_URL || 'http://127.0.0.1:4000';
+const webUrl = process.env.E2E_WEB_URL || 'http://127.0.0.1:3000';
+const parsedWebUrl = new URL(webUrl);
+const webPort = parsedWebUrl.port || (parsedWebUrl.protocol === 'https:' ? '443' : '80');
 const systemChromiumPath = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || '/usr/bin/chromium';
 const launchOptions = existsSync(systemChromiumPath) ? { executablePath: systemChromiumPath } : undefined;
 
@@ -16,7 +19,7 @@ export default defineConfig({
   expect: { timeout: 15_000 },
   reporter: process.env.CI ? [['line'], ['html', { open: 'never' }]] : 'line',
   use: {
-    baseURL: process.env.E2E_WEB_URL || 'http://127.0.0.1:3000',
+    baseURL: webUrl,
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
     video: 'retain-on-failure',
@@ -42,8 +45,8 @@ export default defineConfig({
       timeout: 60_000,
     },
     {
-      command: 'npm start --workspace=@amarktai/web -- -p 3000',
-      url: 'http://127.0.0.1:3000/login',
+      command: `npm start --workspace=@amarktai/web -- -p ${webPort}`,
+      url: `${webUrl}/login`,
       env: { NODE_ENV: 'production' },
       reuseExistingServer: !process.env.CI,
       timeout: 60_000,
