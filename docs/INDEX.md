@@ -10,6 +10,7 @@ This index is the source of truth for active AmarktAI Marketing documentation.
 - [Autonomy](AUTONOMY.md) — operating modes, policies, approvals, limits, and Emergency Stop.
 - [Application Connector](APPLICATION_CONNECTOR.md) — reusable host integration and security contract.
 - [Deployment](DEPLOYMENT.md) — exact-SHA controlled deployment and rollback boundary.
+- [Deployment profiles](DEPLOYMENT_PROFILES.md) — EquiProfile embedded, AmarktAI standalone, and reusable white-label purposes from one canonical engine.
 - [Operations](OPERATIONS.md) — health, queues, workers, backups, incidents, and durable storage.
 - [Testing and acceptance](TESTING_AND_ACCEPTANCE.md) — local, CI, browser, migration, Docker, and live-provider gates.
 - [Client handover](CLIENT_HANDOVER.md) — release record and post-deployment acceptance sequence.
