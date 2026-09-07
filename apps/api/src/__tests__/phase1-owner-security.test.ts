@@ -10,12 +10,16 @@ describe('Phase 1 owner-only security boundary', () => {
     const middleware = read('apps/web/middleware.ts');
     for (const route of [
       '/', '/register', '/pricing', '/features', '/about', '/ai-agents', '/blog',
-      '/contact', '/docs', '/compare', '/use-cases', '/integrations',
+      '/contact', '/docs', '/compare', '/use-cases',
     ]) {
       expect(middleware).toContain(`'${route}'`);
     }
     expect(middleware).toContain('pathname.startsWith(`${prefix}/`)');
     expect(middleware).toContain("new URL('/login'");
+    // Integrations is an authenticated dashboard workspace, not a public
+    // product-marketing route. Redirecting it would make required owner
+    // connection controls unreachable after login.
+    expect(middleware).not.toContain("  '/integrations',");
   });
 
   test('full sessions require Marketing MFA and connector SSO serializes first-owner provisioning', () => {
