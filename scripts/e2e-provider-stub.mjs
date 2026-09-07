@@ -83,9 +83,17 @@ const server = http.createServer(async (req, res) => {
     req.on('data', (chunk) => { body += chunk; });
     req.on('end', () => {
       const parsed = JSON.parse(body || '{}');
+      const visualQaRequest = Array.isArray(parsed.messages)
+        && parsed.messages.some((message) => Array.isArray(message?.content)
+          && message.content.some((part) => part?.type === 'image_url'
+            && /^data:image\/(?:png|jpeg|webp);base64,/i.test(String(part?.image_url?.url || ''))));
       json(res, {
         id: 'e2e-chat-completion', model: parsed.model,
-        choices: [{ index: 0, message: { role: 'assistant', content: JSON.stringify(plan) }, finish_reason: 'stop' }],
+        choices: [{
+          index: 0,
+          message: { role: 'assistant', content: JSON.stringify(visualQaRequest ? acceptedVisualAssessment : plan) },
+          finish_reason: 'stop',
+        }],
         usage: { prompt_tokens: 120, completion_tokens: 260, total_tokens: 380 },
       });
     });
